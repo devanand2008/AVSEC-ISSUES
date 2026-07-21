@@ -1,0 +1,5 @@
+import { AlertCircle, Inbox } from "lucide-react";
+
+export function LoadingState({ rows = 4 }: { rows?: number }) { return <div className="card" style={{ padding: 20, display: "grid", gap: 12 }} aria-label="Loading"><div className="skeleton" style={{ width: "38%", height: 22 }} />{Array.from({ length: rows }, (_, index) => <div className="skeleton" style={{ height: 48 }} key={index} />)}</div>; }
+export function EmptyState({ title = "Nothing here yet", message = "New items will appear here when they are available." }: { title?: string; message?: string }) { return <div className="card empty"><Inbox size={36} style={{ margin: "0 auto 12px", color: "#94a3b8" }} /><strong style={{ color: "var(--text)", display: "block", marginBottom: 5 }}>{title}</strong><span>{message}</span></div>; }
+export function ErrorState({ message = "We could not load this page. Please try again." }: { message?: string }) { return <div className="error-box" role="alert"><AlertCircle size={18} style={{ verticalAlign: "middle", marginRight: 8 }} />{message}</div>; }

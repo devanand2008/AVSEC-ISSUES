@@ -1,0 +1,9 @@
+"use client";
+import { Suspense, useState,type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { api,ApiError } from "@/lib/api";
+
+export default function ResetPasswordPage(){return <Suspense fallback={<main style={{minHeight:"100dvh",display:"grid",placeItems:"center",padding:24}}><div className="skeleton" style={{width:320,height:280}} /></main>}><ResetPasswordForm /></Suspense>}
+
+function ResetPasswordForm(){const router=useRouter();const token=useSearchParams().get("token")??"";const [password,setPassword]=useState("");const [confirm,setConfirm]=useState("");const [error,setError]=useState("");async function submit(event:FormEvent){event.preventDefault();if(password!==confirm)return setError("The passwords do not match.");try{await api.post("/auth/reset-password",{token,newPassword:password});router.replace("/login");}catch(caught){setError(caught instanceof ApiError?caught.message:"Password reset failed.");}}return <main style={{minHeight:"100dvh",display:"grid",placeItems:"center",padding:24}}><form className="card" onSubmit={submit} style={{width:"min(440px,100%)",padding:30}}><span className="eyebrow">Account recovery</span><h1 className="page-title" style={{margin:"8px 0 22px"}}>Choose a new password</h1>{error&&<div className="error-box" style={{marginBottom:16}}>{error}</div>}<div style={{display:"grid",gap:16}}><label className="field">New password<input className="input" type="password" autoComplete="new-password" minLength={12} required value={password} onChange={(e)=>setPassword(e.target.value)} /></label><label className="field">Confirm password<input className="input" type="password" autoComplete="new-password" minLength={12} required value={confirm} onChange={(e)=>setConfirm(e.target.value)} /></label><button className="btn btn-primary" disabled={!token}>Save new password</button></div></form></main>}

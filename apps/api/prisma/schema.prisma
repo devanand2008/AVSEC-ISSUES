@@ -1,0 +1,2464 @@
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  moduleFormat           = "cjs"
+  generatedFileExtension = "ts"
+  importFileExtension    = ""
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AccountStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  DISABLED
+  GRADUATED
+  RESIGNED
+  ARCHIVED
+}
+
+enum ScopeType {
+  COLLEGE
+  CAMPUS
+  DEPARTMENT
+  PROGRAMME
+  ACADEMIC_YEAR
+  SEMESTER
+  SECTION
+  BLOCK
+  FLOOR
+  ROOM
+  ISSUE_CATEGORY
+  ASSIGNED_ISSUES
+}
+
+enum RoomType {
+  CLASSROOM
+  LABORATORY
+  SEMINAR_HALL
+  AUDITORIUM
+  STAFF_ROOM
+  HOD_ROOM
+  PRINCIPAL_OFFICE
+  ADMINISTRATIVE_OFFICE
+  LIBRARY
+  WORKSHOP
+  RESTROOM
+  CANTEEN
+  HOSTEL_ROOM
+  CORRIDOR
+  STAIRCASE
+  PARKING_AREA
+  PLAYGROUND
+  OTHER
+}
+
+enum AttendanceSessionStatus {
+  DRAFT
+  SUBMITTED
+  LOCKED
+  CANCELLED
+}
+
+enum AttendanceCode {
+  PRESENT
+  ABSENT
+  LATE
+  ON_DUTY
+  MEDICAL_LEAVE
+  AUTHORIZED_LEAVE
+}
+
+enum CorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum StaffAttendanceStatus {
+  PRESENT
+  ABSENT
+  LEAVE
+  ON_DUTY
+}
+
+enum StaffAttendanceSource {
+  MANUAL
+  IMPORT
+  BIOMETRIC
+  API
+}
+
+enum AttendanceInterventionType {
+  EMAIL
+  WHATSAPP
+  WARNING_LETTER
+  COUNSELLING
+}
+
+enum AttendanceInterventionStatus {
+  PENDING
+  QUEUED
+  SENT
+  DELIVERED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum IssuePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+  EMERGENCY
+}
+
+enum IssueStatus {
+  NEW
+  NEEDS_MANUAL_ASSIGNMENT
+  ASSIGNED
+  ACKNOWLEDGED
+  IN_PROGRESS
+  WAITING_FOR_MATERIAL
+  WAITING_FOR_VENDOR
+  ON_HOLD
+  RESOLVED
+  VERIFICATION_PENDING
+  VERIFIED
+  CLOSED
+  REOPENED
+  REJECTED
+  CANCELLED
+}
+
+enum AttachmentPurpose {
+  ISSUE_REPORT
+  ISSUE_UPDATE
+  ISSUE_RESOLUTION
+  MESSAGE
+  PROFILE
+  ATTENDANCE_DOCUMENT
+  ANNOUNCEMENT
+  EXPORT
+}
+
+enum NotificationChannel {
+  IN_APP
+  PUSH
+  WHATSAPP
+  EMAIL
+  SMS
+}
+
+enum DeliveryStatus {
+  PENDING
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  RETRYING
+  DELETED
+  DISABLED
+}
+
+enum ConversationType {
+  DIRECT
+  CLASS_GROUP
+  DEPARTMENT_GROUP
+  FACULTY_GROUP
+  HOD_GROUP
+  CLASS_COORDINATOR_GROUP
+  CLASS_REPRESENTATIVE_GROUP
+  LEADERSHIP_GROUP
+  MAINTENANCE_TEAM_GROUP
+  BLOCK_MAINTENANCE_GROUP
+  ADMINISTRATIVE_GROUP
+  ISSUE
+  ANNOUNCEMENT_CHANNEL
+  CUSTOM_GROUP
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  DOCUMENT
+  VIDEO
+  AUDIO
+  SYSTEM
+}
+
+enum ParticipantRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum AnnouncementStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  PARTIALLY_DELIVERED
+  EXPIRED
+  UNPUBLISHED
+  ARCHIVED
+  FAILED
+}
+
+enum AnnouncementCategory {
+  GENERAL
+  IMPORTANT
+  EMERGENCY
+  ACADEMIC
+  EXAMINATION
+  ATTENDANCE
+  EVENT
+  PLACEMENT
+  HOLIDAY
+  DEPARTMENT
+  MAINTENANCE
+  CIRCULAR
+  OTHER
+}
+
+enum AnnouncementDeliveryStatus {
+  PENDING
+  DELIVERED
+  DISPLAYED
+  VIEWED
+  ACKNOWLEDGED
+  FAILED
+  EXPIRED
+}
+
+enum JobStatus {
+  UPLOADED
+  VALIDATING
+  READY
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  ROLLED_BACK
+}
+
+enum ResourceType {
+  PDF
+  VIDEO
+  LINK
+  PRESENTATION
+  DOCUMENT
+  ARCHIVE
+  OTHER
+}
+
+enum CourseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AssessmentType {
+  QUIZ
+  EXAM
+  ASSIGNMENT
+  CODING
+}
+
+enum FeedbackTargetType {
+  STAFF
+  HOD
+  PRINCIPAL
+  VICE_PRINCIPAL
+  DEPARTMENT
+  BUILDING
+  BLOCK
+  FLOOR
+  CLASSROOM
+  LABORATORY
+  LIBRARY
+  CANTEEN
+  TRANSPORT
+  MAINTENANCE
+  SECURITY
+  OFFICE
+  PLACEMENT
+  TRAINING
+  HOSTEL
+  SPORTS
+  MEDICAL
+  DRINKING_WATER
+  RESTROOM
+  CAMPUS_SERVICE
+  OTHER_SERVICE
+}
+
+enum FeedbackQrStatus {
+  ACTIVE
+  DISABLED
+  EXPIRED
+  ARCHIVED
+}
+
+enum FeedbackCycleStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+  ARCHIVED
+}
+
+enum FeedbackSubmissionRule {
+  ONCE_PER_DAY
+  ONCE_PER_WEEK
+  ONCE_PER_CYCLE
+  UNLIMITED
+}
+
+enum FeedbackQuestionType {
+  RATING
+  TEXT
+  BOOLEAN
+}
+
+enum FeedbackSubmissionStatus {
+  NEW
+  VIEWED
+  UNDER_REVIEW
+  ASSIGNED
+  ACTION_REQUIRED
+  RESOLVED
+  REJECTED
+  ARCHIVED
+}
+
+enum QrCodeType {
+  APPLICATION
+  BLOCK
+  FLOOR
+  CLASS
+  ANNOUNCEMENT
+  LINK
+}
+
+enum QrCodeStatus {
+  ACTIVE
+  DISABLED
+  REVOKED
+}
+
+enum FeedbackPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum FeedbackSentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+model College {
+  id          String       @id @default(uuid()) @db.Uuid
+  code        String       @unique @db.VarChar(30)
+  name        String       @db.VarChar(200)
+  timezone    String       @default("Asia/Kolkata") @db.VarChar(80)
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version     Int          @default(1)
+  campuses    Campus[]
+  departments Department[]
+  programmes  Programme[]
+  academicYears AcademicYear[]
+  users       User[]
+  roles       Role[]
+  issueCategories IssueCategory[]
+  issues      Issue[]
+  responsibleTeams ResponsibleTeam[]
+  slaPolicies IssueSlaPolicy[]
+  announcements Announcement[]
+  studentProfiles StudentProfile[]
+  staffProfiles StaffProfile[]
+  auditLogs AuditLog[]
+  backgroundJobFailures BackgroundJobFailure[]
+  feedbackTargets FeedbackTarget[]
+  feedbackCycles FeedbackCycle[]
+  feedbackQuestions FeedbackQuestion[]
+  feedbackSubmissions FeedbackSubmission[]
+  staffAttendanceRecords StaffAttendanceRecord[]
+  attendanceInterventions AttendanceIntervention[]
+  qrCodes QrCode[]
+  qrScanEvents QrScanEvent[]
+  broadcasts Broadcast[]
+  courses Course[]
+
+  @@map("colleges")
+}
+
+model Campus {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  code        String       @db.VarChar(30)
+  name        String       @db.VarChar(160)
+  address     String?
+  isActive    Boolean      @default(true) @map("is_active")
+  sortOrder   Int          @default(0) @map("sort_order")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  blocks      Block[]
+  departments Department[]
+  issues      Issue[]
+  feedbackTargets FeedbackTarget[]
+
+  @@unique([collegeId, code])
+  @@index([collegeId, isActive, sortOrder])
+  @@map("campuses")
+}
+
+model Department {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  campusId    String?      @map("campus_id") @db.Uuid
+  code        String       @db.VarChar(30)
+  name        String       @db.VarChar(180)
+  shortName   String?      @map("short_name") @db.VarChar(60)
+  description String?
+  hodId       String?      @map("hod_id") @db.Uuid
+  officialEmail String?    @map("official_email") @db.VarChar(254)
+  contactNumber String?    @map("contact_number") @db.VarChar(30)
+  location    String?      @db.VarChar(180)
+  isActive    Boolean      @default(true) @map("is_active")
+  archivedAt  DateTime?    @map("archived_at") @db.Timestamptz(3)
+  createdById String?      @map("created_by_id") @db.Uuid
+  updatedById String?      @map("updated_by_id") @db.Uuid
+  sortOrder   Int          @default(0) @map("sort_order")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  campus      Campus?      @relation(fields: [campusId], references: [id], onDelete: Restrict)
+  programmes  Programme[]
+  rooms       Room[]
+  studentProfiles StudentProfile[]
+  staffProfiles StaffProfile[]
+  issues      Issue[]
+  feedbackTargets FeedbackTarget[]
+  feedbackActions FeedbackAction[] @relation("FeedbackActionDepartment")
+  courses Course[]
+
+  @@unique([collegeId, code])
+  @@unique([collegeId, name])
+  @@index([collegeId, isActive])
+  @@index([collegeId, archivedAt])
+  @@index([hodId])
+  @@map("departments")
+}
+
+model Programme {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  departmentId String      @map("department_id") @db.Uuid
+  code        String       @db.VarChar(30)
+  name        String       @db.VarChar(180)
+  degreeType  String?      @map("degree_type") @db.VarChar(80)
+  durationYears Int        @map("duration_years")
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  department  Department   @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  semesters   Semester[]
+  studentProfiles StudentProfile[]
+  courses Course[]
+
+  @@unique([departmentId, code])
+  @@map("programmes")
+}
+
+model AcademicYear {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  name        String       @db.VarChar(30)
+  startsOn    DateTime     @map("starts_on") @db.Date
+  endsOn      DateTime     @map("ends_on") @db.Date
+  isCurrent   Boolean      @default(false) @map("is_current")
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  semesters   Semester[]
+  attendanceSessions AttendanceSession[]
+  feedbackCycles FeedbackCycle[]
+
+  @@unique([collegeId, name])
+  @@map("academic_years")
+}
+
+model Semester {
+  id          String       @id @default(uuid()) @db.Uuid
+  programmeId String       @map("programme_id") @db.Uuid
+  academicYearId String    @map("academic_year_id") @db.Uuid
+  number      Int
+  name        String       @db.VarChar(80)
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  programme   Programme    @relation(fields: [programmeId], references: [id], onDelete: Restrict)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  sections    Section[]
+  subjects    Subject[]
+  feedbackCycles FeedbackCycle[]
+
+  @@unique([programmeId, academicYearId, number])
+  @@map("semesters")
+}
+
+model Section {
+  id          String       @id @default(uuid()) @db.Uuid
+  semesterId  String       @map("semester_id") @db.Uuid
+  code        String       @db.VarChar(30)
+  name        String       @db.VarChar(80)
+  studyYear   Int?         @map("study_year")
+  displayName String?      @map("display_name") @db.VarChar(180)
+  assignedRoomId String?   @map("assigned_room_id") @db.Uuid
+  officialGroupEnabled Boolean @default(true) @map("official_group_enabled")
+  capacity    Int?
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  semester    Semester     @relation(fields: [semesterId], references: [id], onDelete: Restrict)
+  studentProfiles StudentProfile[]
+  coordinatorAssignments ClassCoordinatorAssignment[]
+  representativeAssignments ClassRepresentativeAssignment[]
+  attendanceSessions AttendanceSession[]
+  facultyAssignments FacultySubjectAssignment[]
+
+  @@unique([semesterId, code])
+  @@map("sections")
+}
+
+model Subject {
+  id          String       @id @default(uuid()) @db.Uuid
+  semesterId  String       @map("semester_id") @db.Uuid
+  code        String       @db.VarChar(30)
+  name        String       @db.VarChar(180)
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  semester    Semester     @relation(fields: [semesterId], references: [id], onDelete: Restrict)
+  facultyAssignments FacultySubjectAssignment[]
+  attendanceSessions AttendanceSession[]
+
+  @@unique([semesterId, code])
+  @@map("subjects")
+}
+
+model User {
+  id          String       @id @default(uuid()) @db.Uuid
+  publicId    String       @unique @default(uuid()) @map("public_id") @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  collegeIdentityId String @map("college_identity_id") @db.VarChar(60)
+  fullName    String       @map("full_name") @db.VarChar(180)
+  email       String?      @db.VarChar(254)
+  normalizedEmail String?  @map("normalized_email") @db.VarChar(254)
+  mobile      String?      @db.VarChar(30)
+  whatsappNumber String?   @map("whatsapp_number") @db.VarChar(30)
+  status      AccountStatus @default(PENDING)
+  mustChangePassword Boolean @default(true) @map("must_change_password")
+  firstLoginCompletedAt DateTime? @map("first_login_completed_at") @db.Timestamptz(3)
+  profilePhotoKey String?  @map("profile_photo_key")
+  lastLoginAt DateTime?    @map("last_login_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  archivedAt  DateTime?    @map("archived_at") @db.Timestamptz(3)
+  version     Int          @default(1)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  credential  UserCredential?
+  sessions    Session[]
+  loginAttempts LoginAttempt[]
+  passwordResetTokens PasswordResetToken[]
+  devices     DeviceRegistration[]
+  roles       UserRole[]
+  scopes      UserScope[]
+  studentProfile StudentProfile?
+  staffProfile StaffProfile?
+  facultyAssignments FacultySubjectAssignment[]
+  coordinatorAssignments ClassCoordinatorAssignment[]
+  representativeAssignments ClassRepresentativeAssignment[]
+  attendanceSessions AttendanceSession[] @relation("AttendanceFaculty")
+  attendanceRecords AttendanceRecord[] @relation("AttendanceStudent")
+  correctionRequests AttendanceCorrectionRequest[] @relation("CorrectionRequester")
+  correctionReviews AttendanceCorrectionRequest[] @relation("CorrectionReviewer")
+  attendanceChanges AttendanceChangeHistory[] @relation("AttendanceChangeActor")
+  staffAttendanceRecords StaffAttendanceRecord[] @relation("StaffAttendanceStaff")
+  staffAttendanceRecordsCreated StaffAttendanceRecord[] @relation("StaffAttendanceCreator")
+  staffAttendanceRecordsUpdated StaffAttendanceRecord[] @relation("StaffAttendanceUpdater")
+  attendanceInterventions AttendanceIntervention[] @relation("AttendanceInterventionStudent")
+  attendanceInterventionsCreated AttendanceIntervention[] @relation("AttendanceInterventionCreator")
+  qrCodesCreated QrCode[] @relation("QrCodeCreator")
+  qrScanEvents QrScanEvent[] @relation("QrScanUser")
+  reportedIssues Issue[] @relation("IssueReporter")
+  assignedIssues Issue[] @relation("IssueAssignee")
+  affectedIssues IssueAffectedUser[]
+  issueComments IssueComment[]
+  issueAttachments IssueAttachment[]
+  issueStatusChanges IssueStatusHistory[]
+  responsibleMemberships ResponsibleTeamMember[]
+  notifications NotificationRecipient[]
+  conversationParticipants ConversationParticipant[]
+  messages Message[]
+  messageReportsCreated ReportedMessage[] @relation("MessageReporter")
+  messageReportsReviewed ReportedMessage[] @relation("MessageReportReviewer")
+  messageReads MessageReadReceipt[]
+  announcementsCreated Announcement[]
+  announcementReads AnnouncementReadReceipt[]
+  auditLogs AuditLog[]
+  importJobsRequested ImportJob[] @relation("ImportRequester")
+  feedbackStaffTargets FeedbackTarget[] @relation("FeedbackStaffTarget")
+  feedbackTargetsCreated FeedbackTarget[] @relation("FeedbackTargetCreator")
+  feedbackQrCodesCreated FeedbackQrCode[] @relation("FeedbackQrCreator")
+  feedbackCyclesCreated FeedbackCycle[] @relation("FeedbackCycleCreator")
+  feedbackSubmissions FeedbackSubmission[] @relation("FeedbackStudent")
+  feedbackActionsAssigned FeedbackAction[] @relation("FeedbackActionAssignee")
+  feedbackActionsCreated FeedbackAction[] @relation("FeedbackActionCreator")
+  feedbackScanLogs FeedbackScanLog[] @relation("FeedbackScanStudent")
+  broadcastsAuthored Broadcast[] @relation("BroadcastAuthor")
+
+  @@unique([collegeId, collegeIdentityId])
+  @@unique([collegeId, normalizedEmail])
+  @@index([collegeId, status])
+  @@map("users")
+}
+
+model UserCredential {
+  userId      String       @id @map("user_id") @db.Uuid
+  passwordHash String      @map("password_hash")
+  passwordChangedAt DateTime? @map("password_changed_at") @db.Timestamptz(3)
+  failedAttemptCount Int   @default(0) @map("failed_attempt_count")
+  lockedUntil DateTime?    @map("locked_until") @db.Timestamptz(3)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_credentials")
+}
+
+model Session {
+  id          String       @id @default(uuid()) @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  familyId    String       @map("family_id") @db.Uuid
+  userAgent   String?      @map("user_agent")
+  ipAddress   String?      @map("ip_address") @db.VarChar(64)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt  DateTime     @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  expiresAt   DateTime     @map("expires_at") @db.Timestamptz(3)
+  revokedAt   DateTime?    @map("revoked_at") @db.Timestamptz(3)
+  revokeReason String?     @map("revoke_reason") @db.VarChar(250)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+
+  @@index([userId, revokedAt, expiresAt])
+  @@map("sessions")
+}
+
+model RefreshToken {
+  id          String       @id @default(uuid()) @db.Uuid
+  sessionId   String       @map("session_id") @db.Uuid
+  tokenHash   String       @unique @map("token_hash")
+  issuedAt    DateTime     @default(now()) @map("issued_at") @db.Timestamptz(3)
+  expiresAt   DateTime     @map("expires_at") @db.Timestamptz(3)
+  usedAt      DateTime?    @map("used_at") @db.Timestamptz(3)
+  revokedAt   DateTime?    @map("revoked_at") @db.Timestamptz(3)
+  replacedById String?     @unique @map("replaced_by_id") @db.Uuid
+  session     Session      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, expiresAt])
+  @@map("refresh_tokens")
+}
+
+model LoginAttempt {
+  id          String       @id @default(uuid()) @db.Uuid
+  userId      String?      @map("user_id") @db.Uuid
+  identifierHash String    @map("identifier_hash")
+  successful  Boolean
+  reason      String?      @db.VarChar(120)
+  ipAddress   String?      @map("ip_address") @db.VarChar(64)
+  userAgent   String?      @map("user_agent")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([identifierHash, createdAt])
+  @@map("login_attempts")
+}
+
+model PasswordResetToken {
+  id          String       @id @default(uuid()) @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  tokenHash   String       @unique @map("token_hash")
+  expiresAt   DateTime     @map("expires_at") @db.Timestamptz(3)
+  usedAt      DateTime?    @map("used_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+model DeviceRegistration {
+  id          String       @id @default(uuid()) @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  tokenHash   String       @unique @map("token_hash")
+  encryptedToken String    @map("encrypted_token")
+  platform    String       @db.VarChar(30)
+  deviceName  String?      @map("device_name") @db.VarChar(120)
+  enabled     Boolean      @default(true)
+  lastSeenAt  DateTime     @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("device_registrations")
+}
+
+model UserPresence {
+  userId       String   @id @map("user_id") @db.Uuid
+  isOnline     Boolean  @default(false) @map("is_online")
+  lastSeenAt   DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([isOnline, lastSeenAt])
+  @@map("user_presence")
+}
+
+model Role {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String?      @map("college_id") @db.Uuid
+  code        String       @db.VarChar(60)
+  name        String       @db.VarChar(120)
+  description String?
+  isSystem    Boolean      @default(false) @map("is_system")
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college     College?     @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@unique([collegeId, code])
+  @@map("roles")
+}
+
+model Permission {
+  id          String       @id @default(uuid()) @db.Uuid
+  code        String       @unique @db.VarChar(100)
+  resource    String       @db.VarChar(60)
+  action      String       @db.VarChar(60)
+  description String?
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId      String       @map("role_id") @db.Uuid
+  permissionId String      @map("permission_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  role        Role         @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission  Permission   @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  id          String       @id @default(uuid()) @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  roleId      String       @map("role_id") @db.Uuid
+  validFrom   DateTime     @default(now()) @map("valid_from") @db.Timestamptz(3)
+  validUntil  DateTime?    @map("valid_until") @db.Timestamptz(3)
+  isPrimary   Boolean      @default(false) @map("is_primary")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, roleId])
+  @@map("user_roles")
+}
+
+model RoleAssignmentHistory {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  changedById   String   @map("changed_by_id") @db.Uuid
+  previousRoles Json     @map("previous_roles")
+  newRoles      Json     @map("new_roles")
+  previousScopes Json    @map("previous_scopes")
+  newScopes     Json     @map("new_scopes")
+  reason        String   @db.VarChar(500)
+  changedAt     DateTime @default(now()) @map("changed_at") @db.Timestamptz(3)
+
+  @@index([userId, changedAt])
+  @@index([changedById, changedAt])
+  @@map("role_assignment_history")
+}
+
+model UserScope {
+  id          String       @id @default(uuid()) @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  scopeType   ScopeType    @map("scope_type")
+  scopeId     String?      @map("scope_id") @db.Uuid
+  issueCategoryId String?  @map("issue_category_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  issueCategory IssueCategory? @relation(fields: [issueCategoryId], references: [id], onDelete: Cascade)
+
+  @@index([userId, scopeType, scopeId])
+  @@map("user_scopes")
+}
+
+model StudentProfile {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  userId      String       @unique @map("user_id") @db.Uuid
+  departmentId String      @map("department_id") @db.Uuid
+  programmeId String       @map("programme_id") @db.Uuid
+  sectionId   String       @map("section_id") @db.Uuid
+  studentId   String       @map("student_id") @db.VarChar(60)
+  legacyId    String?      @map("legacy_id") @db.VarChar(80)
+  admissionYear Int        @map("admission_year")
+  rollNumber  String?      @map("roll_number") @db.VarChar(60)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  department  Department   @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  programme   Programme    @relation(fields: [programmeId], references: [id], onDelete: Restrict)
+  section     Section      @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+
+  @@unique([collegeId, studentId])
+  @@index([sectionId])
+  @@map("student_profiles")
+}
+
+model StaffProfile {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  userId      String       @unique @map("user_id") @db.Uuid
+  departmentId String?     @map("department_id") @db.Uuid
+  employeeId  String       @map("employee_id") @db.VarChar(60)
+  designation String?      @db.VarChar(120)
+  specialization String?   @db.VarChar(180)
+  shift       String?      @db.VarChar(80)
+  emergencyContact String? @map("emergency_contact") @db.VarChar(30)
+  joinedOn    DateTime?    @map("joined_on") @db.Date
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  department  Department?  @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  @@unique([collegeId, employeeId])
+  @@index([departmentId])
+  @@map("staff_profiles")
+}
+
+model FacultySubjectAssignment {
+  id          String       @id @default(uuid()) @db.Uuid
+  facultyId   String       @map("faculty_id") @db.Uuid
+  subjectId   String       @map("subject_id") @db.Uuid
+  sectionId   String       @map("section_id") @db.Uuid
+  validFrom   DateTime     @map("valid_from") @db.Date
+  validUntil  DateTime?    @map("valid_until") @db.Date
+  isActive    Boolean      @default(true) @map("is_active")
+  faculty     User         @relation(fields: [facultyId], references: [id], onDelete: Restrict)
+  subject     Subject      @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  section     Section      @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+
+  @@unique([facultyId, subjectId, sectionId, validFrom])
+  @@map("faculty_subject_assignments")
+}
+
+model ClassCoordinatorAssignment {
+  id          String       @id @default(uuid()) @db.Uuid
+  coordinatorId String     @map("coordinator_id") @db.Uuid
+  sectionId   String       @map("section_id") @db.Uuid
+  validFrom   DateTime     @map("valid_from") @db.Date
+  validUntil  DateTime?    @map("valid_until") @db.Date
+  isActive    Boolean      @default(true) @map("is_active")
+  coordinator User         @relation(fields: [coordinatorId], references: [id], onDelete: Restrict)
+  section     Section      @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+
+  @@index([sectionId, isActive])
+  @@map("class_coordinator_assignments")
+}
+
+model ClassRepresentativeAssignment {
+  id          String       @id @default(uuid()) @db.Uuid
+  representativeId String  @map("representative_id") @db.Uuid
+  sectionId   String       @map("section_id") @db.Uuid
+  validFrom   DateTime     @map("valid_from") @db.Date
+  validUntil  DateTime?    @map("valid_until") @db.Date
+  isActive    Boolean      @default(true) @map("is_active")
+  representative User      @relation(fields: [representativeId], references: [id], onDelete: Restrict)
+  section     Section      @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+
+  @@index([sectionId, isActive])
+  @@map("class_representative_assignments")
+}
+
+model AttendanceSession {
+  id          String       @id @default(uuid()) @db.Uuid
+  academicYearId String    @map("academic_year_id") @db.Uuid
+  sectionId   String       @map("section_id") @db.Uuid
+  subjectId   String       @map("subject_id") @db.Uuid
+  facultyId   String       @map("faculty_id") @db.Uuid
+  sessionDate DateTime     @map("session_date") @db.Date
+  periodNumber Int         @map("period_number")
+  startsAt    DateTime?    @map("starts_at") @db.Timestamptz(3)
+  endsAt      DateTime?    @map("ends_at") @db.Timestamptz(3)
+  status      AttendanceSessionStatus @default(DRAFT)
+  submittedAt DateTime?    @map("submitted_at") @db.Timestamptz(3)
+  lockedAt    DateTime?    @map("locked_at") @db.Timestamptz(3)
+  version     Int          @default(1)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  section     Section      @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+  subject     Subject      @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  faculty     User         @relation("AttendanceFaculty", fields: [facultyId], references: [id], onDelete: Restrict)
+  records     AttendanceRecord[]
+  corrections AttendanceCorrectionRequest[]
+
+  @@unique([sectionId, subjectId, sessionDate, periodNumber])
+  @@index([facultyId, sessionDate, status])
+  @@map("attendance_sessions")
+}
+
+model AttendanceRecord {
+  id          String       @id @default(uuid()) @db.Uuid
+  sessionId   String       @map("session_id") @db.Uuid
+  studentUserId String     @map("student_user_id") @db.Uuid
+  status      AttendanceCode
+  note        String?      @db.VarChar(500)
+  markedAt    DateTime     @default(now()) @map("marked_at") @db.Timestamptz(3)
+  version     Int          @default(1)
+  session     AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  student     User         @relation("AttendanceStudent", fields: [studentUserId], references: [id], onDelete: Restrict)
+  histories   AttendanceChangeHistory[]
+  corrections AttendanceCorrectionRequest[]
+
+  @@unique([sessionId, studentUserId])
+  @@index([studentUserId, status])
+  @@map("attendance_records")
+}
+
+model AttendanceCorrectionRequest {
+  id          String       @id @default(uuid()) @db.Uuid
+  sessionId   String       @map("session_id") @db.Uuid
+  recordId    String       @map("record_id") @db.Uuid
+  requestedById String     @map("requested_by_id") @db.Uuid
+  requestedStatus AttendanceCode @map("requested_status")
+  reason      String       @db.VarChar(1000)
+  status      CorrectionStatus @default(PENDING)
+  reviewedById String?     @map("reviewed_by_id") @db.Uuid
+  reviewComment String?    @map("review_comment") @db.VarChar(1000)
+  reviewedAt  DateTime?    @map("reviewed_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  session     AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  record      AttendanceRecord @relation(fields: [recordId], references: [id], onDelete: Restrict)
+  requestedBy User         @relation("CorrectionRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedBy  User?        @relation("CorrectionReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+
+  @@index([sessionId, status])
+  @@map("attendance_correction_requests")
+}
+
+model AttendanceChangeHistory {
+  id          String       @id @default(uuid()) @db.Uuid
+  recordId    String       @map("record_id") @db.Uuid
+  previousStatus AttendanceCode? @map("previous_status")
+  newStatus   AttendanceCode @map("new_status")
+  previousNote String?       @map("previous_note") @db.VarChar(500)
+  newNote     String?        @map("new_note") @db.VarChar(500)
+  changedById String       @map("changed_by_id") @db.Uuid
+  reason      String?      @db.VarChar(1000)
+  requestId   String       @map("request_id") @db.VarChar(80)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  record      AttendanceRecord @relation(fields: [recordId], references: [id], onDelete: Restrict)
+  changedBy   User         @relation("AttendanceChangeActor", fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([recordId, createdAt])
+  @@map("attendance_change_histories")
+}
+
+model StaffAttendanceRecord {
+  id                    String                  @id @default(uuid()) @db.Uuid
+  collegeId             String                  @map("college_id") @db.Uuid
+  staffUserId           String                  @map("staff_user_id") @db.Uuid
+  attendanceDate        DateTime                @map("attendance_date") @db.Date
+  status                StaffAttendanceStatus
+  checkInAt             DateTime?               @map("check_in_at") @db.Timestamptz(3)
+  checkOutAt            DateTime?               @map("check_out_at") @db.Timestamptz(3)
+  isLate                Boolean                 @default(false) @map("is_late")
+  lateMinutes           Int                     @default(0) @map("late_minutes")
+  isEarlyDeparture      Boolean                 @default(false) @map("is_early_departure")
+  earlyDepartureMinutes Int                     @default(0) @map("early_departure_minutes")
+  source                StaffAttendanceSource   @default(MANUAL)
+  notes                 String?                 @db.VarChar(1000)
+  createdById           String                  @map("created_by_id") @db.Uuid
+  updatedById           String                  @map("updated_by_id") @db.Uuid
+  createdAt             DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college               College                 @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  staff                 User                    @relation("StaffAttendanceStaff", fields: [staffUserId], references: [id], onDelete: Restrict)
+  createdBy             User                    @relation("StaffAttendanceCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy             User                    @relation("StaffAttendanceUpdater", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@unique([staffUserId, attendanceDate])
+  @@index([collegeId, attendanceDate, status])
+  @@index([collegeId, source])
+  @@map("staff_attendance_records")
+}
+
+model AttendanceIntervention {
+  id                String                       @id @default(uuid()) @db.Uuid
+  collegeId         String                       @map("college_id") @db.Uuid
+  studentUserId     String                       @map("student_user_id") @db.Uuid
+  type              AttendanceInterventionType
+  status            AttendanceInterventionStatus @default(PENDING)
+  providerReference String?                      @map("provider_reference") @db.VarChar(200)
+  errorMessage      String?                      @map("error_message") @db.VarChar(2000)
+  notes             String?                      @db.VarChar(2000)
+  occurredAt        DateTime                     @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  createdById       String                       @map("created_by_id") @db.Uuid
+  createdAt         DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college           College                      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  student           User                         @relation("AttendanceInterventionStudent", fields: [studentUserId], references: [id], onDelete: Restrict)
+  createdBy         User                         @relation("AttendanceInterventionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([collegeId, occurredAt])
+  @@index([studentUserId, type, status, occurredAt])
+  @@map("attendance_interventions")
+}
+
+model Block {
+  id          String       @id @default(uuid()) @db.Uuid
+  campusId    String       @map("campus_id") @db.Uuid
+  code        String       @db.VarChar(30)
+  name        String       @db.VarChar(120)
+  isActive    Boolean      @default(true) @map("is_active")
+  sortOrder   Int          @default(0) @map("sort_order")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  campus      Campus       @relation(fields: [campusId], references: [id], onDelete: Restrict)
+  floors      Floor[]
+  issues      Issue[]
+  feedbackTargets FeedbackTarget[]
+
+  @@unique([campusId, code])
+  @@index([campusId, isActive, sortOrder])
+  @@map("blocks")
+}
+
+model Floor {
+  id          String       @id @default(uuid()) @db.Uuid
+  blockId     String       @map("block_id") @db.Uuid
+  code        String       @db.VarChar(30)
+  name        String       @db.VarChar(100)
+  level       Int
+  isActive    Boolean      @default(true) @map("is_active")
+  sortOrder   Int          @default(0) @map("sort_order")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  block       Block        @relation(fields: [blockId], references: [id], onDelete: Restrict)
+  rooms       Room[]
+  issues      Issue[]
+  feedbackTargets FeedbackTarget[]
+
+  @@unique([blockId, code])
+  @@index([blockId, isActive, sortOrder])
+  @@map("floors")
+}
+
+model Room {
+  id          String       @id @default(uuid()) @db.Uuid
+  floorId     String       @map("floor_id") @db.Uuid
+  departmentId String?     @map("department_id") @db.Uuid
+  code        String       @db.VarChar(40)
+  name        String       @db.VarChar(140)
+  roomNumber  String?      @map("room_number") @db.VarChar(40)
+  roomType    RoomType     @map("room_type")
+  capacity    Int?
+  latitude    Decimal?     @db.Decimal(10, 7)
+  longitude   Decimal?     @db.Decimal(10, 7)
+  qrToken     String       @unique @default(uuid()) @map("qr_token") @db.Uuid
+  isActive    Boolean      @default(true) @map("is_active")
+  sortOrder   Int          @default(0) @map("sort_order")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  floor       Floor        @relation(fields: [floorId], references: [id], onDelete: Restrict)
+  department  Department?  @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  assets      Asset[]
+  issues      Issue[]
+  responsiblePeople RoomResponsiblePerson[]
+  feedbackTargets FeedbackTarget[]
+
+  @@unique([floorId, code])
+  @@index([floorId, isActive, sortOrder])
+  @@map("rooms")
+}
+
+model AssetCategory {
+  id          String       @id @default(uuid()) @db.Uuid
+  name        String       @unique @db.VarChar(120)
+  isActive    Boolean      @default(true) @map("is_active")
+  assets      Asset[]
+
+  @@map("asset_categories")
+}
+
+model Asset {
+  id          String       @id @default(uuid()) @db.Uuid
+  roomId      String       @map("room_id") @db.Uuid
+  categoryId  String       @map("category_id") @db.Uuid
+  code        String       @unique @db.VarChar(60)
+  name        String       @db.VarChar(160)
+  serialNumber String?     @map("serial_number") @db.VarChar(120)
+  installedOn DateTime?    @map("installed_on") @db.Date
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  room        Room         @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  category    AssetCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  issues      Issue[]
+
+  @@index([roomId, isActive])
+  @@map("assets")
+}
+
+model RoomResponsiblePerson {
+  id          String       @id @default(uuid()) @db.Uuid
+  roomId      String       @map("room_id") @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  issueCategoryId String?  @map("issue_category_id") @db.Uuid
+  isPrimary   Boolean      @default(false) @map("is_primary")
+  isActive    Boolean      @default(true) @map("is_active")
+  room        Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  issueCategory IssueCategory? @relation(fields: [issueCategoryId], references: [id], onDelete: Restrict)
+
+  @@unique([roomId, userId, issueCategoryId])
+  @@map("room_responsible_people")
+}
+
+model IssueCategory {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  code        String       @db.VarChar(50)
+  name        String       @db.VarChar(120)
+  description String?
+  icon        String?      @db.VarChar(60)
+  isActive    Boolean      @default(true) @map("is_active")
+  sortOrder   Int          @default(0) @map("sort_order")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  issueTypes  IssueType[]
+  issues      Issue[]
+  rules       IssueAssignmentRule[]
+  userScopes  UserScope[]
+  roomResponsiblePeople RoomResponsiblePerson[]
+
+  @@unique([collegeId, code])
+  @@index([collegeId, isActive, sortOrder])
+  @@map("issue_categories")
+}
+
+model IssueType {
+  id          String       @id @default(uuid()) @db.Uuid
+  categoryId  String       @map("category_id") @db.Uuid
+  code        String       @db.VarChar(60)
+  name        String       @db.VarChar(160)
+  defaultPriority IssuePriority @default(MEDIUM) @map("default_priority")
+  isOther     Boolean      @default(false) @map("is_other")
+  isActive    Boolean      @default(true) @map("is_active")
+  sortOrder   Int          @default(0) @map("sort_order")
+  category    IssueCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  issues      Issue[]
+  rules       IssueAssignmentRule[]
+
+  @@unique([categoryId, code])
+  @@map("issue_types")
+}
+
+model ResponsibleTeam {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  code        String       @db.VarChar(50)
+  name        String       @db.VarChar(140)
+  isDefaultMaintenance Boolean @default(false) @map("is_default_maintenance")
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  members     ResponsibleTeamMember[]
+  dutySchedules DutySchedule[]
+  rules       IssueAssignmentRule[]
+  issues      Issue[]
+
+  @@unique([collegeId, code])
+  @@map("responsible_teams")
+}
+
+model ResponsibleTeamMember {
+  id          String       @id @default(uuid()) @db.Uuid
+  teamId      String       @map("team_id") @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  isPrimary   Boolean      @default(false) @map("is_primary")
+  isActive    Boolean      @default(true) @map("is_active")
+  maxOpenIssues Int?       @map("max_open_issues")
+  team        ResponsibleTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([teamId, userId])
+  @@map("responsible_team_members")
+}
+
+model DutySchedule {
+  id          String       @id @default(uuid()) @db.Uuid
+  teamId      String       @map("team_id") @db.Uuid
+  userId      String?      @map("user_id") @db.Uuid
+  dayOfWeek   Int          @map("day_of_week")
+  startsAtMinutes Int      @map("starts_at_minutes")
+  endsAtMinutes Int        @map("ends_at_minutes")
+  timezone    String       @default("Asia/Kolkata") @db.VarChar(80)
+  isActive    Boolean      @default(true) @map("is_active")
+  team        ResponsibleTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, dayOfWeek, isActive])
+  @@map("duty_schedules")
+}
+
+model IssueAssignmentRule {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  campusId    String?      @map("campus_id") @db.Uuid
+  blockId     String?      @map("block_id") @db.Uuid
+  floorId     String?      @map("floor_id") @db.Uuid
+  roomId      String?      @map("room_id") @db.Uuid
+  roomType    RoomType?    @map("room_type")
+  departmentId String?     @map("department_id") @db.Uuid
+  categoryId  String?      @map("category_id") @db.Uuid
+  issueTypeId String?      @map("issue_type_id") @db.Uuid
+  assetId     String?      @map("asset_id") @db.Uuid
+  priorityFilter IssuePriority? @map("priority_filter")
+  teamId      String       @map("team_id") @db.Uuid
+  primaryUserId String?    @map("primary_user_id") @db.Uuid
+  backupUserId String?     @map("backup_user_id") @db.Uuid
+  escalationUserId String? @map("escalation_user_id") @db.Uuid
+  rulePriority Int         @default(0) @map("rule_priority")
+  workloadBalancing Boolean @default(false) @map("workload_balancing")
+  isActive    Boolean      @default(true) @map("is_active")
+  validFrom   DateTime?    @map("valid_from") @db.Timestamptz(3)
+  validUntil  DateTime?    @map("valid_until") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  category    IssueCategory? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  issueType   IssueType?   @relation(fields: [issueTypeId], references: [id], onDelete: Restrict)
+  team        ResponsibleTeam @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  routedIssues Issue[]
+
+  @@index([collegeId, isActive, rulePriority])
+  @@index([roomId, categoryId, issueTypeId])
+  @@map("issue_assignment_rules")
+}
+
+model IssueSlaPolicy {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  priority    IssuePriority
+  acknowledgementMinutes Int @map("acknowledgement_minutes")
+  resolutionMinutes Int    @map("resolution_minutes")
+  workingHoursOnly Boolean @default(false) @map("working_hours_only")
+  timezone    String       @default("Asia/Kolkata") @db.VarChar(80)
+  isActive    Boolean      @default(true) @map("is_active")
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  issues      Issue[]
+
+  @@unique([collegeId, priority])
+  @@map("issue_sla_policies")
+}
+
+model Issue {
+  id          String       @id @default(uuid()) @db.Uuid
+  issueNumber String       @unique @map("issue_number") @db.VarChar(30)
+  collegeId   String       @map("college_id") @db.Uuid
+  campusId    String       @map("campus_id") @db.Uuid
+  blockId     String       @map("block_id") @db.Uuid
+  floorId     String       @map("floor_id") @db.Uuid
+  roomId      String       @map("room_id") @db.Uuid
+  departmentId String?     @map("department_id") @db.Uuid
+  categoryId  String       @map("category_id") @db.Uuid
+  issueTypeId String?      @map("issue_type_id") @db.Uuid
+  assetId     String?      @map("asset_id") @db.Uuid
+  reporterId  String       @map("reporter_id") @db.Uuid
+  title       String       @db.VarChar(160)
+  description String
+  exactPosition String?    @map("exact_position") @db.VarChar(250)
+  submissionSource String  @default("MANUAL") @map("submission_source") @db.VarChar(40)
+  qrToken     String?      @map("qr_token") @db.VarChar(180)
+  scannedLocationId String? @map("scanned_location_id") @db.Uuid
+  priority    IssuePriority
+  status      IssueStatus  @default(NEW)
+  teamId      String?      @map("team_id") @db.Uuid
+  assignedToId String?     @map("assigned_to_id") @db.Uuid
+  routingRuleId String?    @map("routing_rule_id") @db.Uuid
+  routingSnapshot Json?    @map("routing_snapshot")
+  slaPolicyId String?      @map("sla_policy_id") @db.Uuid
+  acknowledgementDueAt DateTime? @map("acknowledgement_due_at") @db.Timestamptz(3)
+  resolutionDueAt DateTime? @map("resolution_due_at") @db.Timestamptz(3)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(3)
+  resolvedAt  DateTime?    @map("resolved_at") @db.Timestamptz(3)
+  closedAt    DateTime?    @map("closed_at") @db.Timestamptz(3)
+  escalationLevel Int      @default(0) @map("escalation_level")
+  affectedUserCount Int    @default(1) @map("affected_user_count")
+  version     Int          @default(1)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  campus      Campus       @relation(fields: [campusId], references: [id], onDelete: Restrict)
+  block       Block        @relation(fields: [blockId], references: [id], onDelete: Restrict)
+  floor       Floor        @relation(fields: [floorId], references: [id], onDelete: Restrict)
+  room        Room         @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  department  Department?  @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  category    IssueCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  issueType   IssueType?   @relation(fields: [issueTypeId], references: [id], onDelete: Restrict)
+  asset       Asset?       @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  reporter    User         @relation("IssueReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  team        ResponsibleTeam? @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  assignedTo  User?        @relation("IssueAssignee", fields: [assignedToId], references: [id], onDelete: Restrict)
+  routingRule IssueAssignmentRule? @relation(fields: [routingRuleId], references: [id], onDelete: Restrict)
+  slaPolicy   IssueSlaPolicy? @relation(fields: [slaPolicyId], references: [id], onDelete: Restrict)
+  affectedUsers IssueAffectedUser[]
+  attachments IssueAttachment[]
+  comments    IssueComment[]
+  statusHistory IssueStatusHistory[]
+  assignmentHistory IssueAssignmentHistory[]
+  escalations IssueEscalation[]
+  verifications ResolutionVerification[]
+  conversations Conversation[]
+
+  @@index([collegeId, status, priority, createdAt])
+  @@index([assignedToId, status, resolutionDueAt])
+  @@index([roomId, categoryId, issueTypeId, assetId, status])
+  @@index([submissionSource, scannedLocationId, createdAt])
+  @@map("issues")
+}
+
+model IssueAffectedUser {
+  issueId     String       @map("issue_id") @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  subscribedAt DateTime    @default(now()) @map("subscribed_at") @db.Timestamptz(3)
+  issue       Issue        @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@id([issueId, userId])
+  @@map("issue_affected_users")
+}
+
+model IssueAttachment {
+  id          String       @id @default(uuid()) @db.Uuid
+  issueId     String       @map("issue_id") @db.Uuid
+  uploadedById String      @map("uploaded_by_id") @db.Uuid
+  purpose     AttachmentPurpose
+  storageKey  String       @unique @map("storage_key")
+  thumbnailKey String?     @map("thumbnail_key")
+  originalName String      @map("original_name") @db.VarChar(255)
+  mimeType    String       @map("mime_type") @db.VarChar(120)
+  sizeBytes   BigInt       @map("size_bytes")
+  sha256      String?      @db.VarChar(64)
+  deletedAt   DateTime?    @map("deleted_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  issue       Issue        @relation(fields: [issueId], references: [id], onDelete: Restrict)
+  uploadedBy  User         @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@index([issueId, purpose])
+  @@map("issue_attachments")
+}
+
+model IssueComment {
+  id          String       @id @default(uuid()) @db.Uuid
+  issueId     String       @map("issue_id") @db.Uuid
+  authorId    String       @map("author_id") @db.Uuid
+  body        String
+  isInternal  Boolean      @default(false) @map("is_internal")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  editedAt    DateTime?    @map("edited_at") @db.Timestamptz(3)
+  deletedAt   DateTime?    @map("deleted_at") @db.Timestamptz(3)
+  issue       Issue        @relation(fields: [issueId], references: [id], onDelete: Restrict)
+  author      User         @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([issueId, createdAt])
+  @@map("issue_comments")
+}
+
+model IssueStatusHistory {
+  id          String       @id @default(uuid()) @db.Uuid
+  issueId     String       @map("issue_id") @db.Uuid
+  previousStatus IssueStatus? @map("previous_status")
+  newStatus   IssueStatus  @map("new_status")
+  changedById String       @map("changed_by_id") @db.Uuid
+  comment     String?
+  locationMetadata Json?   @map("location_metadata")
+  requestId   String       @map("request_id") @db.VarChar(80)
+  ipAddress   String?      @map("ip_address") @db.VarChar(64)
+  userAgent   String?      @map("user_agent")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  issue       Issue        @relation(fields: [issueId], references: [id], onDelete: Restrict)
+  changedBy   User         @relation(fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([issueId, createdAt])
+  @@map("issue_status_histories")
+}
+
+model IssueAssignmentHistory {
+  id          String       @id @default(uuid()) @db.Uuid
+  issueId     String       @map("issue_id") @db.Uuid
+  previousUserId String?   @map("previous_user_id") @db.Uuid
+  assignedUserId String?   @map("assigned_user_id") @db.Uuid
+  assignedTeamId String?   @map("assigned_team_id") @db.Uuid
+  assignedById String?     @map("assigned_by_id") @db.Uuid
+  routingRuleId String?    @map("routing_rule_id") @db.Uuid
+  reason      String       @db.VarChar(1000)
+  snapshot    Json?
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  issue       Issue        @relation(fields: [issueId], references: [id], onDelete: Restrict)
+
+  @@index([issueId, createdAt])
+  @@map("issue_assignment_histories")
+}
+
+model IssueEscalation {
+  id          String       @id @default(uuid()) @db.Uuid
+  issueId     String       @map("issue_id") @db.Uuid
+  level       Int
+  recipientUserId String?  @map("recipient_user_id") @db.Uuid
+  reason      String       @db.VarChar(1000)
+  escalatedAt DateTime     @default(now()) @map("escalated_at") @db.Timestamptz(3)
+  nextEscalationAt DateTime? @map("next_escalation_at") @db.Timestamptz(3)
+  notificationStatus DeliveryStatus @default(PENDING) @map("notification_status")
+  deduplicationKey String @unique @map("deduplication_key")
+  issue       Issue        @relation(fields: [issueId], references: [id], onDelete: Restrict)
+
+  @@index([nextEscalationAt, notificationStatus])
+  @@map("issue_escalations")
+}
+
+model ResolutionVerification {
+  id          String       @id @default(uuid()) @db.Uuid
+  issueId     String       @map("issue_id") @db.Uuid
+  verifierId  String       @map("verifier_id") @db.Uuid
+  accepted    Boolean
+  comment     String?      @db.VarChar(1000)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  issue       Issue        @relation(fields: [issueId], references: [id], onDelete: Restrict)
+
+  @@index([issueId, createdAt])
+  @@map("resolution_verifications")
+}
+
+model Notification {
+  id          String       @id @default(uuid()) @db.Uuid
+  type        String       @db.VarChar(80)
+  title       String       @db.VarChar(180)
+  body        String
+  priority    IssuePriority? 
+  relatedEntityType String? @map("related_entity_type") @db.VarChar(60)
+  relatedEntityId String?  @map("related_entity_id") @db.Uuid
+  data        Json?
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  recipients  NotificationRecipient[]
+  attempts    NotificationDeliveryAttempt[]
+
+  @@index([relatedEntityType, relatedEntityId])
+  @@map("notifications")
+}
+
+model NotificationRecipient {
+  id          String       @id @default(uuid()) @db.Uuid
+  notificationId String    @map("notification_id") @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  readAt      DateTime?    @map("read_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+  @@index([userId, readAt, createdAt])
+  @@map("notification_recipients")
+}
+
+model NotificationDeliveryAttempt {
+  id          String       @id @default(uuid()) @db.Uuid
+  notificationId String    @map("notification_id") @db.Uuid
+  recipientUserId String   @map("recipient_user_id") @db.Uuid
+  channel     NotificationChannel
+  provider    String       @db.VarChar(80)
+  status      DeliveryStatus @default(PENDING)
+  attemptNumber Int        @default(1) @map("attempt_number")
+  idempotencyKey String    @unique @map("idempotency_key")
+  providerMessageId String? @map("provider_message_id") @db.VarChar(200)
+  errorCode   String?      @map("error_code") @db.VarChar(100)
+  errorMessage String?     @map("error_message")
+  attemptedAt DateTime     @default(now()) @map("attempted_at") @db.Timestamptz(3)
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Restrict)
+
+  @@index([status, attemptedAt])
+  @@map("notification_delivery_attempts")
+}
+
+model NotificationTemplate {
+  id          String       @id @default(uuid()) @db.Uuid
+  code        String       @unique @db.VarChar(100)
+  channel     NotificationChannel
+  language    String       @default("en") @db.VarChar(10)
+  subjectTemplate String?  @map("subject_template")
+  bodyTemplate String      @map("body_template")
+  isActive    Boolean      @default(true) @map("is_active")
+  version     Int          @default(1)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([code, channel, language])
+  @@map("notification_templates")
+}
+
+model OutboxEvent {
+  id          String       @id @default(uuid()) @db.Uuid
+  aggregateType String     @map("aggregate_type") @db.VarChar(60)
+  aggregateId String       @map("aggregate_id") @db.Uuid
+  eventType   String       @map("event_type") @db.VarChar(100)
+  payload     Json
+  idempotencyKey String    @unique @map("idempotency_key")
+  availableAt DateTime     @default(now()) @map("available_at") @db.Timestamptz(3)
+  processedAt DateTime?    @map("processed_at") @db.Timestamptz(3)
+  attemptCount Int         @default(0) @map("attempt_count")
+  lastError   String?      @map("last_error")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([processedAt, availableAt])
+  @@map("outbox_events")
+}
+
+model WhatsAppMessage {
+  id          String       @id @default(uuid()) @db.Uuid
+  notificationId String?   @map("notification_id") @db.Uuid
+  recipientNumberHash String @map("recipient_number_hash")
+  providerMessageId String? @unique @map("provider_message_id") @db.VarChar(200)
+  templateName String      @map("template_name") @db.VarChar(120)
+  status      DeliveryStatus @default(PENDING)
+  lastError   String?      @map("last_error")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([status, createdAt])
+  @@map("whatsapp_messages")
+}
+
+model WhatsAppWebhookEvent {
+  id          String       @id @default(uuid()) @db.Uuid
+  eventKey    String       @unique @map("event_key")
+  eventType   String       @map("event_type") @db.VarChar(100)
+  payloadHash String       @map("payload_hash") @db.VarChar(64)
+  payload     Json
+  processedAt DateTime?    @map("processed_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@map("whatsapp_webhook_events")
+}
+
+model Conversation {
+  id          String       @id @default(uuid()) @db.Uuid
+  type        ConversationType
+  title       String?      @db.VarChar(180)
+  description String?
+  avatarStorageKey String? @map("avatar_storage_key")
+  collegeId   String       @map("college_id") @db.Uuid
+  issueId     String?      @unique @map("issue_id") @db.Uuid
+  officialKey String?      @unique @map("official_key") @db.VarChar(180)
+  officialGroupType String? @map("official_group_type") @db.VarChar(80)
+  linkedEntityId String?   @map("linked_entity_id") @db.Uuid
+  isOfficial  Boolean      @default(false) @map("is_official")
+  sendRestricted Boolean   @default(false) @map("send_restricted")
+  createdById String?      @map("created_by_id") @db.Uuid
+  archivedAt  DateTime?    @map("archived_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  issue       Issue?       @relation(fields: [issueId], references: [id], onDelete: Restrict)
+  participants ConversationParticipant[]
+  messages    Message[]
+
+  @@index([collegeId, type])
+  @@index([collegeId, archivedAt, updatedAt])
+  @@index([officialGroupType, linkedEntityId])
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id          String       @id @default(uuid()) @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  role        ParticipantRole @default(MEMBER)
+  joinedAt    DateTime     @default(now()) @map("joined_at") @db.Timestamptz(3)
+  leftAt      DateTime?    @map("left_at") @db.Timestamptz(3)
+  mutedUntil  DateTime?    @map("muted_until") @db.Timestamptz(3)
+  pinnedAt    DateTime?    @map("pinned_at") @db.Timestamptz(3)
+  archivedAt  DateTime?    @map("archived_at") @db.Timestamptz(3)
+  markedUnreadAt DateTime? @map("marked_unread_at") @db.Timestamptz(3)
+  lastReadMessageId String? @map("last_read_message_id") @db.Uuid
+  lastReadAt  DateTime?    @map("last_read_at") @db.Timestamptz(3)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId, leftAt])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id          String       @id @default(uuid()) @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  senderId    String       @map("sender_id") @db.Uuid
+  replyToId   String?      @map("reply_to_id") @db.Uuid
+  forwardedFromId String?  @map("forwarded_from_id") @db.Uuid
+  type        MessageType  @default(TEXT)
+  status      DeliveryStatus @default(SENT)
+  clientId    String?      @map("client_id") @db.VarChar(80)
+  body        String
+  pinnedAt    DateTime?    @map("pinned_at") @db.Timestamptz(3)
+  editedAt    DateTime?    @map("edited_at") @db.Timestamptz(3)
+  deletedAt   DateTime?    @map("deleted_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  sender      User         @relation(fields: [senderId], references: [id], onDelete: Restrict)
+  replyTo     Message?     @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies     Message[]    @relation("MessageReplies")
+  forwardedFrom Message?   @relation("MessageForwards", fields: [forwardedFromId], references: [id], onDelete: SetNull)
+  forwards    Message[]    @relation("MessageForwards")
+  attachments MessageAttachment[]
+  readReceipts MessageReadReceipt[]
+  reactions   MessageReaction[]
+  reports     ReportedMessage[]
+  deliveries MessageDelivery[]
+  editHistory MessageEditHistory[]
+  deletions   MessageDeletion[]
+  stars       MessageStar[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderId, createdAt])
+  @@unique([senderId, clientId])
+  @@map("messages")
+}
+
+model MessageAttachment {
+  id          String       @id @default(uuid()) @db.Uuid
+  messageId   String       @map("message_id") @db.Uuid
+  storageKey  String       @unique @map("storage_key")
+  originalName String      @map("original_name") @db.VarChar(255)
+  safeName     String      @map("safe_name") @db.VarChar(255)
+  mimeType    String       @map("mime_type") @db.VarChar(120)
+  sizeBytes   BigInt       @map("size_bytes")
+  sha256      String?      @db.VarChar(64)
+  thumbnailKey String?     @map("thumbnail_key")
+  width       Int?
+  height      Int?
+  uploadedById String      @map("uploaded_by_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  deletedAt   DateTime?    @map("deleted_at") @db.Timestamptz(3)
+  message     Message      @relation(fields: [messageId], references: [id], onDelete: Restrict)
+
+  @@map("message_attachments")
+}
+
+model MessageDelivery {
+  messageId   String         @map("message_id") @db.Uuid
+  userId      String         @map("user_id") @db.Uuid
+  status      DeliveryStatus @default(QUEUED)
+  lastError   String?        @map("last_error") @db.VarChar(500)
+  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  message     Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId, status, createdAt])
+  @@map("message_deliveries")
+}
+
+model MessageEditHistory {
+  id          String   @id @default(uuid()) @db.Uuid
+  messageId   String   @map("message_id") @db.Uuid
+  previousBody String  @map("previous_body")
+  editedById  String   @map("edited_by_id") @db.Uuid
+  editedAt    DateTime @default(now()) @map("edited_at") @db.Timestamptz(3)
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId, editedAt])
+  @@map("message_edit_history")
+}
+
+model MessageDeletion {
+  messageId   String   @map("message_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  deletedAt   DateTime @default(now()) @map("deleted_at") @db.Timestamptz(3)
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId, deletedAt])
+  @@map("message_deletions")
+}
+
+model MessageStar {
+  messageId   String   @map("message_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId, createdAt])
+  @@map("message_stars")
+}
+
+model MessageReadReceipt {
+  messageId   String       @map("message_id") @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  readAt      DateTime     @default(now()) @map("read_at") @db.Timestamptz(3)
+  message     Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@map("message_read_receipts")
+}
+
+model MessageReaction {
+  messageId   String       @map("message_id") @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  emoji       String       @db.VarChar(30)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  message     Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId, emoji])
+  @@map("message_reactions")
+}
+
+model ReportedMessage {
+  id          String       @id @default(uuid()) @db.Uuid
+  messageId   String       @map("message_id") @db.Uuid
+  reportedById String      @map("reported_by_id") @db.Uuid
+  reason      String       @db.VarChar(1000)
+  status      String       @default("OPEN") @db.VarChar(30)
+  reviewedById String?     @map("reviewed_by_id") @db.Uuid
+  reviewNote  String?      @map("review_note") @db.VarChar(1000)
+  reviewedAt  DateTime?    @map("reviewed_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  message     Message      @relation(fields: [messageId], references: [id], onDelete: Restrict)
+  reportedBy  User         @relation("MessageReporter", fields: [reportedById], references: [id], onDelete: Restrict)
+  reviewedBy  User?        @relation("MessageReportReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@map("reported_messages")
+}
+
+model Announcement {
+  id                    String                @id @default(uuid()) @db.Uuid
+  collegeId             String                @map("college_id") @db.Uuid
+  authorId              String                @map("author_id") @db.Uuid
+  title                 String                @db.VarChar(180)
+  message               String
+  category              AnnouncementCategory  @default(GENERAL)
+  priority              IssuePriority         @default(LOW)
+  status                AnnouncementStatus    @default(DRAFT)
+  imageStorageKey       String?               @map("image_storage_key")
+  imageUrl              String?               @map("image_url")
+  imageMimeType         String?               @map("image_mime_type") @db.VarChar(120)
+  imageWidth            Int?                  @map("image_width")
+  imageHeight           Int?                  @map("image_height")
+  imageSizeBytes        BigInt?               @map("image_size_bytes")
+  showOnAppOpen         Boolean               @default(true) @map("show_on_app_open")
+  showOnlyOnce          Boolean               @default(true) @map("show_only_once")
+  sendPush              Boolean               @default(false) @map("send_push")
+  sendEmail             Boolean               @default(false) @map("send_email")
+  publishAt             DateTime?             @map("publish_at") @db.Timestamptz(3)
+  expiresAt             DateTime?             @map("expires_at") @db.Timestamptz(3)
+  publishedAt           DateTime?             @map("published_at") @db.Timestamptz(3)
+  archivedAt            DateTime?             @map("archived_at") @db.Timestamptz(3)
+  pinned                Boolean               @default(false)
+  requiresAcknowledgement Boolean             @default(false) @map("requires_acknowledgement")
+  totalRecipients       Int                   @default(0) @map("total_recipients")
+  idempotencyKey        String?               @unique @map("idempotency_key") @db.VarChar(120)
+  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college               College               @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  author                User                  @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  audiences             AnnouncementAudience[]
+  reads                 AnnouncementReadReceipt[]
+
+  @@index([collegeId, status, publishAt])
+  @@index([collegeId, status, expiresAt])
+  @@map("announcements")
+}
+
+model AnnouncementAudience {
+  id          String       @id @default(uuid()) @db.Uuid
+  announcementId String    @map("announcement_id") @db.Uuid
+  scopeType   ScopeType    @map("scope_type")
+  scopeId     String?      @map("scope_id") @db.Uuid
+  roleCode    String?      @map("role_code") @db.VarChar(60)
+  userId      String?      @map("user_id") @db.Uuid
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+
+  @@index([scopeType, scopeId, roleCode])
+  @@map("announcement_audiences")
+}
+
+model AnnouncementReadReceipt {
+  announcementId      String                      @map("announcement_id") @db.Uuid
+  userId              String                      @map("user_id") @db.Uuid
+  deliveryStatus      AnnouncementDeliveryStatus  @default(PENDING) @map("delivery_status")
+  readAt              DateTime?                   @map("read_at") @db.Timestamptz(3)
+  acknowledgedAt      DateTime?                   @map("acknowledged_at") @db.Timestamptz(3)
+  firstDeliveredAt    DateTime?                   @map("first_delivered_at") @db.Timestamptz(3)
+  firstDisplayedAt    DateTime?                   @map("first_displayed_at") @db.Timestamptz(3)
+  firstViewedAt       DateTime?                   @map("first_viewed_at") @db.Timestamptz(3)
+  dismissedAt         DateTime?                   @map("dismissed_at") @db.Timestamptz(3)
+  lastOpenedAt        DateTime?                   @map("last_opened_at") @db.Timestamptz(3)
+  openCount           Int                         @default(0) @map("open_count")
+  announcement        Announcement                @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user                User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([announcementId, userId])
+  @@index([userId, deliveryStatus, firstViewedAt])
+  @@index([announcementId, deliveryStatus])
+  @@map("announcement_read_receipts")
+}
+
+model FeedbackTarget {
+  id          String       @id @default(uuid()) @db.Uuid
+  targetUuid  String       @unique @default(uuid()) @map("target_uuid") @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  targetType  FeedbackTargetType @map("target_type")
+  staffUserId String?      @map("staff_user_id") @db.Uuid
+  departmentId String?     @map("department_id") @db.Uuid
+  campusId    String?      @map("campus_id") @db.Uuid
+  blockId     String?      @map("block_id") @db.Uuid
+  floorId     String?      @map("floor_id") @db.Uuid
+  roomId      String?      @map("room_id") @db.Uuid
+  serviceCode String?      @map("service_code") @db.VarChar(80)
+  targetName  String       @map("target_name") @db.VarChar(180)
+  description String?
+  isActive    Boolean      @default(true) @map("is_active")
+  createdById String?      @map("created_by_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  staff       User?        @relation("FeedbackStaffTarget", fields: [staffUserId], references: [id], onDelete: Restrict)
+  department  Department?  @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  campus      Campus?      @relation(fields: [campusId], references: [id], onDelete: Restrict)
+  block       Block?       @relation(fields: [blockId], references: [id], onDelete: Restrict)
+  floor       Floor?       @relation(fields: [floorId], references: [id], onDelete: Restrict)
+  room        Room?        @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  createdBy   User?        @relation("FeedbackTargetCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  qrCodes     FeedbackQrCode[]
+  submissions FeedbackSubmission[]
+
+  @@index([collegeId, targetType, isActive])
+  @@index([staffUserId])
+  @@index([departmentId])
+  @@index([campusId])
+  @@index([blockId])
+  @@index([floorId])
+  @@index([roomId])
+  @@map("feedback_targets")
+}
+
+model FeedbackQrCode {
+  id          String       @id @default(uuid()) @db.Uuid
+  qrUuid      String       @unique @default(uuid()) @map("qr_uuid") @db.Uuid
+  targetId    String       @map("target_id") @db.Uuid
+  secureTokenHash String   @unique @map("secure_token_hash") @db.VarChar(64)
+  qrUrl       String       @map("qr_url")
+  status      FeedbackQrStatus @default(ACTIVE)
+  expiryDate  DateTime?    @map("expiry_date") @db.Timestamptz(3)
+  scanCount   Int          @default(0) @map("scan_count")
+  feedbackCount Int        @default(0) @map("feedback_count")
+  lastScannedAt DateTime?  @map("last_scanned_at") @db.Timestamptz(3)
+  createdById String?      @map("created_by_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  target      FeedbackTarget @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  createdBy   User?        @relation("FeedbackQrCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  scanLogs    FeedbackScanLog[]
+  submissions FeedbackSubmission[]
+
+  @@index([targetId, status])
+  @@index([status, expiryDate])
+  @@map("feedback_qr_codes")
+}
+
+model FeedbackCycle {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  cycleName   String       @map("cycle_name") @db.VarChar(160)
+  academicYearId String?   @map("academic_year_id") @db.Uuid
+  semesterId  String?      @map("semester_id") @db.Uuid
+  startDate   DateTime     @map("start_date") @db.Date
+  endDate     DateTime     @map("end_date") @db.Date
+  submissionRule FeedbackSubmissionRule @default(ONCE_PER_DAY) @map("submission_rule")
+  anonymousMode Boolean    @default(true) @map("anonymous_mode")
+  commentsRequired Boolean @default(false) @map("comments_required")
+  staffCanViewComments Boolean @default(false) @map("staff_can_view_comments")
+  studentIdentityVisibleToManagement Boolean @default(false) @map("student_identity_visible_to_management")
+  negativeFeedbackRequiresInvestigation Boolean @default(true) @map("negative_feedback_requires_investigation")
+  status      FeedbackCycleStatus @default(ACTIVE)
+  createdById String?      @map("created_by_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  academicYear AcademicYear? @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  semester    Semester?    @relation(fields: [semesterId], references: [id], onDelete: Restrict)
+  createdBy   User?        @relation("FeedbackCycleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  submissions FeedbackSubmission[]
+
+  @@index([collegeId, status, startDate, endDate])
+  @@index([academicYearId])
+  @@index([semesterId])
+  @@map("feedback_cycles")
+}
+
+model FeedbackQuestion {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  targetType  FeedbackTargetType @map("target_type")
+  category    String       @db.VarChar(120)
+  questionText String      @map("question_text") @db.VarChar(300)
+  questionType FeedbackQuestionType @default(RATING) @map("question_type")
+  displayOrder Int         @default(0) @map("display_order")
+  isRequired  Boolean      @default(true) @map("is_required")
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  ratings     FeedbackRating[]
+
+  @@index([collegeId, targetType, isActive, displayOrder])
+  @@map("feedback_questions")
+}
+
+model FeedbackSubmission {
+  id          String       @id @default(uuid()) @db.Uuid
+  referenceNumber String   @unique @map("reference_number") @db.VarChar(40)
+  collegeId   String       @map("college_id") @db.Uuid
+  studentUserId String     @map("student_user_id") @db.Uuid
+  targetId    String       @map("target_id") @db.Uuid
+  qrCodeId    String?      @map("qr_code_id") @db.Uuid
+  feedbackCycleId String?  @map("feedback_cycle_id") @db.Uuid
+  submissionWindowKey String @map("submission_window_key") @db.VarChar(160)
+  overallRating Int        @map("overall_rating")
+  positiveComment String?  @map("positive_comment")
+  improvementComment String? @map("improvement_comment")
+  generalComment String?   @map("general_comment")
+  complaintText String?    @map("complaint_text")
+  isAnonymous Boolean      @default(true) @map("is_anonymous")
+  sentiment   FeedbackSentiment @default(NEUTRAL)
+  status      FeedbackSubmissionStatus @default(NEW)
+  priority    FeedbackPriority @default(LOW)
+  submittedAt DateTime     @default(now()) @map("submitted_at") @db.Timestamptz(3)
+  deviceInfo  Json?        @map("device_info")
+  ipHash      String?      @map("ip_hash") @db.VarChar(64)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  student     User         @relation("FeedbackStudent", fields: [studentUserId], references: [id], onDelete: Restrict)
+  target      FeedbackTarget @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  qrCode      FeedbackQrCode? @relation(fields: [qrCodeId], references: [id], onDelete: SetNull)
+  feedbackCycle FeedbackCycle? @relation(fields: [feedbackCycleId], references: [id], onDelete: Restrict)
+  ratings     FeedbackRating[]
+  actions     FeedbackAction[]
+  notifications FeedbackNotification[]
+
+  @@index([collegeId, submittedAt])
+  @@index([studentUserId, targetId, submittedAt])
+  @@index([targetId, submittedAt])
+  @@index([qrCodeId, submittedAt])
+  @@index([feedbackCycleId])
+  @@index([overallRating])
+  @@index([status, priority])
+  @@unique([studentUserId, targetId, submissionWindowKey])
+  @@map("feedback_submissions")
+}
+
+model FeedbackRating {
+  id          String       @id @default(uuid()) @db.Uuid
+  submissionId String      @map("submission_id") @db.Uuid
+  questionId  String      @map("question_id") @db.Uuid
+  rating      Int
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  submission  FeedbackSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  question    FeedbackQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([submissionId, questionId])
+  @@index([questionId, rating])
+  @@map("feedback_ratings")
+}
+
+model FeedbackAction {
+  id          String       @id @default(uuid()) @db.Uuid
+  submissionId String      @map("submission_id") @db.Uuid
+  assignedToUserId String? @map("assigned_to_user_id") @db.Uuid
+  assignedDepartmentId String? @map("assigned_department_id") @db.Uuid
+  actionNote  String?      @map("action_note")
+  internalNote String?     @map("internal_note")
+  status      FeedbackSubmissionStatus @default(UNDER_REVIEW)
+  priority    FeedbackPriority @default(MEDIUM)
+  dueDate     DateTime?    @map("due_date") @db.Date
+  resolvedAt  DateTime?    @map("resolved_at") @db.Timestamptz(3)
+  createdById String       @map("created_by_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  submission  FeedbackSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  assignedTo  User?        @relation("FeedbackActionAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  assignedDepartment Department? @relation("FeedbackActionDepartment", fields: [assignedDepartmentId], references: [id], onDelete: SetNull)
+  createdBy   User         @relation("FeedbackActionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([submissionId, createdAt])
+  @@index([assignedToUserId, status])
+  @@index([assignedDepartmentId, status])
+  @@index([status, priority, dueDate])
+  @@map("feedback_actions")
+}
+
+model FeedbackNotification {
+  id          String       @id @default(uuid()) @db.Uuid
+  submissionId String      @map("submission_id") @db.Uuid
+  channel     NotificationChannel
+  recipient   String       @db.VarChar(254)
+  notificationType String  @map("notification_type") @db.VarChar(80)
+  status      DeliveryStatus @default(PENDING)
+  providerReference String? @map("provider_reference") @db.VarChar(200)
+  sentAt      DateTime?    @map("sent_at") @db.Timestamptz(3)
+  errorMessage String?     @map("error_message")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  submission  FeedbackSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+  @@index([channel, status, createdAt])
+  @@map("feedback_notifications")
+}
+
+model FeedbackScanLog {
+  id          String       @id @default(uuid()) @db.Uuid
+  qrCodeId    String       @map("qr_code_id") @db.Uuid
+  studentUserId String?    @map("student_user_id") @db.Uuid
+  scannedAt   DateTime     @default(now()) @map("scanned_at") @db.Timestamptz(3)
+  deviceType  String?      @map("device_type") @db.VarChar(80)
+  browser     String?      @db.VarChar(160)
+  successStatus Boolean    @map("success_status")
+  failureReason String?    @map("failure_reason") @db.VarChar(300)
+  ipHash      String?      @map("ip_hash") @db.VarChar(64)
+  qrCode      FeedbackQrCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  student     User?        @relation("FeedbackScanStudent", fields: [studentUserId], references: [id], onDelete: SetNull)
+
+  @@index([qrCodeId, scannedAt])
+  @@index([studentUserId, scannedAt])
+  @@map("feedback_scan_logs")
+}
+
+model QrCode {
+  id              String       @id @default(uuid()) @db.Uuid
+  publicId        String       @unique @default(uuid()) @map("public_id") @db.Uuid
+  collegeId       String       @map("college_id") @db.Uuid
+  qrType          QrCodeType   @map("qr_type")
+  secureTokenHash String       @unique @map("secure_token_hash") @db.VarChar(64)
+  qrUrl           String       @map("qr_url") @db.VarChar(500)
+  label           String       @db.VarChar(180)
+  destination     String       @db.VarChar(500)
+  entityType      String?      @map("entity_type") @db.VarChar(80)
+  entityId        String?      @map("entity_id") @db.Uuid
+  metadata        Json?
+  status          QrCodeStatus @default(ACTIVE)
+  expiryDate      DateTime?    @map("expiry_date") @db.Timestamptz(3)
+  revokedAt       DateTime?    @map("revoked_at") @db.Timestamptz(3)
+  scanCount       Int          @default(0) @map("scan_count")
+  lastScannedAt   DateTime?    @map("last_scanned_at") @db.Timestamptz(3)
+  createdById     String?      @map("created_by_id") @db.Uuid
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college         College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  createdBy       User?        @relation("QrCodeCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  scans           QrScanEvent[]
+
+  @@index([collegeId, qrType, status])
+  @@index([entityType, entityId])
+  @@index([status, expiryDate])
+  @@map("qr_codes")
+}
+
+model QrScanEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  qrCodeId      String    @map("qr_code_id") @db.Uuid
+  collegeId     String    @map("college_id") @db.Uuid
+  userId        String?   @map("user_id") @db.Uuid
+  scanMethod    String?   @map("scan_method") @db.VarChar(80)
+  successStatus Boolean   @map("success_status")
+  failureReason String?   @map("failure_reason") @db.VarChar(300)
+  destination   String?   @db.VarChar(500)
+  ipAddress     String?   @map("ip_address") @db.VarChar(64)
+  userAgent     String?   @map("user_agent")
+  scannedAt     DateTime  @default(now()) @map("scanned_at") @db.Timestamptz(3)
+  qrCode        QrCode    @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  college       College   @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  user          User?     @relation("QrScanUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([qrCodeId, scannedAt])
+  @@index([collegeId, scannedAt])
+  @@index([userId, scannedAt])
+  @@map("qr_scan_events")
+}
+
+model AuditLog {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String?      @map("college_id") @db.Uuid
+  actorId     String?      @map("actor_id") @db.Uuid
+  action      String       @db.VarChar(100)
+  entityType  String       @map("entity_type") @db.VarChar(80)
+  entityId    String?      @map("entity_id") @db.Uuid
+  beforeValue Json?        @map("before_value")
+  afterValue  Json?        @map("after_value")
+  reason      String?
+  requestId   String       @map("request_id") @db.VarChar(80)
+  ipAddress   String?      @map("ip_address") @db.VarChar(64)
+  userAgent   String?      @map("user_agent")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  actor       User?        @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  college     College?     @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+
+  @@index([collegeId, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+  @@map("audit_logs")
+}
+
+model AppSetting {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String?      @map("college_id") @db.Uuid
+  key         String       @db.VarChar(120)
+  value       Json
+  isSecret    Boolean      @default(false) @map("is_secret")
+  version     Int          @default(1)
+  updatedById String?      @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([collegeId, key])
+  @@map("app_settings")
+}
+
+model ImportJob {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  requestedById String     @map("requested_by_id") @db.Uuid
+  entityType  String       @map("entity_type") @db.VarChar(80)
+  importMode  String       @default("CREATE_ONLY") @map("import_mode") @db.VarChar(40)
+  selectedSheetName String? @map("selected_sheet_name") @db.VarChar(120)
+  columnMapping Json?      @map("column_mapping")
+  sourceStorageKey String  @map("source_storage_key")
+  sourceSha256 String      @map("source_sha256") @db.VarChar(64)
+  status      JobStatus    @default(UPLOADED)
+  totalRows   Int          @default(0) @map("total_rows")
+  validRows   Int          @default(0) @map("valid_rows")
+  errorRows   Int          @default(0) @map("error_rows")
+  resultStorageKey String? @map("result_storage_key")
+  credentialExportedAt DateTime? @map("credential_exported_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  requestedBy User         @relation("ImportRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  records     ImportJobRecord[]
+
+  @@index([collegeId, status, createdAt])
+  @@map("import_jobs")
+}
+
+model ImportJobRecord {
+  id          String       @id @default(uuid()) @db.Uuid
+  importJobId String       @map("import_job_id") @db.Uuid
+  rowNumber   Int          @map("row_number")
+  model       String       @db.VarChar(80)
+  recordId    String       @map("record_id") @db.Uuid
+  label       String       @db.VarChar(300)
+  rolledBackAt DateTime?   @map("rolled_back_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  importJob   ImportJob    @relation(fields: [importJobId], references: [id], onDelete: Restrict)
+
+  @@unique([importJobId, model, recordId])
+  @@index([importJobId, rowNumber, createdAt])
+  @@map("import_job_records")
+}
+
+model ExportJob {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String       @map("college_id") @db.Uuid
+  requestedById String     @map("requested_by_id") @db.Uuid
+  entityType  String       @map("entity_type") @db.VarChar(80)
+  filters     Json
+  status      JobStatus    @default(QUEUED)
+  resultStorageKey String? @map("result_storage_key")
+  expiresAt   DateTime?    @map("expires_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([collegeId, requestedById, status])
+  @@map("export_jobs")
+}
+
+model BackgroundJobFailure {
+  id          String       @id @default(uuid()) @db.Uuid
+  collegeId   String?      @map("college_id") @db.Uuid
+  queueName   String       @map("queue_name") @db.VarChar(100)
+  jobId       String       @map("job_id") @db.VarChar(120)
+  jobName     String       @map("job_name") @db.VarChar(120)
+  payloadRedacted Json     @map("payload_redacted")
+  errorCode   String?      @map("error_code") @db.VarChar(100)
+  errorMessage String      @map("error_message")
+  stackHash   String?      @map("stack_hash") @db.VarChar(64)
+  failedAt    DateTime     @default(now()) @map("failed_at") @db.Timestamptz(3)
+  resolvedAt  DateTime?    @map("resolved_at") @db.Timestamptz(3)
+  retryCount  Int          @default(0) @map("retry_count")
+  college     College?     @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+
+  @@unique([queueName, jobId])
+  @@index([resolvedAt, failedAt])
+  @@index([collegeId, resolvedAt, failedAt])
+  @@map("background_job_failures")
+}
+
+model IdempotencyKey {
+  id          String       @id @default(uuid()) @db.Uuid
+  actorId     String       @map("actor_id") @db.Uuid
+  endpoint    String       @db.VarChar(160)
+  key         String       @db.VarChar(120)
+  requestHash String       @map("request_hash") @db.VarChar(64)
+  responseStatus Int?      @map("response_status")
+  responseBody Json?       @map("response_body")
+  resourceId  String?      @map("resource_id") @db.Uuid
+  expiresAt   DateTime     @map("expires_at") @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([actorId, endpoint, key])
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+
+/* ─── Broadcast ─── */
+
+enum BroadcastStatus {
+  DRAFT
+  SCHEDULED
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum BroadcastAudienceType {
+  ALL
+  ROLE
+  DEPARTMENT
+  SECTION
+  INDIVIDUAL
+}
+
+enum BroadcastDeliveryStatus {
+  QUEUED
+  DELIVERED
+  FAILED
+  SKIPPED
+}
+
+model Broadcast {
+  id              String              @id @default(uuid()) @db.Uuid
+  collegeId       String              @map("college_id") @db.Uuid
+  authorId        String              @map("author_id") @db.Uuid
+  title           String              @db.VarChar(180)
+  body            String
+  audienceType    BroadcastAudienceType @map("audience_type")
+  audienceValue   String?             @map("audience_value") @db.VarChar(120)
+  status          BroadcastStatus     @default(DRAFT)
+  scheduledAt     DateTime?           @map("scheduled_at") @db.Timestamptz(3)
+  sentAt          DateTime?           @map("sent_at") @db.Timestamptz(3)
+  failedAt        DateTime?           @map("failed_at") @db.Timestamptz(3)
+  cancelledAt     DateTime?           @map("cancelled_at") @db.Timestamptz(3)
+  totalRecipients Int                 @default(0) @map("total_recipients")
+  deliveredCount  Int                 @default(0) @map("delivered_count")
+  failedCount     Int                 @default(0) @map("failed_count")
+  errorMessage    String?             @map("error_message") @db.VarChar(500)
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college         College             @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  author          User                @relation("BroadcastAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  recipients      BroadcastRecipient[]
+
+  @@index([collegeId, status, createdAt])
+  @@index([collegeId, scheduledAt])
+  @@map("broadcasts")
+}
+
+model BroadcastRecipient {
+  broadcastId     String                  @map("broadcast_id") @db.Uuid
+  userId          String                  @map("user_id") @db.Uuid
+  status          BroadcastDeliveryStatus @default(QUEUED)
+  deliveredAt     DateTime?               @map("delivered_at") @db.Timestamptz(3)
+  readAt          DateTime?               @map("read_at") @db.Timestamptz(3)
+  failureReason   String?                 @map("failure_reason") @db.VarChar(300)
+  broadcast       Broadcast               @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@id([broadcastId, userId])
+  @@index([userId, status])
+  @@map("broadcast_recipients")
+}
+
+model Course {
+  id           String       @id @default(uuid()) @db.Uuid
+  collegeId    String       @map("college_id") @db.Uuid
+  departmentId String?      @map("department_id") @db.Uuid
+  programmeId  String?      @map("programme_id") @db.Uuid
+  code         String       @db.VarChar(60)
+  title        String       @db.VarChar(180)
+  description  String?      @db.Text
+  status       CourseStatus @default(DRAFT)
+  thumbnailUrl String?      @map("thumbnail_url")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  college      College      @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  department   Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  programme    Programme?   @relation(fields: [programmeId], references: [id], onDelete: SetNull)
+
+  modules      CourseModule[]
+  resources    CourseResource[]
+  assessments  CourseAssessment[]
+  studentProgress StudentProgress[]
+  assessmentResults AssessmentResult[]
+
+  @@unique([collegeId, code])
+  @@index([collegeId, status])
+  @@map("courses")
+}
+
+model CourseModule {
+  id          String   @id @default(uuid()) @db.Uuid
+  courseId    String   @map("course_id") @db.Uuid
+  title       String   @db.VarChar(180)
+  description String?  @db.Text
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons     CourseLesson[]
+  resources   CourseResource[]
+
+  @@index([courseId, sortOrder])
+  @@map("course_modules")
+}
+
+model CourseLesson {
+  id          String   @id @default(uuid()) @db.Uuid
+  moduleId    String   @map("module_id") @db.Uuid
+  title       String   @db.VarChar(180)
+  content     String?  @db.Text
+  videoUrl    String?  @map("video_url")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  module      CourseModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  progress    StudentProgress[]
+
+  @@index([moduleId, sortOrder])
+  @@map("course_lessons")
+}
+
+model CourseResource {
+  id          String       @id @default(uuid()) @db.Uuid
+  courseId    String       @map("course_id") @db.Uuid
+  moduleId    String?      @map("module_id") @db.Uuid
+  title       String       @db.VarChar(180)
+  description String?      @db.Text
+  type        ResourceType @default(OTHER)
+  url         String
+  uploadedById String?     @map("uploaded_by_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  course      Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  module      CourseModule? @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@index([courseId, type])
+  @@map("course_resources")
+}
+
+model CourseAssessment {
+  id          String         @id @default(uuid()) @db.Uuid
+  courseId    String         @map("course_id") @db.Uuid
+  title       String         @db.VarChar(180)
+  description String?        @db.Text
+  type        AssessmentType @default(QUIZ)
+  maxScore    Int            @default(100) @map("max_score")
+  passingScore Int           @default(50) @map("passing_score")
+  questionsJson Json?        @map("questions_json")
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  course      Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  results     AssessmentResult[]
+
+  @@index([courseId])
+  @@map("course_assessments")
+}
+
+model StudentProgress {
+  id          String   @id @default(uuid()) @db.Uuid
+  studentId   String   @map("student_id") @db.Uuid
+  courseId    String   @map("course_id") @db.Uuid
+  lessonId    String   @map("lesson_id") @db.Uuid
+  completedAt DateTime @default(now()) @map("completed_at") @db.Timestamptz(3)
+
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lesson      CourseLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, lessonId])
+  @@index([studentId, courseId])
+  @@map("student_progress")
+}
+
+model AssessmentResult {
+  id          String   @id @default(uuid()) @db.Uuid
+  studentId   String   @map("student_id") @db.Uuid
+  courseId    String   @map("course_id") @db.Uuid
+  assessmentId String  @map("assessment_id") @db.Uuid
+  score       Int
+  passed      Boolean
+  completedAt DateTime @default(now()) @map("completed_at") @db.Timestamptz(3)
+  answersJson Json?    @map("answers_json")
+
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  assessment  CourseAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, assessmentId])
+  @@index([courseId])
+  @@map("assessment_results")
+}

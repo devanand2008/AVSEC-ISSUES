@@ -1,0 +1,82 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-and-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_ENV: production
+      WEB_URL: https://college-ci.example
+      API_URL: https://api.college-ci.example/api/v1
+      NEXT_PUBLIC_API_URL: https://api.college-ci.example/api/v1
+      NEXT_PUBLIC_SOCKET_URL: wss://api.college-ci.example/realtime
+      PORT: 4000
+      API_PREFIX: api/v1
+      TRUST_PROXY: 1
+      LOG_LEVEL: info
+      GLOBAL_RATE_LIMIT_TTL_MS: 60000
+      GLOBAL_RATE_LIMIT_MAX: 120
+      LOGIN_RATE_LIMIT_TTL_MS: 60000
+      LOGIN_RATE_LIMIT_MAX: 10
+      POSTGRES_DB: college_management
+      POSTGRES_USER: college_app
+      POSTGRES_PASSWORD: ci-database-password-2026
+      DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@postgres:5432/college_management?schema=public
+      DATABASE_POOL_MAX: 10
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ci-access-secret-2026-0123456789-abcdef
+      JWT_REFRESH_SECRET: ci-refresh-secret-2026-fedcba9876543210
+      JWT_ACCESS_EXPIRY: 15m
+      JWT_REFRESH_EXPIRY: 7d
+      COOKIE_SECURE: "true"
+      COOKIE_SAME_SITE: lax
+      CSRF_SECRET: ci-csrf-secret-2026-abcdef0123456789
+      PASSWORD_PEPPER: ci-password-pepper-2026
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: college-private
+      S3_ACCESS_KEY: ci-storage-user
+      S3_SECRET_KEY: ci-storage-secret-2026
+      S3_FORCE_PATH_STYLE: "true"
+      WHATSAPP_ENABLED: "false"
+      MALWARE_SCAN_ENABLED: "false"
+      DEFAULT_TIMEZONE: Asia/Kolkata
+      SWAGGER_ENABLED: "false"
+      SEED_DEVELOPMENT_DATA: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Run security preflight sensitive-file scanner
+        run: node scripts/check-sensitive-files.mjs
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+      - name: Validate production environment policy
+        run: npm run env:validate:production
+      - name: Typecheck, lint, test, and build
+        run: npm run check
+      - name: Audit production dependencies
+        run: npm run audit:production
+      - name: Validate development and production Compose models
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.production.yml --profile full config --quiet
+      - name: Build production container images
+        run: docker compose -f docker-compose.yml -f docker-compose.production.yml --profile full build api web

@@ -1,0 +1,380 @@
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { Job, Queue, Worker } from "bullmq";
+import { createHash } from "node:crypto";
+import { extname } from "node:path";
+import { Workbook } from "exceljs";
+import type { AuthPrincipal } from "../../common/http/request-context";
+import { PrismaService } from "../../database/prisma.service";
+import { AuditService } from "../audit/audit.service";
+import { IMPORT_ENTITY_TYPES, IMPORT_MODES, IMPORT_TEMPLATES, type CredentialExportRow, type ImportEntityType, type ImportMode, type ImportedRecord, type ImportResultReport, type ImportRow, type ImportRowError } from "./import.types";
+import { ImportsFileService } from "./imports-file.service";
+import { ImportsHandlerService } from "./imports-handler.service";
+
+interface ImportQueueData { jobId: string }
+interface PreviewOptionsInput {
+  sheetName?: string;
+  importMode?: string;
+  columnMapping?: string;
+}
+
+interface PreviewOptions {
+  sheetName?: string;
+  importMode: ImportMode;
+  columnMapping?: Record<string, string>;
+}
+
+const ROLE_RANK: Record<string, number> = {
+  SUPER_ADMIN: 100, MAIN_ADMIN: 90, PRINCIPAL: 80, VICE_PRINCIPAL: 75, HOD: 70, MAINTENANCE_ADMIN: 70,
+  MAINTENANCE_SUPERVISOR: 60, CLASS_COORDINATOR: 60, FACULTY: 50, CLASS_REPRESENTATIVE: 40,
+  MAINTENANCE_STAFF: 40, ELECTRICIAN: 40, PLUMBER: 40, IT_SUPPORT: 40, LAB_TECHNICIAN: 40, HOUSEKEEPING: 40, SECURITY: 40,
+  OTHER_RESPONSIBLE: 40, STUDENT: 10,
+};
+
+@Injectable()
+export class ImportsService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(ImportsService.name);
+  private readonly connection: { host: string; port: number; username?: string; password?: string; tls?: Record<string, never> };
+  private readonly queue: Queue<ImportQueueData, void, string>;
+  private worker?: Worker<ImportQueueData, void, string>;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    private readonly files: ImportsFileService,
+    private readonly handler: ImportsHandlerService,
+    private readonly audit: AuditService,
+  ) {
+    const redisUrl = new URL(config.getOrThrow<string>("REDIS_URL"));
+    this.connection = { host: redisUrl.hostname, port: Number(redisUrl.port || 6379), ...(redisUrl.username ? { username: redisUrl.username } : {}), ...(redisUrl.password ? { password: redisUrl.password } : {}), ...(redisUrl.protocol === "rediss:" ? { tls: {} } : {}) };
+    this.queue = new Queue<ImportQueueData, void, string>("data-imports", { connection: this.connection });
+  }
+
+  onModuleInit(): void {
+    this.worker = new Worker<ImportQueueData, void, string>("data-imports", (job) => this.process(job), { connection: this.connection, concurrency: 1 });
+    this.worker.on("failed", (job, error) => {
+      this.logger.error({ jobId: job?.data.jobId, error: error.message }, "Data import failed");
+      if (job) void this.recordFailure(job, error);
+    });
+    this.worker.on("error", (error) => this.logger.error({ error: error.message }, "Import worker connection error"));
+    this.queue.on("error", (error) => this.logger.error({ error: error.message }, "Import queue connection error"));
+  }
+
+  async onModuleDestroy(): Promise<void> { await this.worker?.close(); await this.queue.close(); }
+
+  async template(user: AuthPrincipal, value: string): Promise<{ fileName: string; content: Buffer }> {
+    const entityType = this.entityType(value);
+    this.assertPermission(user, entityType);
+    const template = IMPORT_TEMPLATES[entityType];
+    const headers = [...template.required, ...template.optional];
+    const workbook = new Workbook();
+    const worksheet = workbook.addWorksheet("Template");
+    worksheet.addRows([
+      headers,
+      headers.map((header) => template.example[header] ?? ""),
+    ]);
+    const content = Buffer.from(await workbook.xlsx.writeBuffer());
+    return { fileName: `${entityType.toLowerCase()}-import-template.xlsx`, content };
+  }
+
+  async preview(user: AuthPrincipal, value: string, file: Express.Multer.File | undefined, requestId: string, rawOptions: PreviewOptionsInput = {}) {
+    const entityType = this.entityType(value);
+    this.assertPermission(user, entityType);
+    this.files.validateFile(file);
+    const options = this.previewOptions(entityType, rawOptions);
+    const parsed = await this.files.parse(file, entityType, { sheetName: options.sheetName, columnMapping: options.columnMapping });
+    await this.assertRoleDelegation(user, entityType, parsed.rows);
+    const databaseErrors = await this.handler.validate(entityType, user.collegeId, parsed.rows, options.importMode);
+    const source = await this.files.saveSource(user.collegeId, entityType, file);
+    const allErrors = [...parsed.errors, ...databaseErrors];
+    const invalidRows = new Set(allErrors.map((error) => error.rowNumber));
+    const importJob = await this.prisma.importJob.create({ data: {
+      collegeId: user.collegeId,
+      requestedById: user.id,
+      entityType,
+      importMode: options.importMode,
+      selectedSheetName: parsed.selectedSheetName,
+      columnMapping: options.columnMapping,
+      sourceStorageKey: source.key,
+      sourceSha256: source.sha256,
+      status: "READY",
+      totalRows: parsed.rows.length,
+      validRows: parsed.rows.length - invalidRows.size,
+      errorRows: invalidRows.size,
+    } });
+    await this.audit.record({ actorId: user.id, action: "import.previewed", entityType: "ImportJob", entityId: importJob.id, afterValue: { importedEntity: entityType, importMode: options.importMode, selectedSheetName: parsed.selectedSheetName, totalRows: parsed.rows.length, validRows: parsed.rows.length - invalidRows.size, errorRows: invalidRows.size, sourceSha256: source.sha256 }, requestId });
+    return {
+      job: this.jobView(importJob),
+      rawHeaders: parsed.rawHeaders,
+      headers: parsed.headers,
+      columnMapping: parsed.columnMapping,
+      sheetNames: parsed.sheetNames,
+      selectedSheetName: parsed.selectedSheetName,
+      previewRows: parsed.rows.slice(0, 25).map((row, index) => ({
+        rowNumber: index + 2,
+        values: this.safePreviewRow(row),
+      })),
+      errors: allErrors.slice(0, 250),
+      errorsTruncated: allErrors.length > 250,
+    };
+  }
+
+  async list(user: AuthPrincipal) {
+    const jobs = await this.prisma.importJob.findMany({ where: { collegeId: user.collegeId, ...(user.permissions.includes("audit.read") ? {} : { requestedById: user.id }) }, orderBy: { createdAt: "desc" }, take: 100 });
+    return jobs.map((job) => this.jobView(job));
+  }
+
+  async get(user: AuthPrincipal, id: string) {
+    const job = await this.findAuthorized(user, id);
+    const recoverableRecords = await this.prisma.importJobRecord.count({ where: { importJobId: id, rolledBackAt: null, model: { not: "UserUpdate" } } });
+    if (!job.resultStorageKey) return { ...this.jobView(job), recoverableRecords, credentialsAvailable: false };
+    const result = await this.files.loadReport(job.resultStorageKey);
+    const credentialsAvailable = Boolean(result.credentials?.length);
+    const { credentials: _credentials, ...safeResult } = result;
+    return { ...this.jobView(job), recoverableRecords, credentialsAvailable, result: safeResult };
+  }
+
+  async confirm(user: AuthPrincipal, id: string, requestId: string) {
+    const job = await this.findAuthorized(user, id, true);
+    this.assertPermission(user, this.entityType(job.entityType));
+    if (job.importMode === "VALIDATE_ONLY") throw new ConflictException("This job was created in validate-only mode and cannot be confirmed.");
+    if (job.status !== "READY") throw new ConflictException("Only a validated READY import can be confirmed.");
+    if (job.validRows === 0) throw new BadRequestException("This import has no valid rows to process.");
+    await this.prisma.importJob.update({ where: { id }, data: { status: "QUEUED" } });
+    try {
+      await this.queue.add("process", { jobId: id }, { jobId: id, attempts: 1, removeOnComplete: 500, removeOnFail: 1000 });
+    } catch (error) {
+      await this.prisma.importJob.update({ where: { id }, data: { status: "READY" } });
+      throw error;
+    }
+    await this.audit.record({ actorId: user.id, action: "import.confirmed", entityType: "ImportJob", entityId: id, afterValue: { importedEntity: job.entityType, validRows: job.validRows }, requestId });
+    return { id, status: "QUEUED" };
+  }
+
+  async rollback(user: AuthPrincipal, id: string, requestId: string) {
+    const job = await this.findAuthorized(user, id, true);
+    this.assertPermission(user, this.entityType(job.entityType));
+    if (!["COMPLETED", "FAILED"].includes(job.status)) throw new ConflictException("Only a completed or failed import can be rolled back.");
+    const ledger = await this.prisma.importJobRecord.findMany({ where: { importJobId: id, rolledBackAt: null, model: { not: "UserUpdate" } }, orderBy: [{ createdAt: "asc" }, { rowNumber: "asc" }] });
+    let records: ImportedRecord[] = ledger.map((record) => ({ rowNumber: record.rowNumber, model: record.model, id: record.recordId, label: record.label }));
+    if (!records.length && job.resultStorageKey) {
+      const expectedKey = `colleges/${job.collegeId}/imports/results/${job.id}.json`;
+      if (job.resultStorageKey !== expectedKey) throw new ConflictException("The legacy result report is outside the authorized job storage path.");
+      const report = await this.files.loadReport(job.resultStorageKey);
+      if (report.jobId !== job.id || report.entityType !== job.entityType) throw new ConflictException("The stored result report does not match this import job.");
+      records = report.successful.filter((record) => record.model !== "UserUpdate");
+    }
+    if (!records.length) throw new BadRequestException("This import did not create any recoverable records.");
+    try {
+      await this.handler.rollback(job.collegeId, records);
+    } catch {
+      throw new ConflictException("Rollback is no longer safe because one or more imported records are now referenced by other data.");
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.importJob.update({ where: { id }, data: { status: "ROLLED_BACK" } });
+      await tx.importJobRecord.updateMany({ where: { importJobId: id, rolledBackAt: null }, data: { rolledBackAt: new Date() } });
+      await this.audit.record({ actorId: user.id, action: "import.rolled_back", entityType: "ImportJob", entityId: id, afterValue: { importedEntity: job.entityType, recordsRemoved: records.length }, reason: "Operator requested safe import rollback", requestId }, tx);
+    });
+    return { id, status: "ROLLED_BACK", recordsRemoved: records.length };
+  }
+
+  async credentials(user: AuthPrincipal, id: string, requestId: string): Promise<{ fileName: string; content: Buffer }> {
+    const job = await this.findAuthorized(user, id, true);
+    const entityType = this.entityType(job.entityType);
+    if (!["USERS", "STUDENTS", "STAFF"].includes(entityType)) throw new BadRequestException("Credential export is available only for user imports.");
+    this.assertPermission(user, entityType);
+    if (job.status !== "COMPLETED" || !job.resultStorageKey) throw new ConflictException("Credentials can be exported only after a completed import.");
+    const report = await this.files.loadReport(job.resultStorageKey);
+    if (!report.credentials?.length) throw new ConflictException("Temporary credentials have already been exported or were not generated for this import.");
+    const content = await this.credentialWorkbook(report.credentials);
+    const exportedAt = new Date();
+    const sanitized: ImportResultReport = { ...report, credentials: undefined, credentialsExportedAt: exportedAt.toISOString() };
+    await this.files.saveReport(job.collegeId, sanitized);
+    await this.prisma.importJob.update({ where: { id }, data: { credentialExportedAt: exportedAt } });
+    await this.audit.record({
+      actorId: user.id,
+      action: "import.credentials_exported",
+      entityType: "ImportJob",
+      entityId: id,
+      afterValue: { importedEntity: entityType, credentialRows: report.credentials.length },
+      reason: "One-time temporary credential export",
+      requestId,
+    });
+    return { fileName: `${entityType.toLowerCase()}-${id.slice(0, 8)}-credentials.xlsx`, content };
+  }
+
+  private async process(queueJob: Job<ImportQueueData, void, string>): Promise<void> {
+    const importJob = await this.prisma.importJob.findUnique({ where: { id: queueJob.data.jobId } });
+    if (!importJob || !["QUEUED", "PROCESSING"].includes(importJob.status)) return;
+    const entityType = this.entityType(importJob.entityType);
+    await this.prisma.importJob.update({ where: { id: importJob.id }, data: { status: "PROCESSING", validRows: 0, errorRows: 0 } });
+    const buffer = await this.files.loadSource(importJob.sourceStorageKey);
+    if (createHash("sha256").update(buffer).digest("hex") !== importJob.sourceSha256) throw new Error("Stored import source failed its integrity check.");
+    const extension = extname(importJob.sourceStorageKey);
+    const file = { buffer, originalname: `source${extension}`, size: buffer.length } as Express.Multer.File;
+    const importMode = this.importMode(importJob.importMode);
+    const parsed = await this.files.parse(file, entityType, { sheetName: importJob.selectedSheetName ?? undefined, columnMapping: this.asColumnMapping(importJob.columnMapping) });
+    const databaseErrors = await this.handler.validate(entityType, importJob.collegeId, parsed.rows, importMode);
+    const invalidRows = new Set([...parsed.errors, ...databaseErrors].map((error) => error.rowNumber));
+    const errors: ImportRowError[] = [...parsed.errors, ...databaseErrors];
+    const successful: ImportedRecord[] = [];
+    const credentials: CredentialExportRow[] = [];
+    for (let index = 0; index < parsed.rows.length; index += 1) {
+      const rowNumber = index + 2;
+      if (!invalidRows.has(rowNumber)) {
+        try {
+          const row = parsed.rows[index];
+          if (!row) continue;
+          const record = await this.handler.create(entityType, importJob.collegeId, row, rowNumber, importJob.id, importJob.requestedById, importMode);
+          const { credential, ...publicRecord } = record;
+          successful.push(publicRecord);
+          if (credential) credentials.push(credential);
+        } catch (error) {
+          errors.push({ rowNumber, message: this.rowError(error) });
+        }
+      }
+      if ((index + 1) % 10 === 0 || index === parsed.rows.length - 1) {
+        await this.prisma.importJob.update({ where: { id: importJob.id }, data: { validRows: successful.length, errorRows: new Set(errors.map((error) => error.rowNumber)).size } });
+        await queueJob.updateProgress(Math.round(((index + 1) / parsed.rows.length) * 100));
+      }
+    }
+    const report: ImportResultReport = { jobId: importJob.id, entityType, importMode, completedAt: new Date().toISOString(), successful, errors, ...(credentials.length ? { credentials } : {}) };
+    const resultStorageKey = await this.files.saveReport(importJob.collegeId, report);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.importJob.update({ where: { id: importJob.id }, data: { status: "COMPLETED", validRows: successful.length, errorRows: new Set(errors.map((error) => error.rowNumber)).size, resultStorageKey } });
+      await this.audit.record({ actorId: importJob.requestedById, action: "import.completed", entityType: "ImportJob", entityId: importJob.id, afterValue: { importedEntity: entityType, successfulRows: successful.length, errorRows: new Set(errors.map((error) => error.rowNumber)).size }, requestId: `import-job:${importJob.id}` }, tx);
+    });
+  }
+
+  private async recordFailure(job: Job<ImportQueueData, void, string>, error: Error): Promise<void> {
+    const importJob = await this.prisma.importJob.findUnique({ where: { id: job.data.jobId }, select: { collegeId: true } });
+    await this.prisma.importJob.updateMany({ where: { id: job.data.jobId, status: { in: ["QUEUED", "PROCESSING"] } }, data: { status: "FAILED" } });
+    await this.prisma.backgroundJobFailure.upsert({
+      where: { queueName_jobId: { queueName: "data-imports", jobId: String(job.id ?? job.data.jobId) } },
+      create: { collegeId: importJob?.collegeId, queueName: "data-imports", jobId: String(job.id ?? job.data.jobId), jobName: job.name, payloadRedacted: { importJobId: job.data.jobId }, errorMessage: error.message.slice(0, 2000), stackHash: error.stack ? createHash("sha256").update(error.stack).digest("hex") : undefined, retryCount: job.attemptsMade },
+      update: { failedAt: new Date(), resolvedAt: null, errorMessage: error.message.slice(0, 2000), stackHash: error.stack ? createHash("sha256").update(error.stack).digest("hex") : undefined, retryCount: job.attemptsMade },
+    });
+  }
+
+  private async assertRoleDelegation(user: AuthPrincipal, entityType: ImportEntityType, rows: ImportRow[]): Promise<void> {
+    if (!["USERS", "STUDENTS", "STAFF"].includes(entityType)) return;
+    const roleCodes = [...new Set(entityType === "STUDENTS" ? ["STUDENT"] : rows.flatMap((row) => (row.role_codes || "").split(/[;,|]/).map((code) => code.trim().toUpperCase()).filter(Boolean)))];
+    const roles = await this.prisma.role.findMany({ where: { code: { in: roleCodes }, isActive: true, OR: [{ collegeId: user.collegeId }, { collegeId: null }] }, include: { permissions: { include: { permission: true } } } });
+    if (!roles.length) return;
+    const actorRank = user.roles.reduce((rank, code) => Math.max(rank, ROLE_RANK[code] ?? 0), 0);
+    const actorPermissions = new Set(user.permissions);
+    if (roles.some((role) => {
+      const requestedRank = ROLE_RANK[role.code];
+      return requestedRank === undefined ? !user.roles.includes("SUPER_ADMIN") : requestedRank > actorRank;
+    })) throw new ForbiddenException("The import assigns a role above your administrative level.");
+    if (roles.some((role) => role.permissions.some((mapping) => !actorPermissions.has(mapping.permission.code)))) throw new ForbiddenException("The import would delegate permissions that you do not hold.");
+  }
+
+  private entityType(value: string): ImportEntityType {
+    const normalized = value?.trim().toUpperCase() as ImportEntityType;
+    if (!IMPORT_ENTITY_TYPES.includes(normalized)) throw new BadRequestException(`entityType must be one of: ${IMPORT_ENTITY_TYPES.join(", ")}.`);
+    return normalized;
+  }
+
+  private previewOptions(entityType: ImportEntityType, raw: PreviewOptionsInput): PreviewOptions {
+    const importMode = this.importMode(raw.importMode);
+    if (!["USERS", "STUDENTS", "STAFF"].includes(entityType) && importMode !== "CREATE_ONLY") {
+      throw new BadRequestException("Update import modes are available only for user imports.");
+    }
+    return {
+      importMode,
+      sheetName: raw.sheetName?.trim() || undefined,
+      columnMapping: this.parseColumnMapping(raw.columnMapping),
+    };
+  }
+
+  private importMode(value?: string): ImportMode {
+    const aliases: Record<string, ImportMode> = {
+      "": "VALIDATE_ONLY",
+      VALIDATE: "VALIDATE_ONLY",
+      VALIDATE_ONLY: "VALIDATE_ONLY",
+      CREATE_NEW_STUDENTS_ONLY: "CREATE_ONLY",
+      CREATE_NEW_USERS_ONLY: "CREATE_ONLY",
+      CREATE_ONLY: "CREATE_ONLY",
+      UPDATE_EXISTING_STUDENTS_ONLY: "UPDATE_ONLY",
+      UPDATE_EXISTING_USERS_ONLY: "UPDATE_ONLY",
+      UPDATE_ONLY: "UPDATE_ONLY",
+      CREATE_AND_UPDATE: "CREATE_AND_UPDATE",
+      CREATE_UPDATE: "CREATE_AND_UPDATE",
+    };
+    const normalizedInput = (value || "VALIDATE_ONLY").trim().toUpperCase().replace(/[\s-]+/g, "_");
+    const normalized = (aliases[normalizedInput] ?? normalizedInput) as ImportMode;
+    if (!IMPORT_MODES.includes(normalized)) {
+      throw new BadRequestException(`importMode must be one of: ${IMPORT_MODES.join(", ")}.`);
+    }
+    return normalized;
+  }
+
+  private parseColumnMapping(value?: string): Record<string, string> | undefined {
+    if (!value?.trim()) return undefined;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      throw new BadRequestException("columnMapping must be a JSON object.");
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new BadRequestException("columnMapping must be a JSON object.");
+    }
+    const entries = Object.entries(parsed as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string")
+      .map(([source, target]) => [source.trim(), target.trim()] as const)
+      .filter(([source, target]) => source && target);
+    if (entries.length > 100) throw new BadRequestException("columnMapping can contain at most 100 mapped columns.");
+    return entries.length ? Object.fromEntries(entries) : undefined;
+  }
+
+  private asColumnMapping(value: unknown): Record<string, string> | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+        .map(([source, target]) => [source, target]),
+    );
+  }
+
+  private assertPermission(user: AuthPrincipal, entityType: ImportEntityType): void { if (!user.permissions.includes(IMPORT_TEMPLATES[entityType].permission)) throw new ForbiddenException("You do not have permission to import this entity type."); }
+  private async findAuthorized(user: AuthPrincipal, id: string, ownerOnly = false) {
+    const job = await this.prisma.importJob.findFirst({ where: { id, collegeId: user.collegeId, ...(!ownerOnly && user.permissions.includes("audit.read") ? {} : { requestedById: user.id }) } });
+    if (!job) throw new NotFoundException("Import job not found.");
+    return job;
+  }
+  private jobView(job: { id: string; entityType: string; importMode?: string; selectedSheetName?: string | null; status: string; totalRows: number; validRows: number; errorRows: number; sourceSha256: string; resultStorageKey: string | null; createdAt: Date; updatedAt: Date }) { return { id: job.id, entityType: job.entityType, importMode: job.importMode ?? "CREATE_ONLY", selectedSheetName: job.selectedSheetName ?? null, status: job.status, totalRows: job.totalRows, validRows: job.validRows, errorRows: job.errorRows, sourceSha256: job.sourceSha256, resultAvailable: Boolean(job.resultStorageKey), createdAt: job.createdAt, updatedAt: job.updatedAt }; }
+  private safePreviewRow(row: ImportRow): ImportRow {
+    const { temporary_password: _temporaryPassword, ...safeRow } = row;
+    return safeRow as ImportRow;
+  }
+  private async credentialWorkbook(rows: CredentialExportRow[]): Promise<Buffer> {
+    const content = [
+      ["AVS Engineering College"],
+      ["Confidential Login Credentials"],
+      ["This file contains temporary passwords. Store it securely and delete it after distribution."],
+      [],
+      ["user_id", "full_name", "role", "login_id", "temporary_password", "first_login_required"],
+      ...rows.map((row) => [row.userId, row.fullName, row.role, row.loginId, row.temporaryPassword, row.firstLoginRequired ? "true" : "false"].map((value) => this.safeSpreadsheetText(String(value)))),
+    ];
+    const workbook = new Workbook();
+    const worksheet = workbook.addWorksheet("Credentials");
+    worksheet.addRows(content);
+    return Buffer.from(await workbook.xlsx.writeBuffer());
+  }
+  private safeSpreadsheetText(value: string): string {
+    return /^[=+\-@]/.test(value) ? `'${value}` : value;
+  }
+  private rowError(error: unknown): string {
+    if (error instanceof BadRequestException) {
+      const response = error.getResponse();
+      return typeof response === "string" ? response : (response as { message?: string | string[] }).message?.toString() ?? "Row validation failed.";
+    }
+    const code = (error as { code?: string }).code;
+    if (code === "P2002") return "A record with the same unique value already exists.";
+    if (code === "P2003") return "A referenced record does not exist or cannot be used.";
+    this.logger.warn({ error: error instanceof Error ? error.message : "Unknown row error" }, "Import row rejected");
+    return "The row could not be imported. Check its values and references.";
+  }
+}

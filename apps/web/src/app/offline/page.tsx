@@ -1,0 +1,2 @@
+import { WifiOff } from "lucide-react";
+export default function OfflinePage() { return <main style={{ minHeight: "100dvh", display: "grid", placeItems: "center", padding: 24, textAlign: "center" }}><section><WifiOff size={48} color="#64748b" style={{ margin: "0 auto 16px" }} /><h1 className="page-title">You’re offline</h1><p className="page-subtitle">Reconnect to confirm saved attendance, messages, or issue reports.</p></section></main>; }

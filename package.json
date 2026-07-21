@@ -1,0 +1,50 @@
+{
+  "name": "college-administration-platform",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Production college administration, attendance, issue reporting and communication platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10"
+  },
+  "overrides": {
+    "lodash": "4.18.1",
+    "postcss": "8.5.19"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w @college/api\" \"npm run dev -w @college/web\"",
+    "dev:api": "npm run dev -w @college/api",
+    "dev:web": "npm run dev -w @college/web",
+    "build": "npm run build -w @college/shared-types && npm run build -w @college/validation && npm run build -w @college/api && npm run build -w @college/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e -w @college/web",
+    "test:all": "npm run prisma:validate && npm run typecheck && npm run lint && npm run test && npm run build",
+    "check": "npm run prisma:validate && npm run typecheck && npm run lint && npm run test && npm run build",
+    "prisma:generate": "npm run prisma:generate -w @college/api",
+    "prisma:validate": "npm run prisma:validate -w @college/api",
+    "prisma:migrate": "npm run prisma:migrate -w @college/api",
+    "prisma:deploy": "npm run prisma:deploy -w @college/api",
+    "env:validate:production": "npm run env:validate:production -w @college/api",
+    "seed": "npm run seed -w @college/api",
+    "cleanup:data": "tsx scripts/cleanup-unnecessary-data.ts",
+    "load:campus": "node scripts/load/campus-concurrency.mjs",
+    "format": "prettier --write \"apps/**/*.{ts,tsx,css,json}\" \"packages/**/*.{ts,json}\" \"*.{md,json,yml}\"",
+    "docker:infra": "docker compose up -d postgres redis minio minio-init",
+    "docker:down": "docker compose down",
+    "security:check": "node scripts/check-sensitive-files.mjs",
+    "audit:production": "npm audit --omit=dev --audit-level=high"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.1",
+    "concurrently": "9.2.1",
+    "eslint": "9.39.5",
+    "prettier": "3.6.2",
+    "typescript": "5.9.3"
+  }
+}

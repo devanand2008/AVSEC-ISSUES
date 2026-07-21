@@ -1,0 +1,5 @@
+ALTER TABLE "import_jobs"
+  ADD COLUMN IF NOT EXISTS "import_mode" VARCHAR(40) NOT NULL DEFAULT 'CREATE_ONLY',
+  ADD COLUMN IF NOT EXISTS "selected_sheet_name" VARCHAR(120),
+  ADD COLUMN IF NOT EXISTS "column_mapping" JSONB;
+

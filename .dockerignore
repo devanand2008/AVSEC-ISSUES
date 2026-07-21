@@ -1,0 +1,104 @@
+# ── Dependencies (installed fresh in each Docker stage) ──
+node_modules
+**/node_modules
+
+# ── Build artifacts (produced inside Docker, not needed from host) ──
+**/dist
+**/.next
+**/coverage
+**/*.tsbuildinfo
+
+# ── Test artifacts ──
+**/playwright-report
+**/test-results
+**/e2e
+
+# ── Environment and secrets (injected via env_file / environment) ──
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+user_data
+import-results
+credential-exports
+failed-imports
+exports
+uploads
+private_uploads
+certs
+mkcert-master/rootCA*
+mkcert-master/*.pem
+mkcert-master/*.key
+mkcert-master/*.crt
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+
+# ── Docker / CI (prevent recursive context) ──
+docker-compose*.yml
+Dockerfile
+**/Dockerfile
+
+# ── Version control and CI ──
+.git
+.github
+.gitignore
+
+# ── Caches ──
+.npm-cache
+**/.cache
+
+# ── IDE and editor ──
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# ── Logs ──
+*.log
+*.err.log
+*.out.log
+
+# ── Root-level legacy files (not part of the NestJS/Next.js app) ──
+Attendance.html
+records.html
+index.html
+vite.config.js
+legacy.package.json
+
+# ── Root-level src and dist (legacy Vite app, not the monorepo apps) ──
+src
+dist
+
+# ── Documentation (not needed in containers) ──
+*.md
+docs
+
+# ── Operational directories ──
+backups
+scripts
+worker management system2
+
+# ── Keep these (explicit re-includes after broad excludes) ──
+!apps/api/prisma/**
+!apps/api/src/**
+!apps/api/package.json
+!apps/api/tsconfig*.json
+!apps/api/nest-cli.json
+!apps/api/prisma.config.ts
+!apps/web/src/**
+!apps/web/public/**
+!apps/web/package.json
+!apps/web/tsconfig*.json
+!apps/web/next.config.ts
+!apps/web/postcss.config.mjs
+!packages/**/src/**
+!packages/**/package.json
+!packages/**/tsconfig*.json
+!package.json
+!package-lock.json
