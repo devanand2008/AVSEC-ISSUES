@@ -26,6 +26,7 @@ const APPROVED_PATH_PREFIXES = [
   "/report-issue",
   "/locations/rooms/qr",
   "/qr/scan",
+  "/scan-qr",
   "/student/feedback/target",
   "/student/feedback/scanner",
   "/attendance",
@@ -512,7 +513,7 @@ export class QrService {
     }
     const roomToken = url.searchParams.get("roomToken");
     if (roomToken && ROOM_TOKEN.test(roomToken)) return { kind: "ROOM", token: roomToken };
-    const genericQueryToken = url.searchParams.get("qrToken");
+    const genericQueryToken = url.searchParams.get("qrToken") ?? url.searchParams.get("token");
     if (genericQueryToken && GENERIC_TOKEN.test(genericQueryToken)) return { kind: "GENERIC", token: genericQueryToken };
     const lastSegment = pathname.split("/").filter(Boolean).pop() ?? "";
     if (ROOM_TOKEN.test(lastSegment)) return { kind: "ROOM", token: lastSegment };
@@ -660,7 +661,7 @@ export class QrService {
   }
 
   private qrScanUrl(token: string): string {
-    return `${this.config.get<string>("WEB_URL", "http://localhost:3000").replace(/\/$/, "")}/qr/scan/${encodeURIComponent(token)}`;
+    return `${this.config.get<string>("WEB_URL", "http://localhost:3000").replace(/\/$/, "")}/scan-qr?token=${encodeURIComponent(token)}`;
   }
 
   private generateToken(): string {
@@ -670,7 +671,11 @@ export class QrService {
   private assertApprovedOrigin(url: URL): void {
     const configured = this.config.get<string>("WEB_URL", "http://localhost:3000");
     const allowed = new Set<string>();
-    for (const candidate of [configured, "http://localhost:3000", "https://localhost:3000"]) {
+    const configuredOrigins = (this.config.get<string>("CORS_ALLOWED_ORIGINS", "") || "")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+    for (const candidate of [configured, ...configuredOrigins, "http://localhost:3000", "https://localhost:3000"]) {
       try {
         const parsed = new URL(candidate);
         allowed.add(parsed.origin);

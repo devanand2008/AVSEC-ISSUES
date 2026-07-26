@@ -3,6 +3,13 @@ import { AdminController } from "./admin.controller";
 import { AdminService } from "./admin.service";
 import { DeliveryModule } from "../delivery/delivery.module";
 import { TemplatesController } from "./top-level-templates.controller";
+import { StorageModule } from "../storage/storage.module";
+import { DataMaintenanceController } from "./data-maintenance.controller";
+import { DataMaintenanceService } from "./data-maintenance.service";
 
-@Module({ imports: [DeliveryModule], controllers: [AdminController, TemplatesController], providers: [AdminService] })
+@Module({
+  imports: [DeliveryModule, StorageModule],
+  controllers: [AdminController, TemplatesController, DataMaintenanceController],
+  providers: [AdminService, DataMaintenanceService],
+})
 export class AdminModule {}

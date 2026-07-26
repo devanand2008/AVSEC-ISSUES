@@ -14,7 +14,7 @@ import {
   Zap,
   ZapOff,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { api, ApiError } from "@/lib/api";
 
@@ -52,6 +52,7 @@ interface CameraGuidance {
 
 export default function ScanQrPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const htmlId = useId().replace(/:/g, "");
   const readerId = `avs-qr-reader-${htmlId}`;
   const scannerRef = useRef<Html5Qrcode | null>(null);
@@ -87,6 +88,15 @@ export default function ScanQrPage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    const token = searchParams.get("token");
+    if (!token) return;
+    void handleDecoded(token, "MANUAL");
+    // handleDecoded intentionally stays outside the dependency list because it
+    // updates scanner state and should run only when the URL token changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   async function start(requestedCameraId?: string) {
     if (cameraBusy) return;

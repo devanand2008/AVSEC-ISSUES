@@ -1,4 +1,4 @@
-export interface User { id: string; fullName: string; email: string | null; status: string; mustChangePassword: boolean; firstLoginCompletedAt?: string | null; roles: string[]; permissions: string[] }
+export interface User { id: string; fullName: string; email: string | null; status: string; mustChangePassword: boolean; firstLoginCompletedAt?: string | null; profileCompletionStatus?: "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED" | "VERIFIED" | "REJECTED"; profileCompletionPercentage?: number; profileRejectionReason?: string | null; allowedNextRoute?: string; roles: string[]; permissions: string[] }
 export interface PageMeta { page: number; pageSize: number; total: number; pageCount: number }
 export interface PageResponse<T> { data: T[]; meta: PageMeta }
 export interface IssueSummary { id: string; issueNumber: string; title: string; status: string; priority: string; affectedUserCount: number; createdAt: string; acknowledgementDueAt: string | null; resolutionDueAt: string | null; room: { name: string; code: string }; category: { name: string }; assignedTo: { publicId: string; fullName: string } | null; team: { id: string; name: string } | null }

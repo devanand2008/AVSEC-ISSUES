@@ -26,10 +26,24 @@ export class ImportsController {
     @Body("sheetName") sheetName: string | undefined,
     @Body("importMode") importMode: string | undefined,
     @Body("columnMapping") columnMapping: string | undefined,
+    @Body("selectedRoleCode") selectedRoleCode: string | undefined,
+    @Body("resetExistingPasswords") resetExistingPasswords: string | undefined,
+    @Body("departmentMappings") departmentMappings: string | undefined,
+    @Body("detectedStudyYear") detectedStudyYear: string | undefined,
+    @Body("duplicateResolution") duplicateResolution: string | undefined,
     @UploadedFile() file: Express.Multer.File | undefined,
     @CurrentRequestId() requestId: string,
   ) {
-    return this.imports.preview(user, entityType, file, requestId, { sheetName, importMode, columnMapping });
+    return this.imports.preview(user, entityType, file, requestId, {
+      sheetName,
+      importMode,
+      columnMapping,
+      selectedRoleCode,
+      resetExistingPasswords,
+      departmentMappings,
+      detectedStudyYear,
+      duplicateResolution,
+    });
   }
 
   @Get()

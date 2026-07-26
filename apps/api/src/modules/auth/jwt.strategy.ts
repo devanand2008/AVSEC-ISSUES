@@ -64,6 +64,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           include: { role: { include: { permissions: { include: { permission: true } } } } },
         },
         scopes: true,
+        studentProfile: { select: { id: true } },
+        staffProfile: { select: { id: true } },
       },
     });
     const session = user?.sessions[0];
@@ -74,6 +76,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const activeRoles = user.roles.filter((mapping) => !mapping.role.collegeId || mapping.role.collegeId === user.collegeId);
     const roles = activeRoles.map((mapping) => mapping.role.code);
     const permissions = [...new Set(activeRoles.flatMap((mapping) => mapping.role.permissions.map((entry) => entry.permission.code)))];
+    const profileCompletionStatus = this.profileCompletionStatus(roles, user);
     const principal: AuthPrincipal = {
       id: user.id,
       publicId: user.publicId,
@@ -82,6 +85,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       email: user.email,
       status: user.status,
       mustChangePassword: user.mustChangePassword,
+      profileCompletionStatus,
+      profileCompletionPercentage: user.profileCompletionPercentage,
+      profileRejectionReason: user.profileRejectionReason,
       firstLoginCompletedAt: user.firstLoginCompletedAt,
       sessionId: session.id,
       roles,
@@ -98,8 +104,43 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       const firstKey = this.cache.keys().next().value;
       if (firstKey) this.cache.delete(firstKey);
     }
-    if (!principal.mustChangePassword) this.cache.set(cacheKey, { principal, expiresAt: Date.now() + CACHE_TTL_MS });
+    if (!principal.mustChangePassword && ["SUBMITTED", "VERIFIED"].includes(principal.profileCompletionStatus ?? "")) {
+      this.cache.set(cacheKey, { principal, expiresAt: Date.now() + CACHE_TTL_MS });
+    }
 
     return principal;
+  }
+
+  private profileCompletionStatus(
+    roles: string[],
+    user: { profileCompletionStatus?: string; studentProfile?: { id: string } | null; staffProfile?: { id: string } | null },
+  ): "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED" | "VERIFIED" | "REJECTED" {
+    if (roles.some((role) => ["SUPER_ADMIN", "MAIN_ADMIN"].includes(role))) {
+      return "VERIFIED";
+    }
+    const needsStudentProfile = roles.includes("STUDENT") || roles.includes("CLASS_REPRESENTATIVE");
+    const staffRoles = new Set([
+      "FACULTY",
+      "HOD",
+      "CLASS_COORDINATOR",
+      "PRINCIPAL",
+      "VICE_PRINCIPAL",
+      "MAINTENANCE_ADMIN",
+      "MAINTENANCE_SUPERVISOR",
+      "MAINTENANCE_STAFF",
+      "ELECTRICIAN",
+      "PLUMBER",
+      "IT_SUPPORT",
+      "LAB_TECHNICIAN",
+      "HOUSEKEEPING",
+      "SECURITY",
+      "OTHER_RESPONSIBLE",
+    ]);
+    const needsStaffProfile = roles.some((role) => staffRoles.has(role));
+    const hasRequiredProfileRows = (!needsStudentProfile || Boolean(user.studentProfile)) && (!needsStaffProfile || Boolean(user.staffProfile));
+    if (["IN_PROGRESS", "VERIFIED", "REJECTED"].includes(user.profileCompletionStatus ?? "")) {
+      return user.profileCompletionStatus as "IN_PROGRESS" | "VERIFIED" | "REJECTED";
+    }
+    return hasRequiredProfileRows ? "SUBMITTED" : "NOT_STARTED";
   }
 }

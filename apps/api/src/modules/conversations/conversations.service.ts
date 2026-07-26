@@ -1,4 +1,7 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional, UnauthorizedException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import * as argon2 from "argon2";
+import { createCipheriv, randomBytes, scrypt } from "node:crypto";
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
 import type { Prisma } from "../../generated/prisma/client";
@@ -24,7 +27,107 @@ export class ConversationsService {
     private readonly realtime: RealtimeGateway,
     private readonly audit: AuditService,
     private readonly officialGroups: OfficialGroupsService,
+    @Optional() private readonly config?: ConfigService,
   ) {}
+
+  async encryptedBackup(user: AuthPrincipal, currentPassword: string, requestId: string) {
+    const credential = await this.prisma.userCredential.findUnique({ where: { userId: user.id }, select: { passwordHash: true } });
+    const pepper = this.config?.get<string>("PASSWORD_PEPPER", "") ?? "";
+    if (!credential || !(await argon2.verify(credential.passwordHash, currentPassword + pepper))) {
+      throw new UnauthorizedException("The current password is incorrect.");
+    }
+    const conversations = await this.prisma.conversation.findMany({
+      where: { collegeId: user.collegeId, participants: { some: { userId: user.id, leftAt: null } } },
+      select: {
+        id: true,
+        type: true,
+        title: true,
+        description: true,
+        createdAt: true,
+        updatedAt: true,
+        participants: {
+          where: { leftAt: null },
+          select: { role: true, joinedAt: true, user: { select: { publicId: true, fullName: true } } },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    const conversationIds = conversations.map((conversation) => conversation.id);
+    const maxMessages = this.config?.get<number>("MESSAGE_BACKUP_MAX_MESSAGES", 100_000) ?? 100_000;
+    const messages = conversationIds.length ? await this.prisma.message.findMany({
+      where: { conversationId: { in: conversationIds }, deletions: { none: { userId: user.id } } },
+      select: {
+        id: true,
+        conversationId: true,
+        replyToId: true,
+        forwardedFromId: true,
+        type: true,
+        status: true,
+        clientId: true,
+        body: true,
+        pinnedAt: true,
+        editedAt: true,
+        deletedAt: true,
+        createdAt: true,
+        sender: { select: { publicId: true, fullName: true } },
+        attachments: {
+          where: { deletedAt: null },
+          select: { id: true, originalName: true, safeName: true, mimeType: true, sizeBytes: true, sha256: true, width: true, height: true, uploadStatus: true, createdAt: true },
+        },
+        readReceipts: { select: { readAt: true, user: { select: { publicId: true } } } },
+        reactions: { select: { emoji: true, createdAt: true, userId: true } },
+        deliveries: { where: { userId: user.id }, select: { status: true, updatedAt: true } },
+      },
+      orderBy: { createdAt: "asc" },
+      take: maxMessages + 1,
+    }) : [];
+    if (messages.length > maxMessages) throw new BadRequestException(`This backup exceeds the configured ${maxMessages} message limit. Ask an administrator to raise the secure export limit.`);
+    const cursors = conversationIds.length ? await this.prisma.messageLocalSyncCursor.findMany({ where: { userId: user.id, conversationId: { in: conversationIds } } }) : [];
+    const plain = Buffer.from(JSON.stringify({
+      format: "AVS_MESSAGE_BACKUP_V1",
+      exportedAt: new Date().toISOString(),
+      ownerPublicId: user.publicId,
+      conversationCount: conversations.length,
+      messageCount: messages.length,
+      conversations,
+      messages: messages.map((message) => ({
+        ...message,
+        attachments: message.attachments.map((attachment) => ({ ...attachment, sizeBytes: attachment.sizeBytes.toString(), serverReference: attachment.id })),
+      })),
+      syncCursors: cursors,
+      restorePolicy: "Drafts and encrypted local cache may be restored locally. Server access is always re-authorized and attachment URLs must be requested again.",
+    }), "utf8");
+    const salt = randomBytes(16);
+    const iv = randomBytes(12);
+    const key = await this.deriveBackupKey(currentPassword, salt);
+    const cipher = createCipheriv("aes-256-gcm", key, iv);
+    const ciphertext = Buffer.concat([cipher.update(plain), cipher.final()]);
+    const envelope = Buffer.from(JSON.stringify({
+      format: "AVS_ENCRYPTED_JSON_V1",
+      algorithm: "AES-256-GCM",
+      kdf: { name: "scrypt", salt: salt.toString("base64"), keyLength: 32 },
+      iv: iv.toString("base64"),
+      authenticationTag: cipher.getAuthTag().toString("base64"),
+      ciphertext: ciphertext.toString("base64"),
+    }), "utf8");
+    key.fill(0);
+    plain.fill(0);
+    await this.audit.record({
+      actorId: user.id,
+      action: "messages.backup_exported",
+      entityType: "User",
+      entityId: user.id,
+      afterValue: { conversationCount: conversations.length, messageCount: messages.length, encrypted: true },
+      requestId,
+    });
+    return { content: envelope, fileName: `avs-message-backup-${new Date().toISOString().slice(0, 10)}.avs.json` };
+  }
+
+  private deriveBackupKey(password: string, salt: Buffer): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      scrypt(password, salt, 32, { N: 16_384, r: 8, p: 1 }, (error, key) => error ? reject(error) : resolve(key as Buffer));
+    });
+  }
 
   async list(user: AuthPrincipal, search = "") {
     const conversations = await this.prisma.conversation.findMany({
@@ -159,7 +262,8 @@ export class ConversationsService {
     if (!conversation || conversation.archivedAt) throw new NotFoundException("Conversation not found.");
     if (conversation.sendRestricted && participant.role === "MEMBER") throw new ForbiddenException("Only group administrators may send messages in this conversation.");
     const body = input.body?.trim() ?? "";
-    if (!body && !input.messageType) throw new BadRequestException("Enter a message or select an attachment.");
+    const attachmentUploadIds = [...new Set(input.attachmentUploadIds ?? [])];
+    if (!body && !attachmentUploadIds.length && !input.forwardedFromId) throw new BadRequestException("Enter a message or select an attachment.");
     if (input.replyToId) await this.requireMessageInConversation(input.replyToId, conversationId, "Reply target");
     let forwardedBody = body;
     if (input.forwardedFromId) {
@@ -167,11 +271,31 @@ export class ConversationsService {
       forwardedBody ||= source.body;
     }
     if (input.clientId) {
-      const existing = await this.prisma.message.findFirst({ where: { senderId: user.id, clientId: input.clientId } });
+      const existing = await this.prisma.message.findFirst({ where: { senderId: user.id, clientId: input.clientId }, include: { sender: { select: { publicId: true, fullName: true } }, attachments: true, readReceipts: true, reactions: true, deliveries: true } });
       if (existing) return existing;
     }
     const message = await this.prisma.$transaction(async (tx) => {
       const recipients = await tx.conversationParticipant.findMany({ where: { conversationId, userId: { not: user.id }, leftAt: null }, select: { userId: true } });
+      const attachmentUploads = attachmentUploadIds.length ? await tx.messageAttachmentUpload.findMany({
+        where: {
+          id: { in: attachmentUploadIds },
+          collegeId: user.collegeId,
+          conversationId,
+          uploadedById: user.id,
+          status: "READY",
+          consumedByMessageId: null,
+          expiresAt: { gt: new Date() },
+        },
+      }) : [];
+      if (attachmentUploads.length !== attachmentUploadIds.length) {
+        throw new BadRequestException("One or more attachments are incomplete, expired or already sent.");
+      }
+      const firstMime = attachmentUploads[0]?.mimeType;
+      const messageType = firstMime?.startsWith("image/") ? "IMAGE"
+        : firstMime?.startsWith("video/") ? "VIDEO"
+          : firstMime?.startsWith("audio/") ? "AUDIO"
+            : attachmentUploads.length ? "DOCUMENT"
+              : input.messageType ?? "TEXT";
       const created = await tx.message.create({
         data: {
           conversationId,
@@ -179,13 +303,31 @@ export class ConversationsService {
           body: forwardedBody,
           replyToId: input.replyToId,
           forwardedFromId: input.forwardedFromId,
-          type: input.messageType ?? "TEXT",
+          type: messageType,
           status: "SENT",
           clientId: input.clientId,
+          attachments: {
+            create: attachmentUploads.map((upload) => ({
+              storageKey: upload.storageKey,
+              originalName: upload.originalName,
+              safeName: upload.safeName,
+              mimeType: upload.mimeType,
+              sizeBytes: upload.sizeBytes,
+              sha256: upload.sha256,
+              thumbnailKey: upload.thumbnailKey,
+              width: upload.width,
+              height: upload.height,
+              uploadedById: user.id,
+              uploadStatus: "SENT",
+            })),
+          },
           deliveries: { create: recipients.map((recipient) => ({ userId: recipient.userId, status: "SENT" })) },
         },
         include: { sender: { select: { publicId: true, fullName: true } }, attachments: true, readReceipts: true, reactions: true, deliveries: true },
       });
+      if (attachmentUploadIds.length) {
+        await tx.messageAttachmentUpload.updateMany({ where: { id: { in: attachmentUploadIds }, consumedByMessageId: null }, data: { status: "CONSUMED", consumedByMessageId: created.id } });
+      }
       await tx.conversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
       if (recipients.length) {
         await tx.notification.create({ data: { type: "NEW_MESSAGE", title: `New message from ${user.fullName}`, body: forwardedBody.slice(0, 180) || "Shared an attachment", relatedEntityType: "Conversation", relatedEntityId: conversationId, recipients: { create: recipients.map((recipient) => ({ userId: recipient.userId })) } } });
@@ -194,6 +336,28 @@ export class ConversationsService {
     });
     this.realtime.messageCreated(conversationId, message);
     return message;
+  }
+
+  async retry(user: AuthPrincipal, messageId: string) {
+    const message = await this.prisma.message.findFirst({
+      where: { id: messageId, senderId: user.id, deletedAt: null, conversation: { participants: { some: { userId: user.id, leftAt: null } } } },
+      include: { attachments: { where: { deletedAt: null } }, deliveries: true },
+    });
+    if (!message) throw new NotFoundException("Message not found.");
+    if (!["FAILED", "RETRYING", "SENT"].includes(message.status)) throw new BadRequestException("This message cannot be retried.");
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.message.update({ where: { id: message.id }, data: { status: "RETRYING" } });
+      await tx.messageDelivery.updateMany({ where: { messageId, status: "FAILED" }, data: { status: "RETRYING", lastError: null } });
+      const sent = await tx.message.update({
+        where: { id: message.id },
+        data: { status: "SENT" },
+        include: { sender: { select: { publicId: true, fullName: true } }, attachments: true, readReceipts: true, reactions: true, deliveries: true },
+      });
+      await tx.messageDelivery.updateMany({ where: { messageId, status: "RETRYING" }, data: { status: "SENT", lastError: null } });
+      return sent;
+    });
+    this.realtime.messageCreated(message.conversationId, updated);
+    return updated;
   }
 
   async markRead(user: AuthPrincipal, conversationId: string) {

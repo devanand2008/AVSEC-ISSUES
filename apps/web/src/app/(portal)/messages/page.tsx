@@ -212,6 +212,7 @@ function MessagesPageInner() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const cameraRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<HTMLDivElement | null>(null);
+  const draftsRef = useRef<Map<string, string>>(new Map());
   const [selected, setSelected] = useState(() => searchParams?.get("id") ?? "");
   const [body, setBody] = useState("");
   const [conversationSearch, setConversationSearch] = useState(() => searchParams?.get("search") ?? "");
@@ -306,7 +307,7 @@ function MessagesPageInner() {
   useEffect(() => {
     if (!activeId) return;
     const timeout = window.setTimeout(
-      () => setBody(localStorage.getItem(`avs-message-draft:${activeId}`) ?? ""),
+      () => setBody(draftsRef.current.get(activeId) ?? ""),
       0,
     );
     return () => window.clearTimeout(timeout);
@@ -314,7 +315,8 @@ function MessagesPageInner() {
 
   useEffect(() => {
     if (!activeId) return;
-    localStorage.setItem(`avs-message-draft:${activeId}`, body);
+    if (body) draftsRef.current.set(activeId, body);
+    else draftsRef.current.delete(activeId);
     socketRef.current?.emit("typing.changed", { conversationId: activeId, typing: Boolean(body.trim()) });
     const timeout = window.setTimeout(() => socketRef.current?.emit("typing.changed", { conversationId: activeId, typing: false }), 1400);
     return () => window.clearTimeout(timeout);
@@ -336,24 +338,29 @@ function MessagesPageInner() {
     mutationFn: async () => {
       const firstType = attachments[0]?.type ?? "";
       const messageType = firstType.startsWith("image/") ? "IMAGE" : firstType.startsWith("video/") ? "VIDEO" : firstType.startsWith("audio/") ? "AUDIO" : attachments.length ? "DOCUMENT" : "TEXT";
-      const message = await api.post<{ id: string }>(`/conversations/${activeId}/messages`, {
-        body: body.trim(), ...(replyTo ? { replyToId: replyTo.id } : {}), messageType, clientId: idempotencyKey(),
-      });
+      const attachmentUploadIds: string[] = [];
       for (const [index, file] of attachments.entries()) {
         setUploadStatus(`Uploading ${index + 1} of ${attachments.length}…`);
-        const signed = await api.post<{ storageKey: string; uploadUrl: string; requiredHeaders: Record<string, string> }>(
-          `/messages/${message.id}/attachments/presign`,
-          { fileName: file.name, mimeType: file.type, sizeBytes: file.size, purpose: "MESSAGE" },
+        const signed = await api.post<{ uploadId: string; storageKey: string; uploadUrl: string; requiredHeaders: Record<string, string> }>(
+          "/messages/attachments",
+          { conversationId: activeId, fileName: file.name, mimeType: file.type, sizeBytes: file.size, purpose: "MESSAGE" },
         );
         await api.upload(resolveRuntimeUrl(signed.uploadUrl), file, signed.requiredHeaders);
-        await api.post(`/messages/${message.id}/attachments/complete`, {
-          fileName: file.name, mimeType: file.type, sizeBytes: file.size, purpose: "MESSAGE", storageKey: signed.storageKey,
+        await api.post(`/messages/attachments/${signed.uploadId}/complete`, {
+          conversationId: activeId, fileName: file.name, mimeType: file.type, sizeBytes: file.size, purpose: "MESSAGE", storageKey: signed.storageKey,
         });
+        attachmentUploadIds.push(signed.uploadId);
       }
-      return message;
+      return api.post<{ id: string }>(`/conversations/${activeId}/messages`, {
+        body: body.trim(),
+        ...(replyTo ? { replyToId: replyTo.id } : {}),
+        messageType,
+        ...(attachmentUploadIds.length ? { attachmentUploadIds } : {}),
+        clientId: idempotencyKey(),
+      });
     },
     onSuccess: () => {
-      localStorage.removeItem(`avs-message-draft:${activeId}`);
+      draftsRef.current.delete(activeId);
       setBody(""); setReplyTo(null); setAttachments([]); setUploadStatus(""); setError(""); refreshMessages();
     },
     onError: (caught) => { setUploadStatus(""); handleError(caught); },
@@ -363,7 +370,7 @@ function MessagesPageInner() {
     mutationFn: (participantPublicId: string) => api.post<Conversation>("/conversations/direct", { participantPublicId }),
     onSuccess: (conversation) => {
       setShowContacts(false); setContactSearch(""); setSelected(conversation.id);
-      setBody(localStorage.getItem(`avs-message-draft:${conversation.id}`) ?? "");
+      setBody(draftsRef.current.get(conversation.id) ?? "");
       void client.invalidateQueries({ queryKey: ["conversations"] });
     },
     onError: handleError,
@@ -501,7 +508,7 @@ function MessagesPageInner() {
                   aria-selected={isActive}
                   onClick={() => {
                     setSelected(item.id);
-                    setBody(localStorage.getItem(`avs-message-draft:${item.id}`) ?? "");
+                    setBody(draftsRef.current.get(item.id) ?? "");
                   }}
                 >
                   <Avatar name={label} size={46} online={peerIsOnline} />

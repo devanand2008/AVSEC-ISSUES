@@ -21,7 +21,7 @@ interface PasswordCheck {
 
 function passwordChecks(currentPassword: string, newPassword: string): PasswordCheck[] {
   return [
-    { label: "At least 12 characters", ok: newPassword.length >= 12 },
+    { label: "At least 10 characters", ok: newPassword.length >= 10 },
     { label: "Uppercase letter", ok: /[A-Z]/.test(newPassword) },
     { label: "Lowercase letter", ok: /[a-z]/.test(newPassword) },
     { label: "Number", ok: /\d/.test(newPassword) },
@@ -146,7 +146,7 @@ export default function ChangePasswordPage() {
         // 5. Navigate away. router.replace is synchronous in Next.js App
         //    Router and does not cause a page reload, so BFCache is not
         //    involved here.
-        router.replace("/");
+        router.replace(result.user.allowedNextRoute ?? "/");
       } catch (caught) {
         setError(
           caught instanceof ApiError
@@ -238,7 +238,7 @@ export default function ChangePasswordPage() {
               onVisibleChange={() => setShowNew((v) => !v)}
               onChange={setNew}
               autoComplete="new-password"
-              minLength={12}
+              minLength={10}
               disabled={busyDisplay || saved}
             />
 

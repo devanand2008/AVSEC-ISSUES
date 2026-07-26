@@ -55,6 +55,7 @@ export const environmentSchema = z
       .default("api/v1")
       .transform((value) => value.replace(/^\/+|\/+$/g, "")),
     WEB_URL: z.url().default("http://localhost:3000"),
+    CORS_ALLOWED_ORIGINS: optionalString,
     TRUST_PROXY: trustProxy,
     GLOBAL_RATE_LIMIT_TTL_MS: z.coerce
       .number()
@@ -136,6 +137,10 @@ export const environmentSchema = z
       .min(1)
       .default("AVS Engineering College"),
     EMAIL_FROM_ADDRESS: optionalString,
+    OFFICIAL_EMAIL_DOMAINS: z
+      .string()
+      .trim()
+      .default("avsenggcollege.ac.in"),
     FIREBASE_PROJECT_ID: optionalString,
     FIREBASE_CLIENT_EMAIL: optionalString,
     FIREBASE_PRIVATE_KEY: optionalString,

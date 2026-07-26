@@ -1,6 +1,6 @@
 const CACHE_PREFIX = "college-shell-";
-const CACHE = `${CACHE_PREFIX}v3`;
-const SHELL = ["/offline", "/manifest.webmanifest", "/icons/icon-192.svg", "/icons/icon-512.svg"];
+const CACHE = `${CACHE_PREFIX}v4`;
+const SHELL = ["/offline", "/manifest.webmanifest", "/icons/avs-icon-192.png", "/icons/avs-icon-512.png"];
 
 function isCacheablePublicAsset(url) {
   return url.pathname.startsWith("/_next/static/")

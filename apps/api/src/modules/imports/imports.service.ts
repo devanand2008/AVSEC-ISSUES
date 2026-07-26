@@ -16,13 +16,30 @@ interface PreviewOptionsInput {
   sheetName?: string;
   importMode?: string;
   columnMapping?: string;
+  selectedRoleCode?: string;
+  resetExistingPasswords?: string;
+  departmentMappings?: string;
+  detectedStudyYear?: string;
+  duplicateResolution?: string;
 }
 
 interface PreviewOptions {
   sheetName?: string;
   importMode: ImportMode;
   columnMapping?: Record<string, string>;
+  selectedRoleCode?: string;
+  resetExistingPasswords: boolean;
+  departmentMappings?: Record<string, string>;
+  detectedStudyYear?: "2" | "3";
+  duplicateResolution: "KEEP_FIRST" | "SKIP_ALL";
 }
+
+const SELECTED_IMPORT_ROLE_KEY = "__selected_import_role";
+const RESET_EXISTING_PASSWORDS_KEY = "__reset_existing_passwords";
+const DETECTED_STUDY_YEAR_KEY = "__detected_study_year";
+const DUPLICATE_RESOLUTION_KEY = "__duplicate_resolution";
+const DEPARTMENT_MAPPING_PREFIX = "__department_mapping:";
+const DEPARTMENT_ALIAS_SETTING_KEY = "imports.department_aliases";
 
 const ROLE_RANK: Record<string, number> = {
   SUPER_ADMIN: 100, MAIN_ADMIN: 90, PRINCIPAL: 80, VICE_PRINCIPAL: 75, HOD: 70, MAINTENANCE_ADMIN: 70,
@@ -82,19 +99,56 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     this.assertPermission(user, entityType);
     this.files.validateFile(file);
     const options = this.previewOptions(entityType, rawOptions);
-    const parsed = await this.files.parse(file, entityType, { sheetName: options.sheetName, columnMapping: options.columnMapping });
+    const departmentContext = await this.departmentImportContext(
+      user.collegeId,
+      options.departmentMappings,
+    );
+    const parsed = await this.files.parse(file, entityType, {
+      sheetName: options.sheetName,
+      columnMapping: options.columnMapping,
+      departmentMappings: departmentContext.mappings,
+      duplicateResolution: options.duplicateResolution,
+      forcedStudyYear: options.detectedStudyYear,
+      officialEmailDomains: await this.officialEmailDomains(user.collegeId),
+    });
+    this.applySelectedRole(entityType, parsed.rows, options.selectedRoleCode);
     await this.assertRoleDelegation(user, entityType, parsed.rows);
     const databaseErrors = await this.handler.validate(entityType, user.collegeId, parsed.rows, options.importMode);
     const source = await this.files.saveSource(user.collegeId, entityType, file);
     const allErrors = [...parsed.errors, ...databaseErrors];
     const invalidRows = new Set(allErrors.map((error) => error.rowNumber));
+    let persistedColumnMapping = options.selectedRoleCode
+      ? { ...(options.columnMapping ?? {}), [SELECTED_IMPORT_ROLE_KEY]: options.selectedRoleCode }
+      : options.columnMapping;
+    persistedColumnMapping = {
+      ...(persistedColumnMapping ?? {}),
+      ...Object.fromEntries(
+        Object.entries(departmentContext.mappings).map(([source, target]) => [
+          `${DEPARTMENT_MAPPING_PREFIX}${source}`,
+          target,
+        ]),
+      ),
+      ...(parsed.detectedStudyYear
+        ? { [DETECTED_STUDY_YEAR_KEY]: parsed.detectedStudyYear }
+        : {}),
+      [DUPLICATE_RESOLUTION_KEY]: options.duplicateResolution,
+    };
+    const persistedOptions = options.resetExistingPasswords
+      ? { ...(persistedColumnMapping ?? {}), [RESET_EXISTING_PASSWORDS_KEY]: "true" }
+      : persistedColumnMapping;
+    if (Object.keys(departmentContext.explicitMappings).length)
+      await this.saveDepartmentMappings(
+        user.collegeId,
+        user.id,
+        departmentContext.explicitMappings,
+      );
     const importJob = await this.prisma.importJob.create({ data: {
       collegeId: user.collegeId,
       requestedById: user.id,
       entityType,
       importMode: options.importMode,
       selectedSheetName: parsed.selectedSheetName,
-      columnMapping: options.columnMapping,
+      columnMapping: persistedOptions,
       sourceStorageKey: source.key,
       sourceSha256: source.sha256,
       status: "READY",
@@ -102,6 +156,9 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
       validRows: parsed.rows.length - invalidRows.size,
       errorRows: invalidRows.size,
     } });
+    if (options.importMode === "VALIDATE_ONLY") {
+      await this.deleteSourceQuietly(source.key);
+    }
     await this.audit.record({ actorId: user.id, action: "import.previewed", entityType: "ImportJob", entityId: importJob.id, afterValue: { importedEntity: entityType, importMode: options.importMode, selectedSheetName: parsed.selectedSheetName, totalRows: parsed.rows.length, validRows: parsed.rows.length - invalidRows.size, errorRows: invalidRows.size, sourceSha256: source.sha256 }, requestId });
     return {
       job: this.jobView(importJob),
@@ -110,6 +167,12 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
       columnMapping: parsed.columnMapping,
       sheetNames: parsed.sheetNames,
       selectedSheetName: parsed.selectedSheetName,
+      sheetInspections: parsed.sheetInspections,
+      detectedStudyYear: parsed.detectedStudyYear,
+      passwordWarnings: parsed.passwordWarnings,
+      duplicateGroups: parsed.duplicateGroups,
+      duplicateResolution: options.duplicateResolution,
+      departmentOptions: departmentContext.departments,
       previewRows: parsed.rows.slice(0, 25).map((row, index) => ({
         rowNumber: index + 2,
         values: this.safePreviewRow(row),
@@ -206,44 +269,71 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
   private async process(queueJob: Job<ImportQueueData, void, string>): Promise<void> {
     const importJob = await this.prisma.importJob.findUnique({ where: { id: queueJob.data.jobId } });
     if (!importJob || !["QUEUED", "PROCESSING"].includes(importJob.status)) return;
-    const entityType = this.entityType(importJob.entityType);
-    await this.prisma.importJob.update({ where: { id: importJob.id }, data: { status: "PROCESSING", validRows: 0, errorRows: 0 } });
-    const buffer = await this.files.loadSource(importJob.sourceStorageKey);
-    if (createHash("sha256").update(buffer).digest("hex") !== importJob.sourceSha256) throw new Error("Stored import source failed its integrity check.");
-    const extension = extname(importJob.sourceStorageKey);
-    const file = { buffer, originalname: `source${extension}`, size: buffer.length } as Express.Multer.File;
-    const importMode = this.importMode(importJob.importMode);
-    const parsed = await this.files.parse(file, entityType, { sheetName: importJob.selectedSheetName ?? undefined, columnMapping: this.asColumnMapping(importJob.columnMapping) });
-    const databaseErrors = await this.handler.validate(entityType, importJob.collegeId, parsed.rows, importMode);
-    const invalidRows = new Set([...parsed.errors, ...databaseErrors].map((error) => error.rowNumber));
-    const errors: ImportRowError[] = [...parsed.errors, ...databaseErrors];
-    const successful: ImportedRecord[] = [];
-    const credentials: CredentialExportRow[] = [];
-    for (let index = 0; index < parsed.rows.length; index += 1) {
-      const rowNumber = index + 2;
-      if (!invalidRows.has(rowNumber)) {
-        try {
-          const row = parsed.rows[index];
-          if (!row) continue;
-          const record = await this.handler.create(entityType, importJob.collegeId, row, rowNumber, importJob.id, importJob.requestedById, importMode);
-          const { credential, ...publicRecord } = record;
-          successful.push(publicRecord);
-          if (credential) credentials.push(credential);
-        } catch (error) {
-          errors.push({ rowNumber, message: this.rowError(error) });
+    try {
+      const entityType = this.entityType(importJob.entityType);
+      await this.prisma.importJob.update({ where: { id: importJob.id }, data: { status: "PROCESSING", validRows: 0, errorRows: 0 } });
+      const buffer = await this.files.loadSource(importJob.sourceStorageKey);
+      if (createHash("sha256").update(buffer).digest("hex") !== importJob.sourceSha256) throw new Error("Stored import source failed its integrity check.");
+      const extension = extname(importJob.sourceStorageKey);
+      const file = { buffer, originalname: `source${extension}`, size: buffer.length } as Express.Multer.File;
+      const importMode = this.importMode(importJob.importMode);
+      const parsed = await this.files.parse(file, entityType, {
+        sheetName: importJob.selectedSheetName ?? undefined,
+        columnMapping: this.asColumnMapping(importJob.columnMapping),
+        departmentMappings: this.departmentMappingsFromColumnMapping(
+          importJob.columnMapping,
+        ),
+        duplicateResolution: this.duplicateResolutionFromColumnMapping(
+          importJob.columnMapping,
+        ),
+        forcedStudyYear: this.studyYearFromColumnMapping(
+          importJob.columnMapping,
+        ),
+        officialEmailDomains: await this.officialEmailDomains(importJob.collegeId),
+      });
+      this.applySelectedRole(entityType, parsed.rows, this.selectedRoleFromColumnMapping(importJob.columnMapping));
+      const resetExistingPasswords = this.resetExistingPasswordsFromColumnMapping(importJob.columnMapping);
+      const databaseErrors = await this.handler.validate(entityType, importJob.collegeId, parsed.rows, importMode);
+      const invalidRows = new Set([...parsed.errors, ...databaseErrors].map((error) => error.rowNumber));
+      const errors: ImportRowError[] = [...parsed.errors, ...databaseErrors];
+      const successful: ImportedRecord[] = [];
+      const credentials: CredentialExportRow[] = [];
+      for (let index = 0; index < parsed.rows.length; index += 1) {
+        const rowNumber = index + 2;
+        if (!invalidRows.has(rowNumber)) {
+          try {
+            const row = parsed.rows[index];
+            if (!row) continue;
+            const record = await this.handler.create(entityType, importJob.collegeId, row, rowNumber, importJob.id, importJob.requestedById, importMode, { resetExistingPasswords });
+            const { credential, ...publicRecord } = record;
+            successful.push(publicRecord);
+            if (credential) credentials.push(credential);
+          } catch (error) {
+            errors.push({ rowNumber, message: this.rowError(error) });
+          }
+        }
+        if ((index + 1) % 10 === 0 || index === parsed.rows.length - 1) {
+          await this.prisma.importJob.update({ where: { id: importJob.id }, data: { validRows: successful.length, errorRows: new Set(errors.map((error) => error.rowNumber)).size } });
+          await queueJob.updateProgress(Math.round(((index + 1) / parsed.rows.length) * 100));
         }
       }
-      if ((index + 1) % 10 === 0 || index === parsed.rows.length - 1) {
-        await this.prisma.importJob.update({ where: { id: importJob.id }, data: { validRows: successful.length, errorRows: new Set(errors.map((error) => error.rowNumber)).size } });
-        await queueJob.updateProgress(Math.round(((index + 1) / parsed.rows.length) * 100));
-      }
+      const report: ImportResultReport = { jobId: importJob.id, entityType, importMode, completedAt: new Date().toISOString(), successful, errors, ...(credentials.length ? { credentials } : {}) };
+      const resultStorageKey = await this.files.saveReport(importJob.collegeId, report);
+      await this.prisma.$transaction(async (tx) => {
+        await tx.importJob.update({ where: { id: importJob.id }, data: { status: "COMPLETED", validRows: successful.length, errorRows: new Set(errors.map((error) => error.rowNumber)).size, resultStorageKey } });
+        await this.audit.record({ actorId: importJob.requestedById, action: "import.completed", entityType: "ImportJob", entityId: importJob.id, afterValue: { importedEntity: entityType, successfulRows: successful.length, errorRows: new Set(errors.map((error) => error.rowNumber)).size }, requestId: `import-job:${importJob.id}` }, tx);
+      });
+    } finally {
+      await this.deleteSourceQuietly(importJob.sourceStorageKey);
     }
-    const report: ImportResultReport = { jobId: importJob.id, entityType, importMode, completedAt: new Date().toISOString(), successful, errors, ...(credentials.length ? { credentials } : {}) };
-    const resultStorageKey = await this.files.saveReport(importJob.collegeId, report);
-    await this.prisma.$transaction(async (tx) => {
-      await tx.importJob.update({ where: { id: importJob.id }, data: { status: "COMPLETED", validRows: successful.length, errorRows: new Set(errors.map((error) => error.rowNumber)).size, resultStorageKey } });
-      await this.audit.record({ actorId: importJob.requestedById, action: "import.completed", entityType: "ImportJob", entityId: importJob.id, afterValue: { importedEntity: entityType, successfulRows: successful.length, errorRows: new Set(errors.map((error) => error.rowNumber)).size }, requestId: `import-job:${importJob.id}` }, tx);
-    });
+  }
+
+  private async deleteSourceQuietly(key: string): Promise<void> {
+    try {
+      await this.files.deleteSource(key);
+    } catch (error) {
+      this.logger.warn({ key, error: error instanceof Error ? error.message : "Unknown source cleanup error" }, "Temporary import source cleanup failed");
+    }
   }
 
   private async recordFailure(job: Job<ImportQueueData, void, string>, error: Error): Promise<void> {
@@ -281,11 +371,55 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     if (!["USERS", "STUDENTS", "STAFF"].includes(entityType) && importMode !== "CREATE_ONLY") {
       throw new BadRequestException("Update import modes are available only for user imports.");
     }
+    const selectedRoleCode = this.selectedRoleCode(entityType, raw.selectedRoleCode);
     return {
       importMode,
       sheetName: raw.sheetName?.trim() || undefined,
       columnMapping: this.parseColumnMapping(raw.columnMapping),
+      selectedRoleCode,
+      resetExistingPasswords: this.booleanOption(raw.resetExistingPasswords),
+      departmentMappings: this.parseDepartmentMappings(
+        raw.departmentMappings,
+      ),
+      detectedStudyYear: this.studyYearOption(raw.detectedStudyYear),
+      duplicateResolution: this.duplicateResolution(
+        raw.duplicateResolution,
+      ),
     };
+  }
+
+  private selectedRoleCode(entityType: ImportEntityType, value?: string): string | undefined {
+    if (entityType === "STUDENTS") return "STUDENT";
+    if (entityType !== "USERS" && entityType !== "STAFF") return undefined;
+    const normalized = (value || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+    if (!normalized) return undefined;
+    const aliases: Record<string, string> = {
+      STUDENT: "STUDENT",
+      FACULTY: "FACULTY",
+      HOD: "HOD",
+      CLASS_COORDINATOR: "CLASS_COORDINATOR",
+      PRINCIPAL: "PRINCIPAL",
+      VICE_PRINCIPAL: "VICE_PRINCIPAL",
+      CLASS_REPRESENTATIVE: "CLASS_REPRESENTATIVE",
+      MAINTENANCE_ADMIN: "MAINTENANCE_ADMIN",
+      MAINTENANCE_SUPERVISOR: "MAINTENANCE_SUPERVISOR",
+      ELECTRICIAN: "ELECTRICIAN",
+      PLUMBER: "PLUMBER",
+      IT_SUPPORT: "IT_SUPPORT",
+      LABORATORY_TECHNICIAN: "LAB_TECHNICIAN",
+      LAB_TECHNICIAN: "LAB_TECHNICIAN",
+      HOUSEKEEPING: "HOUSEKEEPING",
+      HOUSEKEEPING_STAFF: "HOUSEKEEPING",
+      SECURITY: "SECURITY",
+      SECURITY_STAFF: "SECURITY",
+      GENERAL_MAINTENANCE_STAFF: "MAINTENANCE_STAFF",
+      MAINTENANCE_STAFF: "MAINTENANCE_STAFF",
+      OTHER_STAFF: "OTHER_RESPONSIBLE",
+    };
+    const roleCode = aliases[normalized] ?? normalized;
+    if (entityType === "STAFF" && roleCode === "STUDENT") throw new BadRequestException("Staff imports cannot assign the Student role.");
+    if (!ROLE_RANK[roleCode]) throw new BadRequestException("Import User Type is not recognized.");
+    return roleCode;
   }
 
   private importMode(value?: string): ImportMode {
@@ -329,13 +463,293 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     return entries.length ? Object.fromEntries(entries) : undefined;
   }
 
+  private parseDepartmentMappings(
+    value?: string,
+  ): Record<string, string> | undefined {
+    if (!value?.trim()) return undefined;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      throw new BadRequestException(
+        "departmentMappings must be a JSON object.",
+      );
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      throw new BadRequestException(
+        "departmentMappings must be a JSON object.",
+      );
+    const entries = Object.entries(parsed as Record<string, unknown>)
+      .filter(
+        (entry): entry is [string, string] =>
+          typeof entry[0] === "string" && typeof entry[1] === "string",
+      )
+      .map(([source, target]) => [source.trim(), target.trim()] as const)
+      .filter(([source, target]) => source && target);
+    if (entries.length > 50)
+      throw new BadRequestException(
+        "departmentMappings can contain at most 50 departments.",
+      );
+    return entries.length ? Object.fromEntries(entries) : undefined;
+  }
+
+  private studyYearOption(value?: string): "2" | "3" | undefined {
+    const normalized = (value || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+    if (!normalized) return undefined;
+    if (["2", "2ND", "2RD", "SECOND", "SECOND_YEAR"].includes(normalized))
+      return "2";
+    if (["3", "3RD", "THIRD", "THIRD_YEAR"].includes(normalized))
+      return "3";
+    throw new BadRequestException(
+      "detectedStudyYear must be Second Year or Third Year.",
+    );
+  }
+
+  private duplicateResolution(
+    value?: string,
+  ): "KEEP_FIRST" | "SKIP_ALL" {
+    const normalized = (value || "KEEP_FIRST").trim().toUpperCase();
+    if (normalized === "KEEP_FIRST" || normalized === "SKIP_ALL")
+      return normalized;
+    throw new BadRequestException(
+      "duplicateResolution must be KEEP_FIRST or SKIP_ALL.",
+    );
+  }
+
   private asColumnMapping(value: unknown): Record<string, string> | undefined {
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
+        .filter(([source]) => !source.startsWith("__"))
         .filter((entry): entry is [string, string] => typeof entry[1] === "string")
         .map(([source, target]) => [source, target]),
     );
+  }
+
+  private departmentMappingsFromColumnMapping(
+    value: unknown,
+  ): Record<string, string> | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return undefined;
+    const mappings = Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(
+          (entry): entry is [string, string] =>
+            entry[0].startsWith(DEPARTMENT_MAPPING_PREFIX) &&
+            typeof entry[1] === "string",
+        )
+        .map(([source, target]) => [
+          source.slice(DEPARTMENT_MAPPING_PREFIX.length),
+          target,
+        ]),
+    );
+    return Object.keys(mappings).length ? mappings : undefined;
+  }
+
+  private studyYearFromColumnMapping(
+    value: unknown,
+  ): "2" | "3" | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return undefined;
+    const year = (value as Record<string, unknown>)[DETECTED_STUDY_YEAR_KEY];
+    return year === "2" || year === "3" ? year : undefined;
+  }
+
+  private duplicateResolutionFromColumnMapping(
+    value: unknown,
+  ): "KEEP_FIRST" | "SKIP_ALL" {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return "KEEP_FIRST";
+    return (value as Record<string, unknown>)[DUPLICATE_RESOLUTION_KEY] ===
+      "SKIP_ALL"
+      ? "SKIP_ALL"
+      : "KEEP_FIRST";
+  }
+
+  private selectedRoleFromColumnMapping(value: unknown): string | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const roleCode = (value as Record<string, unknown>)[SELECTED_IMPORT_ROLE_KEY];
+    return typeof roleCode === "string" ? roleCode : undefined;
+  }
+
+  private resetExistingPasswordsFromColumnMapping(value: unknown): boolean {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    return (value as Record<string, unknown>)[RESET_EXISTING_PASSWORDS_KEY] === "true";
+  }
+
+  private applySelectedRole(entityType: ImportEntityType, rows: ImportRow[], selectedRoleCode?: string): void {
+    if (!["USERS", "STUDENTS", "STAFF"].includes(entityType)) return;
+    const roleCode = selectedRoleCode || (entityType === "STUDENTS" ? "STUDENT" : undefined);
+    if (!roleCode) return;
+    rows.forEach((row) => {
+      row.role_codes = roleCode;
+    });
+  }
+  private booleanOption(value?: string): boolean {
+    return ["true", "yes", "1", "on"].includes((value || "").trim().toLowerCase());
+  }
+
+  private async departmentImportContext(
+    collegeId: string,
+    requestedMappings?: Record<string, string>,
+  ): Promise<{
+    mappings: Record<string, string>;
+    explicitMappings: Record<string, string>;
+    departments: Array<{
+      id: string;
+      code: string;
+      name: string;
+      shortName: string | null;
+    }>;
+  }> {
+    const departments = await this.prisma.department.findMany({
+      where: { collegeId, isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      select: { id: true, code: true, name: true, shortName: true },
+    });
+    const setting = await this.prisma.appSetting.findUnique({
+      where: {
+        collegeId_key: { collegeId, key: DEPARTMENT_ALIAS_SETTING_KEY },
+      },
+      select: { value: true },
+    });
+    const stored =
+      setting?.value &&
+      typeof setting.value === "object" &&
+      !Array.isArray(setting.value)
+        ? (setting.value as Record<string, unknown>)
+        : {};
+    const mappings: Record<string, string> = {};
+    const explicitMappings: Record<string, string> = {};
+    const builtInTargets: Record<string, string[]> = {
+      CIVIL: ["CIVIL", "CE", "Civil Engineering"],
+      CSE: ["CSE", "Computer Science and Engineering"],
+      EEE: ["EEE", "Electrical and Electronics Engineering"],
+      ECE: ["ECE", "Electronics and Communication Engineering"],
+      MECH: ["MECH", "ME", "Mechanical Engineering"],
+      BME: ["BME", "Biomedical Engineering"],
+      IT: ["IT", "Information Technology"],
+      AID_S: [
+        "AI&DS",
+        "AIDS",
+        "Artificial Intelligence and Data Science",
+      ],
+      AIML: [
+        "AIML",
+        "CSE(AI&ML)",
+        "CSE-AIML",
+        "Computer Science and Engineering AI and ML",
+      ],
+    };
+
+    for (const [source, targets] of Object.entries(builtInTargets)) {
+      const department = this.matchImportDepartment(departments, targets);
+      if (department) mappings[source] = department.code;
+    }
+    for (const [source, rawTarget] of Object.entries(stored)) {
+      if (typeof rawTarget !== "string") continue;
+      const department = this.matchImportDepartment(departments, [rawTarget]);
+      if (department) mappings[source] = department.code;
+    }
+    for (const [source, rawTarget] of Object.entries(
+      requestedMappings ?? {},
+    )) {
+      const department = this.matchImportDepartment(departments, [rawTarget]);
+      if (!department)
+        throw new BadRequestException(
+          `Department mapping for ${source} must select an active existing department.`,
+        );
+      mappings[source] = department.code;
+      explicitMappings[source] = department.code;
+    }
+    return { mappings, explicitMappings, departments };
+  }
+
+  private matchImportDepartment(
+    departments: Array<{
+      id: string;
+      code: string;
+      name: string;
+      shortName: string | null;
+    }>,
+    values: string[],
+  ) {
+    const ids = new Set(values.map((value) => value.trim()));
+    const tokens = new Set(
+      values.map((value) => this.departmentToken(value)),
+    );
+    return departments.find(
+      (department) =>
+        ids.has(department.id) ||
+        tokens.has(this.departmentToken(department.code)) ||
+        tokens.has(this.departmentToken(department.name)) ||
+        Boolean(
+          department.shortName &&
+            tokens.has(this.departmentToken(department.shortName)),
+        ),
+    );
+  }
+
+  private departmentToken(value: string): string {
+    return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+
+  private async saveDepartmentMappings(
+    collegeId: string,
+    updatedById: string,
+    mappings: Record<string, string>,
+  ): Promise<void> {
+    const current = await this.prisma.appSetting.findUnique({
+      where: {
+        collegeId_key: { collegeId, key: DEPARTMENT_ALIAS_SETTING_KEY },
+      },
+      select: { value: true },
+    });
+    const existingValue =
+      current?.value &&
+      typeof current.value === "object" &&
+      !Array.isArray(current.value)
+        ? (current.value as Record<string, unknown>)
+        : {};
+    const existing = Object.fromEntries(
+      Object.entries(existingValue).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+    await this.prisma.appSetting.upsert({
+      where: {
+        collegeId_key: { collegeId, key: DEPARTMENT_ALIAS_SETTING_KEY },
+      },
+      create: {
+        collegeId,
+        key: DEPARTMENT_ALIAS_SETTING_KEY,
+        value: { ...existing, ...mappings },
+        updatedById,
+      },
+      update: {
+        value: { ...existing, ...mappings },
+        updatedById,
+        version: { increment: 1 },
+      },
+    });
+  }
+
+  private async officialEmailDomains(collegeId: string): Promise<string[] | undefined> {
+    const setting = await this.prisma.appSetting.findUnique({
+      where: { collegeId_key: { collegeId, key: "security.official_email_domains" } },
+      select: { value: true },
+    });
+    const value = setting?.value;
+    const domains = Array.isArray(value)
+      ? value
+      : value && typeof value === "object" && "domains" in value && Array.isArray((value as { domains?: unknown }).domains)
+        ? (value as { domains: unknown[] }).domains
+        : undefined;
+    if (!domains) return undefined;
+    return domains
+      .filter((domain): domain is string => typeof domain === "string")
+      .map((domain) => domain.trim().toLowerCase().replace(/^@/, ""))
+      .filter((domain) => /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(domain));
   }
 
   private assertPermission(user: AuthPrincipal, entityType: ImportEntityType): void { if (!user.permissions.includes(IMPORT_TEMPLATES[entityType].permission)) throw new ForbiddenException("You do not have permission to import this entity type."); }
@@ -374,6 +788,9 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     const code = (error as { code?: string }).code;
     if (code === "P2002") return "A record with the same unique value already exists.";
     if (code === "P2003") return "A referenced record does not exist or cannot be used.";
+    if (this.config.get<string>("NODE_ENV", "development") !== "production" && error instanceof Error) {
+      return error.message.slice(0, 500);
+    }
     this.logger.warn({ error: error instanceof Error ? error.message : "Unknown row error" }, "Import row rejected");
     return "The row could not be imported. Check its values and references.";
   }

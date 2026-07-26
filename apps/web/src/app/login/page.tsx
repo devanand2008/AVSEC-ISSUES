@@ -72,7 +72,7 @@ export default function LoginPage() {
           JSON.stringify({ identifier, collegeCode }),
         );
       else window.localStorage.removeItem("avs_login_hint");
-      router.push(user.mustChangePassword ? "/change-password" : "/");
+      router.push(user.allowedNextRoute ?? (user.mustChangePassword ? "/change-password" : "/"));
     } catch (caught) {
       setError(
         caught instanceof ApiError
@@ -190,7 +190,6 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  minLength={8}
                 />
                 <button
                   type="button"

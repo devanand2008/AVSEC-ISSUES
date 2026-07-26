@@ -8,6 +8,9 @@ export interface AuthPrincipal {
   email: string | null;
   status: string;
   mustChangePassword: boolean;
+  profileCompletionStatus?: "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED" | "VERIFIED" | "REJECTED";
+  profileCompletionPercentage?: number;
+  profileRejectionReason?: string | null;
   firstLoginCompletedAt?: Date | null;
   sessionId: string;
   roles: string[];

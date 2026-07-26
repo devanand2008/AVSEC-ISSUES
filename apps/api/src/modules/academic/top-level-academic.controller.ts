@@ -12,6 +12,7 @@ import {
   CreateSectionDto,
   UpdateSectionDto,
   ArchiveDepartmentDto,
+  AssignSectionStudentDto,
 } from "./dto/academic.dto";
 
 @ApiTags("departments")
@@ -60,6 +61,12 @@ export class DepartmentsController {
   @Post(":id/restore")
   restore(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
     return this.academic.restoreDepartment(user, id, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Post(":id/students")
+  assignStudent(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: AssignSectionStudentDto, @CurrentRequestId() requestId: string) {
+    return this.academic.assignStudent(user, id, input, requestId);
   }
 }
 

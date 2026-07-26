@@ -5,9 +5,9 @@ import { randomInt } from "node:crypto";
 import { AuditService } from "../audit/audit.service";
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
-import { AccountStatus } from "../../generated/prisma/enums";
+import { AccountStatus, ProfileCompletionStatus, ScopeType } from "../../generated/prisma/enums";
 import type { Prisma } from "../../generated/prisma/client";
-import type { AssignUserRoleDto, CreateMaintenanceStaffDto, CreateRoleDto, CreateUserDto, RemoveUserRoleDto, ResetUserPasswordDto, UpdateRoleDto, UpdateUserAccessDto, UpdateUserStatusDto, UserScopeDto } from "./dto/user.dto";
+import type { AssignUserRoleDto, CreateMaintenanceStaffDto, CreateRoleDto, CreateUserDto, DeleteUserDto, RemoveUserRoleDto, ResetUserPasswordDto, UpdateRoleDto, UpdateUserAccessDto, UpdateUserStatusDto, UserScopeDto } from "./dto/user.dto";
 import { OfficialGroupsService } from "../conversations/official-groups.service";
 
 const ROLE_RANK: Record<string, number> = {
@@ -39,22 +39,291 @@ const ROLES_REQUIRING_COLLEGE_SCOPE = new Set(["SUPER_ADMIN", "MAIN_ADMIN", "PRI
 export class UsersService {
   constructor(private readonly prisma: PrismaService, private readonly config: ConfigService, private readonly audit: AuditService, private readonly officialGroups: OfficialGroupsService) {}
 
-  async list(user: AuthPrincipal, page: number, pageSize: number, search?: string, filters: { role?: string; status?: string; firstLogin?: string } = {}) {
+  async profileRequirements(user: AuthPrincipal) {
+    const role = this.primaryProfileRole(user.roles);
+    const primaryRole = user.roles[0] ?? role;
+    const lockedDepartment = await this.lockedDepartment(user.id);
+    const onboarding = await this.prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { fullName: true, onboardingStudyYear: true },
+    });
+    const schemas = {
+      STUDENT: {
+        requiredFields: ["fullName", "collegeId", "registerNumber", "departmentId", "mobileNumber", "programmeId", "academicYearId", "studyYear", "semesterId", "sectionId", "dateOfBirth", "gender"],
+        optionalFields: ["rollNumber", "parentName", "parentMobileNumber", "emergencyContact"],
+      },
+      STAFF: {
+        requiredFields: ["employeeId", "mobileNumber", "designation", "qualification", "specialization", "dateOfJoining"],
+        optionalFields: ["whatsappNumber", "officeLocation", "emergencyContact", "shift"],
+      },
+      MAINTENANCE: {
+        requiredFields: ["employeeId", "mobileNumber", "specialization", "shift", "emergencyContact"],
+        optionalFields: ["designation", "whatsappNumber"],
+      },
+    } as const;
+    const maintenanceRoles = new Set(["MAINTENANCE_ADMIN", "MAINTENANCE_SUPERVISOR", "MAINTENANCE_STAFF", "ELECTRICIAN", "PLUMBER", "IT_SUPPORT", "LAB_TECHNICIAN", "HOUSEKEEPING", "SECURITY", "OTHER_RESPONSIBLE"]);
+    const schema = role === "STUDENT" ? schemas.STUDENT : user.roles.some((code) => maintenanceRoles.has(code)) ? schemas.MAINTENANCE : schemas.STAFF;
+    return {
+      role: primaryRole,
+      profileKind: role,
+      ...schema,
+      lockedFields: ["email", ...(lockedDepartment ? ["departmentId"] : []), "primaryRole"],
+      lockedValues: {
+        email: user.email,
+        fullName: onboarding.fullName,
+        studyYear: onboarding.onboardingStudyYear,
+        department: lockedDepartment,
+        primaryRole,
+      },
+    };
+  }
+
+  async myProfile(user: AuthPrincipal) {
+    const account = await this.prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: {
+        id: true,
+        publicId: true,
+        fullName: true,
+        email: true,
+        mobile: true,
+        whatsappNumber: true,
+        onboardingStudyYear: true,
+        roles: { select: { role: { select: { code: true, name: true } } } },
+        scopes: { select: { scopeType: true, scopeId: true } },
+        studentProfile: { include: { department: true, programme: true, section: true } },
+        staffProfile: { include: { department: true } },
+      },
+    });
+    return {
+      ...account,
+      profileCompletionStatus: account.studentProfile || account.staffProfile ? "SUBMITTED" : "NOT_STARTED",
+      lockedDepartment: await this.lockedDepartment(user.id),
+    };
+  }
+
+  async saveMyProfileDraft(user: AuthPrincipal, input: Record<string, unknown>, requestId: string) {
+    const percent = this.profileDraftPercentage(input, this.primaryProfileRole(user.roles));
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const saved = await tx.user.update({
+        where: { id: user.id },
+        data: {
+          ...(input.fullName ? { fullName: this.requiredString(input.fullName, "Full Name") } : {}),
+          ...(input.mobileNumber ? { mobile: this.optionalString(input.mobileNumber) } : {}),
+          ...(input.whatsappNumber ? { whatsappNumber: this.optionalString(input.whatsappNumber) } : {}),
+          profileCompletionStatus: "IN_PROGRESS",
+          profileCompletionPercentage: percent,
+          version: { increment: 1 },
+        },
+        select: { publicId: true, profileCompletionStatus: true, profileCompletionPercentage: true },
+      });
+      await this.audit.record({ actorId: user.id, action: "profile.draft_saved", entityType: "User", entityId: user.id, afterValue: saved, requestId }, tx);
+      return saved;
+    });
+    return { ...updated, allowedNextRoute: "/profile/setup" };
+  }
+
+  async submitMyProfile(user: AuthPrincipal, input: Record<string, unknown>, requestId: string) {
+    const role = this.primaryProfileRole(user.roles);
+    const lockedDepartment = await this.lockedDepartment(user.id);
+    if (role === "STUDENT") {
+      const collegeId = this.requiredString(input.collegeId, "College ID");
+      const registerNumber = this.requiredString(input.registerNumber, "Register Number");
+      const programmeId = this.requiredString(input.programmeId, "Programme");
+      const academicYearId = this.requiredString(input.academicYearId, "Academic Year");
+      const sectionId = this.requiredString(input.sectionId, "Section");
+      const mobileNumber = this.requiredString(input.mobileNumber, "Mobile Number");
+      const section = await this.prisma.section.findFirst({
+        where: {
+          id: sectionId,
+          semester: {
+            programmeId,
+            academicYearId,
+            programme: {
+              collegeId: user.collegeId,
+              ...(lockedDepartment ? { departmentId: lockedDepartment.id } : {}),
+            },
+          },
+        },
+        select: { id: true, semester: { select: { academicYear: { select: { startsOn: true } }, programme: { select: { departmentId: true } } } } },
+      });
+      if (!section) throw new BadRequestException("The selected programme and section are not available for your department.");
+      const admissionYear = section.semester.academicYear.startsOn.getUTCFullYear();
+      await this.prisma.$transaction(async (tx) => {
+        await tx.user.update({ where: { id: user.id }, data: { fullName: this.requiredString(input.fullName ?? user.fullName, "Full Name"), mobile: mobileNumber, whatsappNumber: this.optionalString(input.whatsappNumber), onboardingStudyYear: this.requiredInteger(input.studyYear, "Study year", 1, 8), profileCompletionStatus: "SUBMITTED", profileCompletionPercentage: 100, profileSubmittedAt: new Date(), profileRejectionReason: null, version: { increment: 1 } } });
+        await tx.studentProfile.upsert({
+          where: { userId: user.id },
+          create: {
+            collegeId: user.collegeId, userId: user.id, departmentId: section.semester.programme.departmentId,
+            programmeId, sectionId, studentId: collegeId, registerNumber, admissionYear,
+            rollNumber: this.optionalString(input.rollNumber), admissionNumber: this.optionalString(input.admissionNumber),
+            studyYear: this.requiredInteger(input.studyYear, "Study year", 1, 8),
+            dateOfBirth: this.optionalDate(input.dateOfBirth), gender: this.requiredString(input.gender, "Gender"),
+            personalEmail: this.optionalString(input.personalEmail), bloodGroup: this.optionalString(input.bloodGroup),
+            address: this.optionalString(input.address), city: this.optionalString(input.city),
+            district: this.optionalString(input.district), state: this.optionalString(input.state),
+            pinCode: this.optionalString(input.pinCode), parentName: this.optionalString(input.parentName),
+            parentMobileNumber: this.optionalString(input.parentMobileNumber),
+            emergencyContact: this.optionalString(input.emergencyContact),
+          },
+          update: {
+            programmeId, sectionId, studentId: collegeId, registerNumber, admissionYear,
+            rollNumber: this.optionalString(input.rollNumber), admissionNumber: this.optionalString(input.admissionNumber),
+            studyYear: this.requiredInteger(input.studyYear, "Study year", 1, 8),
+            dateOfBirth: this.optionalDate(input.dateOfBirth), gender: this.requiredString(input.gender, "Gender"),
+            personalEmail: this.optionalString(input.personalEmail), bloodGroup: this.optionalString(input.bloodGroup),
+            address: this.optionalString(input.address), city: this.optionalString(input.city),
+            district: this.optionalString(input.district), state: this.optionalString(input.state),
+            pinCode: this.optionalString(input.pinCode), parentName: this.optionalString(input.parentName),
+            parentMobileNumber: this.optionalString(input.parentMobileNumber),
+            emergencyContact: this.optionalString(input.emergencyContact),
+          },
+        });
+        await tx.userScope.deleteMany({ where: { userId: user.id, scopeType: ScopeType.SECTION } });
+        await tx.userScope.create({ data: { userId: user.id, scopeType: ScopeType.SECTION, scopeId: sectionId } });
+        await this.audit.record({ actorId: user.id, action: "profile.submitted", entityType: "User", entityId: user.id, afterValue: { role: "STUDENT" }, requestId }, tx);
+      });
+    } else {
+      const employeeId = this.requiredString(input.employeeId, "Employee ID");
+      const mobileNumber = this.requiredString(input.mobileNumber, "Mobile Number");
+      const departmentId = lockedDepartment?.id;
+      const maintenanceRoles = new Set(["MAINTENANCE_ADMIN", "MAINTENANCE_SUPERVISOR", "MAINTENANCE_STAFF", "ELECTRICIAN", "PLUMBER", "IT_SUPPORT", "LAB_TECHNICIAN", "HOUSEKEEPING", "SECURITY", "OTHER_RESPONSIBLE"]);
+      const maintenance = user.roles.some((code) => maintenanceRoles.has(code));
+      const designation = maintenance
+        ? this.optionalString(input.designation) ?? role.replaceAll("_", " ")
+        : this.requiredString(input.designation, "Designation");
+      const qualification = maintenance
+        ? this.optionalString(input.qualification)
+        : this.requiredString(input.qualification, "Qualification");
+      const specialization = this.requiredString(input.specialization, "Specialization");
+      const shift = maintenance
+        ? this.requiredString(input.shift, "Shift")
+        : this.optionalString(input.shift);
+      const emergencyContact = maintenance
+        ? this.requiredString(input.emergencyContact, "Emergency Contact")
+        : this.optionalString(input.emergencyContact);
+      const joinedOn = maintenance
+        ? this.optionalDate(input.dateOfJoining)
+        : this.optionalDate(this.requiredString(input.dateOfJoining, "Date of Joining"));
+      await this.prisma.$transaction(async (tx) => {
+        await tx.user.update({ where: { id: user.id }, data: { fullName: this.requiredString(input.fullName ?? user.fullName, "Full Name"), mobile: mobileNumber, whatsappNumber: this.optionalString(input.whatsappNumber), profileCompletionStatus: "SUBMITTED", profileCompletionPercentage: 100, profileSubmittedAt: new Date(), profileRejectionReason: null, version: { increment: 1 } } });
+        await tx.staffProfile.upsert({
+          where: { userId: user.id },
+          create: { collegeId: user.collegeId, userId: user.id, departmentId, employeeId, designation, qualification, specialization, shift, emergencyContact, joinedOn },
+          update: { departmentId, employeeId, designation, qualification, specialization, shift, emergencyContact, joinedOn },
+        });
+        await this.audit.record({ actorId: user.id, action: "profile.submitted", entityType: "User", entityId: user.id, afterValue: { role }, requestId }, tx);
+      });
+    }
+    await this.officialGroups.synchronizeCollege(user.collegeId);
+    return { profileCompletionStatus: "SUBMITTED", allowedNextRoute: "/" };
+  }
+
+  async list(user: AuthPrincipal, page: number, pageSize: number, search?: string, filters: {
+    role?: string;
+    status?: string;
+    firstLogin?: string;
+    profileStatus?: string;
+    departmentId?: string;
+    programmeId?: string;
+    academicYearId?: string;
+    studyYear?: string;
+    semesterId?: string;
+    sectionId?: string;
+    campusId?: string;
+    blockId?: string;
+    floorId?: string;
+    roomId?: string;
+    archived?: string;
+    lastLogin?: string;
+    importBatchId?: string;
+  } = {}) {
     const status = filters.status && Object.values(AccountStatus).includes(filters.status as AccountStatus) ? filters.status as AccountStatus : undefined;
-    const where = {
+    const profileStatuses = new Set(Object.values(ProfileCompletionStatus));
+    const profileCompletionStatus = filters.profileStatus && profileStatuses.has(filters.profileStatus as ProfileCompletionStatus) ? filters.profileStatus as ProfileCompletionStatus : undefined;
+    const studyYear = filters.studyYear ? Number(filters.studyYear) : undefined;
+    const lastLoginBoundary = filters.lastLogin === "LAST_7_DAYS" ? new Date(Date.now() - 7 * 86_400_000)
+      : filters.lastLogin === "LAST_30_DAYS" ? new Date(Date.now() - 30 * 86_400_000)
+        : undefined;
+    const and: Prisma.UserWhereInput[] = [];
+    if (search) and.push({ OR: [
+      { fullName: { contains: search, mode: "insensitive" } },
+      { collegeIdentityId: { contains: search, mode: "insensitive" } },
+      { normalizedEmail: { contains: search.toLowerCase(), mode: "insensitive" } },
+      { mobile: { contains: search, mode: "insensitive" } },
+      { studentProfile: { OR: [{ studentId: { contains: search, mode: "insensitive" } }, { registerNumber: { contains: search, mode: "insensitive" } }, { rollNumber: { contains: search, mode: "insensitive" } }] } },
+      { staffProfile: { employeeId: { contains: search, mode: "insensitive" } } },
+    ] });
+    if (filters.departmentId) and.push({ OR: [
+      { scopes: { some: { scopeType: "DEPARTMENT", scopeId: filters.departmentId } } },
+      { studentProfile: { departmentId: filters.departmentId } },
+      { staffProfile: { departmentId: filters.departmentId } },
+    ] });
+    const placeScope = filters.roomId ? { scopeType: "ROOM" as const, scopeId: filters.roomId }
+      : filters.floorId ? { scopeType: "FLOOR" as const, scopeId: filters.floorId }
+        : filters.blockId ? { scopeType: "BLOCK" as const, scopeId: filters.blockId }
+          : filters.campusId ? { scopeType: "CAMPUS" as const, scopeId: filters.campusId }
+            : undefined;
+    if (placeScope) and.push({ scopes: { some: placeScope } });
+    const where: Prisma.UserWhereInput = {
       collegeId: user.collegeId,
-      archivedAt: null,
-      ...(search ? { OR: [{ fullName: { contains: search, mode: "insensitive" as const } }, { collegeIdentityId: { contains: search, mode: "insensitive" as const } }, { normalizedEmail: { contains: search.toLowerCase(), mode: "insensitive" as const } }] } : {}),
+      ...(filters.archived === "ONLY" || status === "ARCHIVED" ? { archivedAt: { not: null } } : { archivedAt: null }),
       ...(status ? { status } : {}),
+      ...(profileCompletionStatus ? { profileCompletionStatus } : {}),
       ...(filters.role ? { roles: { some: { role: { code: filters.role, isActive: true } } } } : {}),
+      ...(filters.programmeId ? { studentProfile: { programmeId: filters.programmeId } } : {}),
+      ...(filters.sectionId ? { studentProfile: { sectionId: filters.sectionId } } : {}),
+      ...(Number.isInteger(studyYear) ? { OR: [{ onboardingStudyYear: studyYear }, { studentProfile: { studyYear } }, { studentProfile: { section: { studyYear } } }] } : {}),
+      ...(filters.semesterId ? { studentProfile: { section: { semesterId: filters.semesterId } } } : {}),
+      ...(filters.academicYearId ? { studentProfile: { section: { semester: { academicYearId: filters.academicYearId } } } } : {}),
       ...(filters.firstLogin === "REQUIRED" ? { mustChangePassword: true } : {}),
       ...(filters.firstLogin === "COMPLETED" ? { mustChangePassword: false, firstLoginCompletedAt: { not: null } } : {}),
+      ...(filters.importBatchId ? { importBatchId: filters.importBatchId } : {}),
+      ...(lastLoginBoundary ? { lastLoginAt: { gte: lastLoginBoundary } } : {}),
+      ...(filters.lastLogin === "NEVER" ? { lastLoginAt: null } : {}),
+      ...(and.length ? { AND: and } : {}),
     };
     const [data, total] = await this.prisma.$transaction([
-      this.prisma.user.findMany({ where, skip: (page - 1) * pageSize, take: pageSize, orderBy: { fullName: "asc" }, select: { publicId: true, collegeIdentityId: true, fullName: true, email: true, mobile: true, status: true, mustChangePassword: true, firstLoginCompletedAt: true, lastLoginAt: true, roles: { select: { role: { select: { code: true, name: true } } } }, scopes: { select: { scopeType: true, scopeId: true, issueCategoryId: true } }, studentProfile: { select: { studentId: true, department: { select: { code: true, name: true } }, section: { select: { code: true, name: true } } } }, staffProfile: { select: { employeeId: true, department: { select: { code: true, name: true } } } } } }),
+      this.prisma.user.findMany({ where, skip: (page - 1) * pageSize, take: pageSize, orderBy: { fullName: "asc" }, select: { publicId: true, collegeIdentityId: true, fullName: true, email: true, mobile: true, profilePhotoKey: true, importBatchId: true, onboardingStudyYear: true, status: true, mustChangePassword: true, profileCompletionStatus: true, profileCompletionPercentage: true, profileSubmittedAt: true, profileVerifiedAt: true, firstLoginCompletedAt: true, lastLoginAt: true, roles: { select: { isPrimary: true, role: { select: { code: true, name: true } } } }, scopes: { select: { scopeType: true, scopeId: true, issueCategoryId: true } }, studentProfile: { select: { studentId: true, registerNumber: true, studyYear: true, programme: { select: { code: true, name: true } }, department: { select: { code: true, name: true } }, section: { select: { code: true, name: true, studyYear: true, semester: { select: { number: true, name: true, academicYear: { select: { name: true } } } } } } } }, staffProfile: { select: { employeeId: true, designation: true, department: { select: { code: true, name: true } } } } } }),
       this.prisma.user.count({ where }),
     ]);
-    return { data, meta: { page, pageSize, total, pageCount: Math.ceil(total / pageSize) } };
+    return { data: await this.attachAssignedPlaces(data), meta: { page, pageSize, total, pageCount: Math.ceil(total / pageSize) } };
+  }
+
+  async detail(actor: AuthPrincipal, publicId: string) {
+    const target = await this.prisma.user.findFirst({
+      where: { OR: [{ publicId }, { id: publicId }], collegeId: actor.collegeId },
+      select: {
+        id: true,
+        publicId: true,
+        collegeIdentityId: true,
+        fullName: true,
+        email: true,
+        normalizedEmail: true,
+        mobile: true,
+        whatsappNumber: true,
+        status: true,
+        mustChangePassword: true,
+        profileCompletionStatus: true,
+        profileCompletionPercentage: true,
+        profileSubmittedAt: true,
+        profileVerifiedAt: true,
+        profileRejectionReason: true,
+        firstLoginCompletedAt: true,
+        lastLoginAt: true,
+        createdAt: true,
+        updatedAt: true,
+        roles: { select: { roleId: true, validFrom: true, validUntil: true, isPrimary: true, role: { select: { code: true, name: true } } } },
+        scopes: { select: { scopeType: true, scopeId: true, issueCategoryId: true } },
+        studentProfile: { include: { department: true, programme: true, section: true } },
+        staffProfile: { include: { department: true } },
+        sessions: { where: { revokedAt: null, expiresAt: { gt: new Date() } }, select: { id: true, userAgent: true, ipAddress: true, createdAt: true, lastSeenAt: true, expiresAt: true } },
+      },
+    });
+    if (!target) throw new NotFoundException("User not found.");
+    const { id, ...publicTarget } = target;
+    const history = await this.prisma.roleAssignmentHistory.findMany({ where: { userId: id }, orderBy: { changedAt: "desc" }, take: 50 });
+    return { ...publicTarget, roleHistory: history };
   }
 
   async create(actor: AuthPrincipal, input: CreateUserDto, requestId: string) {
@@ -77,6 +346,22 @@ export class UsersService {
     if (exists) throw new ConflictException("A user with this college ID or email already exists.");
     const passwordHash = await argon2.hash(input.temporaryPassword + this.config.get<string>("PASSWORD_PEPPER", ""), { type: argon2.argon2id });
     const result = await this.prisma.$transaction(async (tx) => {
+      let membership: { sectionId: string; academicYearId: string } | undefined;
+      if (input.studentProfile) {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${input.studentProfile.sectionId}))`;
+        const section = await tx.section.findFirst({
+          where: { id: input.studentProfile.sectionId, isActive: true, archivedAt: null },
+          select: { id: true, capacity: true, semester: { select: { academicYearId: true } } },
+        });
+        if (!section) throw new BadRequestException("The selected section is not active.");
+        const activeStudents = await tx.studentProfile.count({
+          where: { sectionId: section.id, user: { status: "ACTIVE", archivedAt: null } },
+        });
+        if (activeStudents >= section.capacity) {
+          throw new BadRequestException("Section capacity reached. Create another section or move students before adding more.");
+        }
+        membership = { sectionId: section.id, academicYearId: section.semester.academicYearId };
+      }
       const created = await tx.user.create({ data: {
         collegeId: actor.collegeId,
         collegeIdentityId: input.collegeIdentityId.trim(),
@@ -87,9 +372,13 @@ export class UsersService {
         whatsappNumber: input.whatsappNumber?.trim(),
         status: input.accountStatus ?? "ACTIVE",
         mustChangePassword: true,
+        profileCompletionStatus: input.studentProfile || input.staffProfile ? "SUBMITTED" : "NOT_STARTED",
+        profileCompletionPercentage: input.studentProfile || input.staffProfile ? 100 : 0,
+        ...(input.studentProfile || input.staffProfile ? { profileSubmittedAt: new Date() } : {}),
         credential: { create: { passwordHash } },
         roles: { create: roles.map((role) => ({ roleId: role.id })) },
         scopes: { create: input.scopes.map((scope) => ({ scopeType: scope.type, scopeId: scope.id, issueCategoryId: scope.issueCategoryId })) },
+        ...(membership ? { sectionMemberships: { create: { sectionId: membership.sectionId, academicYearId: membership.academicYearId, startsOn: new Date() } } } : {}),
         ...(input.studentProfile ? { studentProfile: { create: {
           collegeId: actor.collegeId,
           departmentId: input.studentProfile.departmentId,
@@ -115,6 +404,140 @@ export class UsersService {
     });
     await this.officialGroups.synchronizeCollege(actor.collegeId);
     return result;
+  }
+
+  async revokeSessions(actor: AuthPrincipal, publicId: string, reason: string, requestId: string) {
+    const target = await this.prisma.user.findFirst({ where: { publicId, collegeId: actor.collegeId }, select: { id: true, publicId: true, fullName: true } });
+    if (!target) throw new NotFoundException("User not found.");
+    if (target.id === actor.id) throw new BadRequestException("Use your security settings to revoke your own sessions.");
+    return this.prisma.$transaction(async (tx) => {
+      const activeSessions = await tx.session.count({ where: { userId: target.id, revokedAt: null } });
+      await this.revokeAccessSessions(tx, target.id, "ADMIN_SESSION_REVOCATION");
+      await this.audit.record({ actorId: actor.id, action: "user.sessions_revoked", entityType: "User", entityId: target.id, afterValue: { revokedSessions: activeSessions }, reason, requestId }, tx);
+      return { id: target.publicId, revokedSessions: activeSessions };
+    });
+  }
+
+  async dependencyReport(actor: AuthPrincipal, publicId: string) {
+    const target = await this.prisma.user.findFirst({ where: { publicId, collegeId: actor.collegeId }, select: { id: true, publicId: true, fullName: true, status: true, archivedAt: true } });
+    if (!target) throw new NotFoundException("User not found.");
+    const values = await Promise.all([
+      this.prisma.attendanceRecord.count({ where: { studentUserId: target.id } }),
+      this.prisma.attendanceSession.count({ where: { facultyId: target.id } }),
+      this.prisma.attendanceSummary.count({ where: { studentUserId: target.id } }),
+      this.prisma.message.count({ where: { senderId: target.id } }),
+      this.prisma.issue.count({ where: { OR: [{ reporterId: target.id }, { assignedToId: target.id }] } }),
+      this.prisma.issueAffectedUser.count({ where: { userId: target.id } }),
+      this.prisma.feedbackSubmission.count({ where: { studentUserId: target.id } }),
+      this.prisma.learningCertificate.count({ where: { studentId: target.id } }),
+      this.prisma.studentProgress.count({ where: { studentId: target.id } }),
+      this.prisma.facultySubjectAssignment.count({ where: { facultyId: target.id } }),
+      this.prisma.classCoordinatorAssignment.count({ where: { coordinatorId: target.id } }),
+      this.prisma.classRepresentativeAssignment.count({ where: { representativeId: target.id } }),
+      this.prisma.classStaffAssignment.count({ where: { staffId: target.id } }),
+      this.prisma.sectionMembership.count({ where: { studentUserId: target.id } }),
+      this.prisma.importJob.count({ where: { requestedById: target.id } }),
+      this.prisma.auditLog.count({ where: { actorId: target.id } }),
+    ]);
+    const counts = {
+      attendanceRecords: values[0],
+      attendanceSessions: values[1],
+      attendanceSummaries: values[2],
+      messages: values[3],
+      issues: values[4],
+      affectedIssues: values[5],
+      feedback: values[6],
+      certificates: values[7],
+      learningProgress: values[8],
+      subjectAssignments: values[9],
+      coordinatorAssignments: values[10],
+      representativeAssignments: values[11],
+      classStaffAssignments: values[12],
+      sectionMemberships: values[13],
+      requestedImports: values[14],
+      auditActions: values[15],
+    };
+    const totalDependencies = Object.values(counts).reduce((sum, count) => sum + count, 0);
+    return {
+      user: target,
+      canDelete: totalDependencies === 0,
+      totalDependencies,
+      counts,
+      message: totalDependencies
+        ? "This user cannot be permanently deleted because retained college records depend on the account. Archive the user instead."
+        : "No retained records depend on this account.",
+    };
+  }
+
+  async deletePermanently(actor: AuthPrincipal, publicId: string, input: DeleteUserDto, requestId: string) {
+    if (!actor.permissions.includes("users.delete_permanent") || !actor.roles.some((role) => ["SUPER_ADMIN", "MAIN_ADMIN"].includes(role))) {
+      throw new ForbiddenException("Only Main Admin with permanent-delete permission can perform this action.");
+    }
+    if (input.confirmationPhrase !== "PERMANENTLY DELETE USER") throw new BadRequestException("The confirmation phrase is incorrect.");
+    const target = await this.prisma.user.findFirst({ where: { publicId, collegeId: actor.collegeId }, select: { id: true, publicId: true, fullName: true, collegeIdentityId: true } });
+    if (!target) throw new NotFoundException("User not found.");
+    if (target.id === actor.id) throw new BadRequestException("You cannot permanently delete your own account.");
+    const report = await this.dependencyReport(actor, publicId);
+    if (!report.canDelete) throw new BadRequestException({ message: report.message, dependencyReport: report });
+    await this.prisma.$transaction(async (tx) => {
+      await this.audit.record({
+        actorId: actor.id,
+        action: "user.deleted_permanently",
+        entityType: "User",
+        entityId: target.id,
+        beforeValue: { publicId: target.publicId, fullName: target.fullName, collegeIdentityId: target.collegeIdentityId },
+        afterValue: { deleted: true, backupReference: input.backupReference, dependencyReport: report },
+        reason: input.reason,
+        requestId,
+      }, tx);
+      await tx.studentProfile.deleteMany({ where: { userId: target.id } });
+      await tx.staffProfile.deleteMany({ where: { userId: target.id } });
+      await tx.user.delete({ where: { id: target.id } });
+    });
+    return { id: publicId, deleted: true, dependencyReport: report };
+  }
+
+  async updateBasic(actor: AuthPrincipal, publicId: string, input: Record<string, unknown>, requestId: string) {
+    const target = await this.prisma.user.findFirst({ where: { publicId, collegeId: actor.collegeId, archivedAt: null }, select: { id: true, fullName: true, email: true, normalizedEmail: true, status: true } });
+    if (!target) throw new NotFoundException("User not found.");
+    const data: Prisma.UserUpdateInput = { version: { increment: 1 } };
+    if ("fullName" in input) data.fullName = this.requiredString(input.fullName, "Full Name");
+    if ("email" in input) {
+      const email = this.optionalString(input.email);
+      data.email = email ?? null;
+      data.normalizedEmail = email?.toLowerCase() ?? null;
+    }
+    if ("mobile" in input) data.mobile = this.optionalString(input.mobile) ?? null;
+    if ("whatsappNumber" in input) data.whatsappNumber = this.optionalString(input.whatsappNumber) ?? null;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const saved = await tx.user.update({ where: { id: target.id }, data, select: { publicId: true, fullName: true, email: true, mobile: true, whatsappNumber: true, updatedAt: true } });
+      await this.audit.record({ actorId: actor.id, action: "user.updated", entityType: "User", entityId: target.id, beforeValue: target, afterValue: saved, requestId }, tx);
+      return saved;
+    });
+    return updated;
+  }
+
+  async verifyProfile(actor: AuthPrincipal, publicId: string, requestId: string) {
+    const target = await this.prisma.user.findFirst({ where: { publicId, collegeId: actor.collegeId, archivedAt: null }, select: { id: true, profileCompletionStatus: true } });
+    if (!target) throw new NotFoundException("User not found.");
+    if (!["SUBMITTED", "REJECTED"].includes(target.profileCompletionStatus)) throw new BadRequestException("Only submitted profiles can be verified.");
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({ where: { id: target.id }, data: { profileCompletionStatus: "VERIFIED", profileCompletionPercentage: 100, profileVerifiedAt: now, profileVerifiedById: actor.id, profileRejectionReason: null, version: { increment: 1 } }, select: { publicId: true, profileCompletionStatus: true, profileVerifiedAt: true } });
+      await this.audit.record({ actorId: actor.id, action: "profile.verified", entityType: "User", entityId: target.id, beforeValue: { profileCompletionStatus: target.profileCompletionStatus }, afterValue: updated, requestId }, tx);
+      return updated;
+    });
+  }
+
+  async rejectProfile(actor: AuthPrincipal, publicId: string, reason: string, requestId: string) {
+    const target = await this.prisma.user.findFirst({ where: { publicId, collegeId: actor.collegeId, archivedAt: null }, select: { id: true, profileCompletionStatus: true } });
+    if (!target) throw new NotFoundException("User not found.");
+    const profileRejectionReason = this.requiredString(reason, "Rejection reason");
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({ where: { id: target.id }, data: { profileCompletionStatus: "REJECTED", profileCompletionPercentage: 75, profileRejectionReason, profileVerifiedAt: null, profileVerifiedById: null, version: { increment: 1 } }, select: { publicId: true, profileCompletionStatus: true, profileRejectionReason: true } });
+      await this.audit.record({ actorId: actor.id, action: "profile.rejected", entityType: "User", entityId: target.id, beforeValue: { profileCompletionStatus: target.profileCompletionStatus }, afterValue: updated, reason: profileRejectionReason, requestId }, tx);
+      return updated;
+    });
   }
 
   async status(actor: AuthPrincipal, publicId: string, input: UpdateUserStatusDto, requestId: string) {
@@ -408,6 +831,26 @@ export class UsersService {
     await tx.refreshToken.updateMany({ where: { sessionId: { in: sessions.map((session) => session.id) }, revokedAt: null }, data: { revokedAt: now } });
   }
 
+  private async attachAssignedPlaces<T extends { scopes: Array<{ scopeType: ScopeType; scopeId: string | null }> }>(users: T[]) {
+    const scoped = users.flatMap((entry) => entry.scopes).filter((scope) => scope.scopeId && ["CAMPUS", "BLOCK", "FLOOR", "ROOM"].includes(scope.scopeType));
+    const ids = (type: ScopeType) => [...new Set(scoped.filter((scope) => scope.scopeType === type).map((scope) => scope.scopeId).filter((id): id is string => Boolean(id)))];
+    const [campuses, blocks, floors, rooms] = await Promise.all([
+      this.prisma.campus.findMany({ where: { id: { in: ids("CAMPUS") } }, select: { id: true, name: true, code: true } }),
+      this.prisma.block.findMany({ where: { id: { in: ids("BLOCK") } }, select: { id: true, name: true, code: true, campus: { select: { name: true } } } }),
+      this.prisma.floor.findMany({ where: { id: { in: ids("FLOOR") } }, select: { id: true, name: true, code: true, block: { select: { name: true, campus: { select: { name: true } } } } } }),
+      this.prisma.room.findMany({ where: { id: { in: ids("ROOM") } }, select: { id: true, name: true, code: true, roomType: true, floor: { select: { name: true, block: { select: { name: true, campus: { select: { name: true } } } } } } } }),
+    ]);
+    const labels = new Map<string, { type: string; label: string }>();
+    campuses.forEach((entry) => labels.set(entry.id, { type: "CAMPUS", label: entry.name }));
+    blocks.forEach((entry) => labels.set(entry.id, { type: "BLOCK", label: `${entry.campus.name} / ${entry.name}` }));
+    floors.forEach((entry) => labels.set(entry.id, { type: "FLOOR", label: `${entry.block.campus.name} / ${entry.block.name} / ${entry.name}` }));
+    rooms.forEach((entry) => labels.set(entry.id, { type: entry.roomType, label: `${entry.floor.block.campus.name} / ${entry.floor.block.name} / ${entry.floor.name} / ${entry.name}` }));
+    return users.map((entry) => ({
+      ...entry,
+      assignedPlaces: entry.scopes.map((scope) => scope.scopeId ? labels.get(scope.scopeId) : undefined).filter((place): place is { type: string; label: string } => Boolean(place)),
+    }));
+  }
+
   async createRole(actor: AuthPrincipal, input: CreateRoleDto, requestId: string) {
     const code = input.code.trim().toUpperCase();
     if (await this.prisma.role.findFirst({ where: { code, OR: [{ collegeId: actor.collegeId }, { collegeId: null }] } })) {
@@ -511,9 +954,57 @@ export class UsersService {
     return permissions;
   }
 
+  private primaryProfileRole(roles: string[]): "STUDENT" | "STAFF" {
+    if (roles.includes("STUDENT") || roles.includes("CLASS_REPRESENTATIVE")) return "STUDENT";
+    return "STAFF";
+  }
+
+  private async lockedDepartment(userId: string): Promise<{ id: string; code: string; name: string } | null> {
+    const scope = await this.prisma.userScope.findFirst({
+      where: { userId, scopeType: ScopeType.DEPARTMENT, scopeId: { not: null } },
+      select: { scopeId: true },
+    });
+    if (!scope?.scopeId) return null;
+    return this.prisma.department.findFirst({
+      where: { id: scope.scopeId, isActive: true },
+      select: { id: true, code: true, name: true },
+    });
+  }
+
+  private requiredString(value: unknown, label: string): string {
+    const text = typeof value === "string" ? value.trim() : "";
+    if (!text) throw new BadRequestException(`${label} is required.`);
+    if (text.length > 180) throw new BadRequestException(`${label} is too long.`);
+    return text;
+  }
+
+  private optionalString(value: unknown): string | undefined {
+    const text = typeof value === "string" ? value.trim() : "";
+    return text || undefined;
+  }
+
+  private requiredInteger(value: unknown, label: string, min: number, max: number): number {
+    const parsed = Number(typeof value === "string" ? value.trim() : value);
+    if (!Number.isInteger(parsed) || parsed < min || parsed > max) throw new BadRequestException(`${label} must be a whole number from ${min} to ${max}.`);
+    return parsed;
+  }
+
+  private optionalDate(value: unknown): Date | undefined {
+    const text = this.optionalString(value);
+    if (!text) return undefined;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new BadRequestException("Date of Joining must use YYYY-MM-DD.");
+    return new Date(`${text}T00:00:00.000Z`);
+  }
+
+  private profileDraftPercentage(input: Record<string, unknown>, role: "STUDENT" | "STAFF"): number {
+    const required = role === "STUDENT"
+      ? ["fullName", "mobileNumber", "collegeId", "programmeId", "academicYear", "studyYear", "semesterId", "sectionId", "dateOfBirth", "gender"]
+      : ["fullName", "mobileNumber", "employeeId", "designation", "qualification", "specialization", "dateOfJoining"];
+    const complete = required.filter((field) => typeof input[field] === "string" && input[field].trim()).length;
+    return Math.min(95, Math.round((complete / required.length) * 100));
+  }
+
   private async validateProfiles(collegeId: string, input: CreateUserDto): Promise<void> {
-    const studentRole = input.roleCodes.some((code) => code === "STUDENT" || code === "CLASS_REPRESENTATIVE");
-    if (studentRole && !input.studentProfile) throw new BadRequestException("Student accounts require an academic student profile.");
     if (input.studentProfile) {
       const profile = input.studentProfile;
       const section = await this.prisma.section.findFirst({

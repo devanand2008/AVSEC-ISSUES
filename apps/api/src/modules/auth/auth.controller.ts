@@ -51,25 +51,33 @@ export class AuthController {
   ) {
     const result = await this.auth.login(input, this.metadata(request));
     this.setCookies(response, result.tokens);
-    return { user: result.user };
+    return {
+      user: result.user,
+      ...(this.isFlutterClient(request) ? { tokens: result.tokens } : {}),
+    };
   }
 
   @Public()
   @Post("refresh")
   @HttpCode(HttpStatus.OK)
   async refresh(
+    @Body("refreshToken") mobileRefreshToken: string | undefined,
     @Req() request: RequestWithId,
     @Res({ passthrough: true }) response: Response,
   ) {
     try {
-      this.assertCsrf(request);
       const cookies = request.cookies as Record<string, string> | undefined;
+      const isFlutter = this.isFlutterClient(request);
+      if (!isFlutter) this.assertCsrf(request);
       const tokens = await this.auth.refresh(
-        cookies?.college_refresh,
+        isFlutter ? mobileRefreshToken : cookies?.college_refresh,
         this.metadata(request),
       );
       this.setCookies(response, tokens);
-      return { refreshed: true };
+      return {
+        refreshed: true,
+        ...(isFlutter ? { tokens } : {}),
+      };
     } catch (error) {
       this.clearCookies(response);
       throw error;
@@ -81,12 +89,15 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiCookieAuth()
   async logout(
+    @Body("refreshToken") mobileRefreshToken: string | undefined,
     @Req() request: RequestWithId,
     @Res({ passthrough: true }) response: Response,
   ): Promise<void> {
     const cookies = request.cookies as Record<string, string> | undefined;
     await this.auth.revokeSessionFromRefreshToken(
-      cookies?.college_refresh,
+      this.isFlutterClient(request)
+        ? mobileRefreshToken
+        : cookies?.college_refresh,
       "USER_LOGOUT",
       this.metadata(request),
     );
@@ -95,16 +106,7 @@ export class AuthController {
 
   @Get("me")
   me(@CurrentUser() user: AuthPrincipal) {
-    return {
-      id: user.publicId,
-      fullName: user.fullName,
-      email: user.email,
-      status: user.status,
-      mustChangePassword: user.mustChangePassword,
-      firstLoginCompletedAt: user.firstLoginCompletedAt,
-      roles: user.roles,
-      permissions: user.permissions,
-    };
+    return this.auth.userView(user.id);
   }
 
   @Post("change-password")
@@ -123,7 +125,21 @@ export class AuthController {
       this.metadata(request),
     );
     this.setCookies(response, result.tokens);
-    return { user: result.user };
+    return {
+      user: result.user,
+      ...(this.isFlutterClient(request) ? { tokens: result.tokens } : {}),
+    };
+  }
+
+  @Post("change-first-password")
+  @HttpCode(HttpStatus.OK)
+  async changeFirstPassword(
+    @Body() input: ChangePasswordDto,
+    @CurrentUser() user: AuthPrincipal,
+    @Req() request: RequestWithId,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    return this.changePassword(input, user, request, response);
   }
 
   @Get("sessions")
@@ -257,5 +273,9 @@ export class AuthController {
       ipAddress: request.ip,
       userAgent: request.header("user-agent"),
     };
+  }
+
+  private isFlutterClient(request: Request): boolean {
+    return request.header("x-avs-client")?.toLowerCase() === "flutter";
   }
 }

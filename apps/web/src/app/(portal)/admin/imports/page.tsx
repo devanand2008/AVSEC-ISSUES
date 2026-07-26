@@ -55,6 +55,26 @@ const importModes = [
   { value: "UPDATE_ONLY", label: "Update existing users only" },
 ];
 
+const userTypeOptions = [
+  { value: "STUDENT", label: "Student" },
+  { value: "FACULTY", label: "Faculty" },
+  { value: "HOD", label: "HOD" },
+  { value: "CLASS_COORDINATOR", label: "Class Coordinator" },
+  { value: "PRINCIPAL", label: "Principal" },
+  { value: "VICE_PRINCIPAL", label: "Vice Principal" },
+  { value: "CLASS_REPRESENTATIVE", label: "Class Representative" },
+  { value: "MAINTENANCE_ADMIN", label: "Maintenance Admin" },
+  { value: "MAINTENANCE_SUPERVISOR", label: "Maintenance Supervisor" },
+  { value: "ELECTRICIAN", label: "Electrician" },
+  { value: "PLUMBER", label: "Plumber" },
+  { value: "IT_SUPPORT", label: "IT Support" },
+  { value: "LAB_TECHNICIAN", label: "Laboratory Technician" },
+  { value: "HOUSEKEEPING", label: "Housekeeping Staff" },
+  { value: "SECURITY", label: "Security Staff" },
+  { value: "MAINTENANCE_STAFF", label: "General Maintenance Staff" },
+  { value: "OTHER_RESPONSIBLE", label: "Other Staff" },
+];
+
 const systemFields = [
   "__IGNORE__",
   "college_identity_id",
@@ -140,6 +160,31 @@ interface Preview {
   columnMapping: Record<string, string>;
   sheetNames: string[];
   selectedSheetName?: string;
+  sheetInspections: Array<{
+    sheetName: string;
+    headerRowNumber?: number;
+    rowCount: number;
+    sourceDepartmentCode: string;
+    mappedDepartmentCode?: string;
+    status: "READY" | "HEADER_NOT_FOUND" | "EMPTY";
+  }>;
+  detectedStudyYear?: "2" | "3";
+  passwordWarnings: number;
+  duplicateGroups: Array<{
+    normalizedEmail: string;
+    locations: Array<{
+      rowNumber: number;
+      sheetName?: string;
+      sourceRowNumber?: number;
+    }>;
+  }>;
+  duplicateResolution: "KEEP_FIRST" | "SKIP_ALL";
+  departmentOptions: Array<{
+    id: string;
+    code: string;
+    name: string;
+    shortName: string | null;
+  }>;
   previewRows: Array<{ rowNumber: number; values: Record<string, string> }>;
   errors: RowError[];
   errorsTruncated: boolean;
@@ -166,6 +211,15 @@ export default function ImportsPage() {
   );
   const [entityType, setEntityType] = useState(allowed[0]?.value ?? "");
   const [importMode, setImportMode] = useState("VALIDATE_ONLY");
+  const [selectedRoleCode, setSelectedRoleCode] = useState("STUDENT");
+  const [resetExistingPasswords, setResetExistingPasswords] = useState(false);
+  const [detectedStudyYear, setDetectedStudyYear] = useState("");
+  const [duplicateResolution, setDuplicateResolution] = useState<
+    "KEEP_FIRST" | "SKIP_ALL"
+  >("KEEP_FIRST");
+  const [departmentMappings, setDepartmentMappings] = useState<
+    Record<string, string>
+  >({});
   const [sheetName, setSheetName] = useState("");
   const [columnMapping, setColumnMapping] = useState<Record<string, string>>(
     {},
@@ -211,6 +265,20 @@ export default function ImportsPage() {
       if (sheetName) body.append("sheetName", sheetName);
       if (Object.keys(columnMapping).length)
         body.append("columnMapping", JSON.stringify(columnMapping));
+      if (["USERS", "STUDENTS", "STAFF"].includes(entityType))
+        body.append("selectedRoleCode", selectedRoleCode);
+      if (resetExistingPasswords)
+        body.append("resetExistingPasswords", "true");
+      if (entityType === "STUDENTS") {
+        if (detectedStudyYear)
+          body.append("detectedStudyYear", detectedStudyYear);
+        body.append("duplicateResolution", duplicateResolution);
+        if (Object.keys(departmentMappings).length)
+          body.append(
+            "departmentMappings",
+            JSON.stringify(departmentMappings),
+          );
+      }
       body.append("file", file);
       return api.postForm<Preview>("/imports/preview", body);
     },
@@ -219,6 +287,18 @@ export default function ImportsPage() {
       setSelectedId(data.job.id);
       setSheetName(data.selectedSheetName ?? "");
       setColumnMapping(data.columnMapping);
+      setDetectedStudyYear(data.detectedStudyYear ?? "");
+      setDuplicateResolution(data.duplicateResolution);
+      setDepartmentMappings(
+        Object.fromEntries(
+          data.sheetInspections
+            .filter((sheet) => sheet.mappedDepartmentCode)
+            .map((sheet) => [
+              sheet.sourceDepartmentCode,
+              sheet.mappedDepartmentCode!,
+            ]),
+        ),
+      );
       setMessage(
         "Validation complete. Review the preview and row errors before confirming.",
       );
@@ -264,12 +344,26 @@ export default function ImportsPage() {
     confirmMutation.error ??
     rollbackMutation.error ??
     credentialsMutation.error;
+  const visiblePreviewHeaders =
+    preview?.headers.filter(
+      (header) =>
+        ![
+          "temporary_password",
+          "legacy_path",
+          "first_name",
+          "last_name",
+          "source_department_code",
+        ].includes(header),
+    ) ?? [];
 
   function chooseFile(nextFile?: File | null) {
     setFile(nextFile ?? null);
     setPreview(null);
     setSheetName("");
     setColumnMapping({});
+    setDetectedStudyYear("");
+    setDuplicateResolution("KEEP_FIRST");
+    setDepartmentMappings({});
     setMessage("");
   }
 
@@ -324,9 +418,15 @@ export default function ImportsPage() {
                 setEntityType(next);
                 if (!["USERS", "STUDENTS", "STAFF"].includes(next))
                   setImportMode("CREATE_ONLY");
+                if (next === "STUDENTS") setSelectedRoleCode("STUDENT");
+                if (next === "STAFF" && selectedRoleCode === "STUDENT")
+                  setSelectedRoleCode("FACULTY");
                 setPreview(null);
                 setSheetName("");
                 setColumnMapping({});
+                setDetectedStudyYear("");
+                setDuplicateResolution("KEEP_FIRST");
+                setDepartmentMappings({});
               }}
             >
               {allowed.map((item) => (
@@ -336,6 +436,25 @@ export default function ImportsPage() {
               ))}
             </select>
           </label>
+          {["USERS", "STUDENTS", "STAFF"].includes(entityType) && (
+            <label className="field">
+              <span>Import User Type</span>
+              <select
+                className="input"
+                value={selectedRoleCode}
+                onChange={(event) => {
+                  setSelectedRoleCode(event.target.value);
+                  setPreview(null);
+                }}
+              >
+                {userTypeOptions.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="field">
             <span>Import mode</span>
             <select
@@ -354,6 +473,54 @@ export default function ImportsPage() {
               ))}
             </select>
           </label>
+          {entityType === "STUDENTS" && (
+            <>
+              <label className="field">
+                <span>Workbook study year</span>
+                <select
+                  className="input"
+                  value={detectedStudyYear}
+                  onChange={(event) => {
+                    setDetectedStudyYear(event.target.value);
+                    setPreview(null);
+                  }}
+                >
+                  <option value="">Detect from filename</option>
+                  <option value="2">Second Year</option>
+                  <option value="3">Third Year</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Duplicate email handling</span>
+                <select
+                  className="input"
+                  value={duplicateResolution}
+                  onChange={(event) => {
+                    setDuplicateResolution(
+                      event.target.value as "KEEP_FIRST" | "SKIP_ALL",
+                    );
+                    setPreview(null);
+                  }}
+                >
+                  <option value="KEEP_FIRST">Keep first valid row</option>
+                  <option value="SKIP_ALL">Skip every duplicate row</option>
+                </select>
+              </label>
+            </>
+          )}
+          {["USERS", "STUDENTS", "STAFF"].includes(entityType) && (
+            <label className="check-field" style={{ alignSelf: "end" }}>
+              <input
+                type="checkbox"
+                checked={resetExistingPasswords}
+                onChange={(event) => {
+                  setResetExistingPasswords(event.target.checked);
+                  setPreview(null);
+                }}
+              />
+              Reset existing users to imported temporary password
+            </label>
+          )}
           <label className="field">
             <span>Upload file</span>
             <div
@@ -374,11 +541,11 @@ export default function ImportsPage() {
               <small>
                 {file
                   ? `${(file.size / 1024).toFixed(1)} KB selected`
-                  : "Supports .csv and .xlsx. Save legacy .xls files as .xlsx before upload."}
+                  : "Supports .csv, .xlsx and .xls files."}
               </small>
               <input
                 type="file"
-                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                 onChange={(event) =>
                   chooseFile(event.target.files?.[0] ?? null)
                 }
@@ -386,6 +553,12 @@ export default function ImportsPage() {
             </div>
           </label>
         </div>
+        {resetExistingPasswords && (
+          <div className="error-box" style={{ marginTop: 14 }}>
+            Existing users with matching email addresses will be forced back to
+            the imported temporary password and their sessions will be revoked.
+          </div>
+        )}
         <div className="button-row" style={{ marginTop: 14 }}>
           <button
             className="btn"
@@ -426,7 +599,95 @@ export default function ImportsPage() {
             </div>
             <StatusBadge value={preview.job.status} />
           </div>
-          {preview.sheetNames.length > 0 && (
+          {preview.sheetInspections.length > 0 && (
+            <div className="column-map-panel">
+              <div className="section-title" style={{ margin: "0 0 12px" }}>
+                <div>
+                  <h3>Workbook inspection</h3>
+                  <p className="muted" style={{ margin: "4px 0 0" }}>
+                    {preview.sheetInspections.length} sheets,{" "}
+                    {preview.detectedStudyYear === "2"
+                      ? "Second Year"
+                      : preview.detectedStudyYear === "3"
+                        ? "Third Year"
+                        : "study year not detected"}
+                    , {preview.passwordWarnings} exact numeric password{" "}
+                    {preview.passwordWarnings === 1 ? "check" : "checks"}.
+                  </p>
+                </div>
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  disabled={previewMutation.isPending}
+                  onClick={() => previewMutation.mutate()}
+                >
+                  <RefreshCw size={16} />
+                  Apply mappings
+                </button>
+              </div>
+              <div className="column-map-grid">
+                {preview.sheetInspections.map((sheet) => (
+                  <label className="field" key={sheet.sheetName}>
+                    <span>
+                      {sheet.sheetName} ·{" "}
+                      {sheet.status === "READY"
+                        ? `header row ${sheet.headerRowNumber}, ${sheet.rowCount} users`
+                        : sheet.status === "EMPTY"
+                          ? "empty sheet"
+                          : "header not found"}
+                    </span>
+                    <select
+                      className="input"
+                      disabled={sheet.status !== "READY"}
+                      value={
+                        departmentMappings[sheet.sourceDepartmentCode] ?? ""
+                      }
+                      onChange={(event) => {
+                        const next = { ...departmentMappings };
+                        if (event.target.value)
+                          next[sheet.sourceDepartmentCode] =
+                            event.target.value;
+                        else delete next[sheet.sourceDepartmentCode];
+                        setDepartmentMappings(next);
+                      }}
+                    >
+                      <option value="">Department mapping required</option>
+                      {preview.departmentOptions.map((department) => (
+                        <option
+                          key={department.id}
+                          value={department.code}
+                        >
+                          {department.code} - {department.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+              {preview.duplicateGroups.length > 0 && (
+                <div className="error-box" style={{ marginTop: 14 }}>
+                  <strong>
+                    {preview.duplicateGroups.length} duplicate email{" "}
+                    {preview.duplicateGroups.length === 1 ? "group" : "groups"}
+                  </strong>
+                  {preview.duplicateGroups.map((group) => (
+                    <div key={group.normalizedEmail} style={{ marginTop: 6 }}>
+                      {maskEmail(group.normalizedEmail)}:{" "}
+                      {group.locations
+                        .map((location) =>
+                          location.sheetName
+                            ? `${location.sheetName}, row ${location.sourceRowNumber}`
+                            : `row ${location.rowNumber}`,
+                        )
+                        .join("; ")}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {preview.sheetNames.length > 0 &&
+            preview.sheetInspections.length === 0 && (
             <div className="import-sheet-strip">
               <span>Workbook sheet</span>
               <select
@@ -462,7 +723,8 @@ export default function ImportsPage() {
               </button>
             </div>
           )}
-          {preview.rawHeaders.length > 0 && (
+          {preview.rawHeaders.length > 0 &&
+            preview.sheetInspections.length === 0 && (
             <div className="column-map-panel">
               <div className="section-title" style={{ margin: "0 0 12px" }}>
                 <h3>Column mapping</h3>
@@ -509,7 +771,7 @@ export default function ImportsPage() {
               <thead>
                 <tr>
                   <th>Row</th>
-                  {preview.headers.map((header) => (
+                  {visiblePreviewHeaders.map((header) => (
                     <th key={header}>{header.replaceAll("_", " ")}</th>
                   ))}
                 </tr>
@@ -525,9 +787,11 @@ export default function ImportsPage() {
                       key={row.rowNumber}
                     >
                       <td>{row.rowNumber}</td>
-                      {preview.headers.map((header) => (
+                      {visiblePreviewHeaders.map((header) => (
                         <td key={header}>
-                          {row.values[header] || (
+                          {(header === "email"
+                            ? maskEmail(row.values[header] ?? "")
+                            : row.values[header]) || (
                             <span className="muted">-</span>
                           )}
                         </td>
@@ -793,4 +1057,11 @@ function downloadErrorReport(
 function csvCell(value: string) {
   const safe = /^[=+\-@]/.test(value) ? `'${value}` : value;
   return `"${safe.replaceAll('"', '""')}"`;
+}
+
+function maskEmail(value: string) {
+  const [local, domain] = value.split("@");
+  if (!local || !domain) return value;
+  const visible = local.slice(0, Math.min(3, local.length));
+  return `${visible}${"*".repeat(Math.max(3, local.length - visible.length))}@${domain}`;
 }

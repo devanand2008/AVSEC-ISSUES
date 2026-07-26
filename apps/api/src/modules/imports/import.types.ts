@@ -27,6 +27,8 @@ export type ImportMode = (typeof IMPORT_MODES)[number];
 
 export interface ImportRow {
   [key: string]: string;
+  first_name: string; last_name: string; legacy_path: string;
+  source_sheet: string; source_row_number: string; source_department_code: string; password_status: string;
   college_identity_id: string; full_name: string; temporary_password: string; role_codes: string;
   email: string; mobile: string; whatsapp_number: string; scope_type: string; scope_code: string;
   account_status: string; user_id: string; employee_or_student_id: string; gender: string; date_of_birth: string;
@@ -91,23 +93,23 @@ export const IMPORT_TEMPLATES: Record<ImportEntityType, ImportTemplate> = {
   USERS: {
     entityType: "USERS",
     permission: "users.import",
-    required: ["college_identity_id", "full_name", "role_codes"],
-    optional: ["temporary_password", "email", "mobile", "whatsapp_number", "scope_type", "scope_code", "account_status", "user_id", "employee_or_student_id", "student_id", "employee_id", "department_code", "programme_code", "academic_year", "year", "semester_number", "section_code"],
-    example: { college_identity_id: "EMP-100", full_name: "Asha Nair", temporary_password: "ChangeMe!2026", role_codes: "FACULTY", email: "asha@example.edu", mobile: "9876543210", whatsapp_number: "9876543210", scope_type: "DEPARTMENT", scope_code: "CSE", account_status: "ACTIVE" },
+    required: ["full_name", "email", "temporary_password", "department_code"],
+    optional: ["role_codes", "college_identity_id", "mobile", "whatsapp_number", "scope_type", "scope_code", "account_status", "user_id", "employee_or_student_id", "student_id", "employee_id", "programme_code", "academic_year", "year", "semester_number", "section_code"],
+    example: { full_name: "Sample Student One", temporary_password: "001234", role_codes: "STUDENT", email: "sample1@example.edu", department_code: "CSE-AIML", account_status: "ACTIVE" },
   },
   STUDENTS: {
     entityType: "STUDENTS",
     permission: "users.import",
-    required: ["full_name", "temporary_password", "department_code", "programme_code", "section_code"],
-    optional: ["college_identity_id", "student_id", "email", "mobile", "whatsapp_number", "roll_number", "legacy_id", "academic_year", "year", "semester_number", "admission_year", "account_status", "admission_number", "gender", "date_of_birth", "parent_name", "parent_mobile_number", "blood_group", "address", "profile_photo_url", "batch"],
-    example: { college_identity_id: "AVS24CSE001", full_name: "Arun Kumar", temporary_password: "001234", department_code: "CSE", programme_code: "BTECH-CSE", section_code: "A", academic_year: "2025-26", year: "2", semester_number: "3", email: "arun.kumar@example.edu", mobile: "9876543210", whatsapp_number: "9876543210", roll_number: "24CSE001", account_status: "ACTIVE" },
+    required: ["email", "temporary_password"],
+    optional: ["first_name", "last_name", "full_name", "department_code", "role_codes", "college_identity_id", "student_id", "email", "mobile", "whatsapp_number", "roll_number", "legacy_id", "legacy_path", "programme_code", "section_code", "academic_year", "year", "semester_number", "admission_year", "account_status", "admission_number", "gender", "date_of_birth", "parent_name", "parent_mobile_number", "blood_group", "address", "profile_photo_url", "batch", "source_sheet", "source_row_number", "source_department_code", "password_status"],
+    example: { full_name: "Sample Student One", email: "sample1@example.edu", temporary_password: "001234", department_code: "CSE-AIML", account_status: "ACTIVE" },
   },
   STAFF: {
     entityType: "STAFF",
     permission: "users.import",
-    required: ["employee_id", "full_name", "role_codes"],
-    optional: ["temporary_password", "email", "mobile", "whatsapp_number", "department_code", "designation", "joined_on", "account_status", "campus_scope", "programme_code", "academic_year", "year", "semester_number", "section_code", "assigned_year", "assigned_semester", "assigned_section", "assigned_block", "assigned_floor", "assigned_room", "specialization", "assigned_issue_category", "shift", "profile_photo_url"],
-    example: { full_name: "Meera Das", temporary_password: "ChangeMe!2026", employee_id: "E101", role_codes: "FACULTY", department_code: "CSE", designation: "Assistant Professor", joined_on: "2026-06-01", account_status: "ACTIVE" },
+    required: ["full_name", "email", "temporary_password", "department_code"],
+    optional: ["role_codes", "college_identity_id", "employee_id", "temporary_password", "email", "mobile", "whatsapp_number", "department_code", "designation", "joined_on", "account_status", "campus_scope", "programme_code", "academic_year", "year", "semester_number", "section_code", "assigned_year", "assigned_semester", "assigned_section", "assigned_block", "assigned_floor", "assigned_room", "specialization", "assigned_issue_category", "shift", "profile_photo_url"],
+    example: { full_name: "Sample Faculty One", email: "faculty1@example.edu", temporary_password: "005678", role_codes: "FACULTY", department_code: "CSE", account_status: "ACTIVE" },
   },
   DEPARTMENTS: {
     entityType: "DEPARTMENTS",

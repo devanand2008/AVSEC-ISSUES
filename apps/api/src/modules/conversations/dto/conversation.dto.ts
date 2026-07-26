@@ -11,6 +11,7 @@ export class SendMessageDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() forwardedFromId?: string;
   @ApiPropertyOptional() @IsOptional() @IsIn(["TEXT", "IMAGE", "DOCUMENT", "VIDEO", "AUDIO"]) messageType?: "TEXT" | "IMAGE" | "DOCUMENT" | "VIDEO" | "AUDIO";
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(80) clientId?: string;
+  @ApiPropertyOptional({ type: [String] }) @IsOptional() @IsArray() @ArrayMaxSize(10) @IsUUID(undefined, { each: true }) attachmentUploadIds?: string[];
 }
 
 export class EditMessageDto {
@@ -53,4 +54,8 @@ export class MessageSearchDto {
 export class ModerateMessageReportDto {
   @ApiProperty() @IsIn(["REVIEWED", "DISMISSED", "ACTIONED"]) status!: "REVIEWED" | "DISMISSED" | "ACTIONED";
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) note?: string;
+}
+
+export class MessageBackupDto {
+  @ApiProperty() @IsString() @Length(8, 200) currentPassword!: string;
 }

@@ -21,7 +21,7 @@ interface RequestMetadata {
   userAgent?: string;
 }
 
-interface TokenPair {
+export interface TokenPair {
   accessToken: string;
   refreshToken: string;
   csrfToken: string;
@@ -86,6 +86,8 @@ export class AuthService {
             },
           },
         },
+        studentProfile: { select: { id: true } },
+        staffProfile: { select: { id: true } },
       },
       take: 2,
     });
@@ -205,6 +207,12 @@ export class AuthService {
       tokens,
       user: {
         ...this.safeUser(user),
+        ...this.profileRouting(user.roles.map((mapping) => mapping.role.code), {
+          studentProfile: user.studentProfile,
+          staffProfile: user.staffProfile,
+          mustChangePassword: user.mustChangePassword,
+          status: user.status,
+        }),
         roles: activeRoles.map((mapping) => mapping.role.code),
         permissions: [
           ...new Set(
@@ -382,7 +390,7 @@ export class AuthService {
       throw new ConflictException("The new password must be different.");
     const [credential, account] = await Promise.all([
       this.prisma.userCredential.findUnique({ where: { userId } }),
-      this.prisma.user.findUnique({ where: { id: userId }, select: { collegeIdentityId: true, email: true } }),
+      this.prisma.user.findUnique({ where: { id: userId }, select: { collegeIdentityId: true, email: true, fullName: true } }),
     ]);
     if (!credential) throw new UnauthorizedException();
     const pepper = this.config.get<string>("PASSWORD_PEPPER", "");
@@ -399,6 +407,13 @@ export class AuthService {
     }
     if (email && loweredNewPassword.includes(email)) {
       throw new ConflictException("The new password must not contain your email address.");
+    }
+    const fullNameTokens = (account?.fullName ?? "")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((part) => part.length >= 3);
+    if (fullNameTokens.some((part) => loweredNewPassword.includes(part))) {
+      throw new ConflictException("The new password must not contain your name.");
     }
     const passwordHash = await argon2.hash(newPassword + pepper, {
       type: argon2.argon2id,
@@ -719,6 +734,9 @@ export class AuthService {
     status: string;
     mustChangePassword: boolean;
     firstLoginCompletedAt: Date | null;
+    profileCompletionStatus?: string;
+    profileCompletionPercentage?: number;
+    profileRejectionReason?: string | null;
   }) {
     return {
       id: user.publicId,
@@ -727,6 +745,9 @@ export class AuthService {
       status: user.status,
       mustChangePassword: user.mustChangePassword,
       firstLoginCompletedAt: user.firstLoginCompletedAt,
+      profileCompletionStatus: user.profileCompletionStatus,
+      profileCompletionPercentage: user.profileCompletionPercentage,
+      profileRejectionReason: user.profileRejectionReason,
     };
   }
 
@@ -758,7 +779,7 @@ export class AuthService {
     }
   }
 
-  private async userView(userId: string): Promise<object> {
+  async userView(userId: string): Promise<object> {
     const now = new Date();
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
@@ -775,6 +796,8 @@ export class AuthService {
             },
           },
         },
+        studentProfile: { select: { id: true } },
+        staffProfile: { select: { id: true } },
       },
     });
     const activeRoles = user.roles.filter(
@@ -783,6 +806,7 @@ export class AuthService {
     );
     return {
       ...this.safeUser(user),
+      ...this.profileRouting(activeRoles.map((mapping) => mapping.role.code), user),
       roles: activeRoles.map((mapping) => mapping.role.code),
       permissions: [
         ...new Set(
@@ -792,5 +816,65 @@ export class AuthService {
         ),
       ],
     };
+  }
+
+  private profileRouting(
+    roles: string[],
+    user: {
+      status: string;
+      mustChangePassword: boolean;
+      profileCompletionStatus?: string;
+      studentProfile?: { id: string } | null;
+      staffProfile?: { id: string } | null;
+    },
+  ): { profileCompletionStatus: "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED" | "VERIFIED" | "REJECTED"; allowedNextRoute: string } {
+    if (roles.some((role) => ["SUPER_ADMIN", "MAIN_ADMIN"].includes(role))) {
+      return {
+        profileCompletionStatus: "VERIFIED",
+        allowedNextRoute:
+          user.status !== "ACTIVE"
+            ? "/suspended"
+            : user.mustChangePassword
+              ? "/change-password"
+              : "/",
+      };
+    }
+    const needsStudentProfile = roles.includes("STUDENT") || roles.includes("CLASS_REPRESENTATIVE");
+    const staffRoles = new Set([
+      "FACULTY",
+      "HOD",
+      "CLASS_COORDINATOR",
+      "PRINCIPAL",
+      "VICE_PRINCIPAL",
+      "MAINTENANCE_ADMIN",
+      "MAINTENANCE_SUPERVISOR",
+      "MAINTENANCE_STAFF",
+      "ELECTRICIAN",
+      "PLUMBER",
+      "IT_SUPPORT",
+      "LAB_TECHNICIAN",
+      "HOUSEKEEPING",
+      "SECURITY",
+      "OTHER_RESPONSIBLE",
+    ]);
+    const needsStaffProfile = roles.some((role) => staffRoles.has(role));
+    const hasRequiredProfileRows = (!needsStudentProfile || Boolean(user.studentProfile)) && (!needsStaffProfile || Boolean(user.staffProfile));
+    const storedStatus = user.profileCompletionStatus;
+    const profileCompletionStatus =
+      storedStatus === "VERIFIED" || storedStatus === "REJECTED" || storedStatus === "IN_PROGRESS"
+        ? storedStatus
+        : hasRequiredProfileRows
+          ? (storedStatus === "NOT_STARTED" ? "SUBMITTED" : (storedStatus as "SUBMITTED" | undefined) ?? "SUBMITTED")
+          : "NOT_STARTED";
+    const complete = ["SUBMITTED", "VERIFIED"].includes(profileCompletionStatus);
+    const allowedNextRoute =
+      user.status !== "ACTIVE"
+        ? "/suspended"
+        : user.mustChangePassword
+          ? "/change-password"
+          : !complete || profileCompletionStatus === "REJECTED"
+            ? "/profile/setup"
+            : "/";
+    return { profileCompletionStatus, allowedNextRoute };
   }
 }

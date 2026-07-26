@@ -31,6 +31,7 @@ import { FeedbackModule } from "./modules/feedback/feedback.module";
 import { QrModule } from "./modules/qr/qr.module";
 import { CsrfGuard } from "./common/guards/csrf.guard";
 import { PasswordChangeGuard } from "./common/guards/password-change.guard";
+import { ProfileCompletionGuard } from "./common/guards/profile-completion.guard";
 import { ImportsModule } from "./modules/imports/imports.module";
 import { LearnModule } from "./modules/learn/learn.module";
 import { resolve } from "node:path";
@@ -99,6 +100,7 @@ import { resolve } from "node:path";
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PasswordChangeGuard },
+    { provide: APP_GUARD, useClass: ProfileCompletionGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

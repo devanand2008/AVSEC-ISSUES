@@ -17,6 +17,8 @@ import {
   CreateFacultySubjectAssignmentDto,
   CreateClassCoordinatorAssignmentDto,
   CreateClassRepresentativeAssignmentDto,
+  CreateClassStaffAssignmentDto,
+  AssignSectionStudentDto,
   DeactivateAcademicAssignmentDto,
   UpdateEntityStatusDto,
   UpdateSectionDto,
@@ -99,6 +101,12 @@ export class AcademicController {
   }
 
   @Permissions("academic.manage")
+  @Get("sections/:id")
+  section(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string) {
+    return this.academic.section(user, id);
+  }
+
+  @Permissions("academic.manage")
   @Get("admin/subjects")
   adminSubjects(@CurrentUser() user: AuthPrincipal, @Query("semesterId") semesterId?: string) {
     return this.academic.allSubjects(user, semesterId);
@@ -172,6 +180,18 @@ export class AcademicController {
     return this.academic.createRepresentativeAssignment(user, input, requestId);
   }
 
+  @Permissions("academic.manage")
+  @Post("admin/assignments/class-staff")
+  createClassStaffAssignment(@CurrentUser() user: AuthPrincipal, @Body() input: CreateClassStaffAssignmentDto, @CurrentRequestId() requestId: string) {
+    return this.academic.createClassStaffAssignment(user, input, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Post("sections/:id/students")
+  assignStudent(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: AssignSectionStudentDto, @CurrentRequestId() requestId: string) {
+    return this.academic.assignStudent(user, id, input, requestId);
+  }
+
   /* ─── Update ─── */
 
   @Permissions("academic.manage")
@@ -226,6 +246,12 @@ export class AcademicController {
   @Patch("admin/assignments/representatives/:id/deactivate")
   deactivateRepresentativeAssignment(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: DeactivateAcademicAssignmentDto, @CurrentRequestId() requestId: string) {
     return this.academic.deactivateRepresentativeAssignment(user, id, input, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Patch("admin/assignments/class-staff/:id/deactivate")
+  deactivateClassStaffAssignment(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: DeactivateAcademicAssignmentDto, @CurrentRequestId() requestId: string) {
+    return this.academic.deactivateClassStaffAssignment(user, id, input, requestId);
   }
 
   @Permissions("academic.manage")

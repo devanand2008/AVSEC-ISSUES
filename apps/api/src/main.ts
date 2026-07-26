@@ -58,6 +58,7 @@ async function bootstrap(): Promise<void> {
     allowedHeaders: [
       "content-type",
       "authorization",
+      "x-avs-client",
       "x-csrf-token",
       "x-request-id",
       "idempotency-key",

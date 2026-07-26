@@ -13,6 +13,7 @@ import {
   FileUp,
   FileWarning,
   Gauge,
+  GraduationCap,
   History,
   HeartPulse,
   Megaphone,
@@ -62,6 +63,18 @@ export const navigation: NavigationItem[] = [
       "attendance.read_college",
       "attendance.session.create",
     ],
+  },
+  {
+    href: "/learn",
+    label: "AVS Skill",
+    icon: GraduationCap,
+    any: ["academic.read", "academic.manage"],
+  },
+  {
+    href: "/academic-learn",
+    label: "AVS Learn",
+    icon: BookOpen,
+    any: ["academic.read", "academic.manage"],
   },
   {
     href: "/student/feedback/scanner",

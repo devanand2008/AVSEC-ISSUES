@@ -55,13 +55,28 @@ export class AdminService {
   }
   settings(user: AuthPrincipal) { return this.prisma.appSetting.findMany({ where: { OR: [{ collegeId: user.collegeId }, { collegeId: null }], isSecret: false }, select: { key: true, value: true, version: true, updatedAt: true }, orderBy: { key: "asc" } }); }
   async updateSetting(user: AuthPrincipal, key: string, value: unknown, requestId: string) {
-    const json = JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+    const normalizedValue = key === "security.official_email_domains" ? this.officialEmailDomains(value) : value;
+    const json = JSON.parse(JSON.stringify(normalizedValue)) as Prisma.InputJsonValue;
     return this.prisma.$transaction(async (tx) => {
       const previous = await tx.appSetting.findUnique({ where: { collegeId_key: { collegeId: user.collegeId, key } } });
       const setting = await tx.appSetting.upsert({ where: { collegeId_key: { collegeId: user.collegeId, key } }, create: { collegeId: user.collegeId, key, value: json, updatedById: user.id }, update: { value: json, updatedById: user.id, version: { increment: 1 } } });
       await this.auditTrail.record({ actorId: user.id, action: "setting.updated", entityType: "AppSetting", entityId: setting.id, beforeValue: previous ? { key, value: previous.value, version: previous.version } : undefined, afterValue: { key, value: setting.value, version: setting.version }, requestId }, tx);
       return setting;
     });
+  }
+
+  private officialEmailDomains(value: unknown) {
+    const source = Array.isArray(value)
+      ? value
+      : value && typeof value === "object" && "domains" in value
+        ? (value as { domains?: unknown }).domains
+        : undefined;
+    if (!Array.isArray(source)) throw new BadRequestException("Official email domains must be an array of domain names.");
+    const domains = [...new Set(source.map((domain) => typeof domain === "string" ? domain.trim().toLowerCase().replace(/^@/, "") : ""))].filter(Boolean);
+    if (!domains.length || domains.length > 20 || domains.some((domain) => !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(domain))) {
+      throw new BadRequestException("Provide between 1 and 20 valid official email domains.");
+    }
+    return { domains };
   }
   integrations() { return { whatsapp: { enabled: this.config.get<boolean>("WHATSAPP_ENABLED", false), configured: Boolean(this.config.get<string>("WHATSAPP_PHONE_NUMBER_ID") && this.config.get<string>("WHATSAPP_ACCESS_TOKEN")) }, firebase: { configured: Boolean(this.config.get<string>("FIREBASE_PROJECT_ID") && this.config.get<string>("FIREBASE_CLIENT_EMAIL") && this.config.get<string>("FIREBASE_PRIVATE_KEY") && this.config.get<string>("DEVICE_TOKEN_ENCRYPTION_KEY")) }, objectStorage: { endpoint: this.config.get<string>("S3_ENDPOINT"), bucketConfigured: Boolean(this.config.get<string>("S3_BUCKET")) }, automaticDelivery: "Background jobs retry failed provider deliveries with exponential backoff and retain permanently failed jobs for operator review." }; }
   async search(user: AuthPrincipal, query: string) {

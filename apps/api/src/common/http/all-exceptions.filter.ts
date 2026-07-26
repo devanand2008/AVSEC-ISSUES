@@ -3,6 +3,7 @@ import {
   Catch,
   HttpException,
   HttpStatus,
+  Logger,
   type ExceptionFilter,
 } from "@nestjs/common";
 import type { Response } from "express";
@@ -19,6 +20,8 @@ interface ValidationErrorResponse {
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly logger = new Logger(AllExceptionsFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
     const request = context.getRequest<RequestWithId>();
@@ -30,6 +33,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const messages = Array.isArray(rawMessage) ? rawMessage : rawMessage ? [rawMessage] : [];
     const responseBody = typeof raw === "object" ? raw : undefined;
     const code = responseBody?.code ?? this.codeForStatus(status);
+    if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
+      const error = exception instanceof Error ? exception : undefined;
+      this.logger.error(
+        {
+          requestId: request.id,
+          method: request.method,
+          path: request.originalUrl,
+          exception: error?.name ?? typeof exception,
+          message: error?.message ?? "Unknown exception",
+        },
+        error?.stack,
+      );
+    }
 
     response.status(status).json({
       error: {

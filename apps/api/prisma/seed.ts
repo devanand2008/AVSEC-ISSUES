@@ -54,6 +54,7 @@ const permissions = [
   "users.archive",
   "users.reset_password",
   "users.import",
+  "users.delete_permanent",
   "roles.read",
   "roles.manage",
   "permissions.read",
@@ -68,6 +69,7 @@ const permissions = [
   "integrations.manage",
   "system.health",
   "backups.manage",
+  "data.maintenance",
   "academic.read",
   "academic.manage",
   "locations.read",
@@ -136,6 +138,7 @@ const permissions = [
   "messages.react",
   "messages.report",
   "messages.moderate_reported",
+  "messages.backup",
   "announcements.read",
   "announcements.publish_class",
   "announcements.publish_department",
@@ -436,6 +439,7 @@ for (const codes of Object.values(rolePermissions)) {
       "messages.delete_own",
       "messages.react",
       "messages.report",
+      "messages.backup",
     ])
       if (!codes.includes(code)) codes.push(code);
   }
@@ -1437,6 +1441,25 @@ async function main() {
       collegeId: college.id,
       key: "attendance.lock_after_minutes",
       value: 60,
+    },
+    update: {},
+  });
+  await prisma.appSetting.upsert({
+    where: {
+      collegeId_key: {
+        collegeId: college.id,
+        key: "security.official_email_domains",
+      },
+    },
+    create: {
+      collegeId: college.id,
+      key: "security.official_email_domains",
+      value: {
+        domains: (process.env.OFFICIAL_EMAIL_DOMAINS ?? "avsenggcollege.ac.in")
+          .split(",")
+          .map((domain) => domain.trim().toLowerCase().replace(/^@/, ""))
+          .filter(Boolean),
+      },
     },
     update: {},
   });

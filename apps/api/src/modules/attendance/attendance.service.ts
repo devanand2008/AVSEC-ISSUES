@@ -25,8 +25,8 @@ export class AttendanceService {
     if (!subject) throw new BadRequestException("Subject, section and academic year do not match.");
     const elevated = user.permissions.includes("attendance.read_college") && this.access.isCollegeWide(user);
     if (!elevated) {
-      const assignment = await this.prisma.facultySubjectAssignment.findFirst({ where: { facultyId: user.id, subjectId: input.subjectId, sectionId: input.sectionId, isActive: true, validFrom: { lte: date }, OR: [{ validUntil: null }, { validUntil: { gte: date } }] } });
-      if (!assignment) throw new ForbiddenException("You are not assigned to this subject and section.");
+      const assignment = await this.prisma.facultySubjectAssignment.findFirst({ where: { facultyId: user.id, subjectId: input.subjectId, sectionId: input.sectionId, isActive: true, attendancePermission: true, validFrom: { lte: date }, OR: [{ validUntil: null }, { validUntil: { gte: date } }] } });
+      if (!assignment) throw new ForbiddenException("You do not have attendance permission for this subject and section.");
     }
     try {
       return await this.prisma.attendanceSession.create({ data: { academicYearId: input.academicYearId, sectionId: input.sectionId, subjectId: input.subjectId, facultyId: user.id, sessionDate: date, periodNumber: input.periodNumber } });
@@ -47,7 +47,7 @@ export class AttendanceService {
   }
 
   async roster(user: AuthPrincipal, sessionId: string) {
-    const session = await this.authorizedSession(user, sessionId);
+    const session = await this.authorizedSession(user, sessionId, true);
     const students = await this.prisma.studentProfile.findMany({ where: { sectionId: session.sectionId, user: { status: "ACTIVE" } }, include: { user: { select: { id: true, publicId: true, fullName: true } } }, orderBy: [{ rollNumber: "asc" }, { user: { fullName: "asc" } }] });
     const existing = await this.prisma.attendanceRecord.findMany({ where: { sessionId }, select: { id: true, studentUserId: true, status: true, note: true } });
     const byStudent = new Map(existing.map((record) => [record.studentUserId, record]));
@@ -99,7 +99,7 @@ export class AttendanceService {
   }
 
   async saveDraft(user: AuthPrincipal, sessionId: string, input: SubmitAttendanceDto, requestId: string) {
-    const session = await this.authorizedSession(user, sessionId);
+    const session = await this.authorizedSession(user, sessionId, true);
     if (session.status !== "DRAFT") throw new ConflictException("Only a draft attendance session can be saved without submission.");
     const roster = await this.prisma.studentProfile.findMany({ where: { sectionId: session.sectionId, user: { status: "ACTIVE" } }, select: { userId: true } });
     const allowed = new Set(roster.map((row) => row.userId));
@@ -136,7 +136,7 @@ export class AttendanceService {
     const hash = this.idempotency.hash(input);
     const replay = await this.idempotency.replay(user.id, `/attendance/sessions/${sessionId}/submit`, key, hash);
     if (replay) return replay;
-    const session = await this.authorizedSession(user, sessionId);
+    const session = await this.authorizedSession(user, sessionId, true);
     if (session.status === "LOCKED" || session.status === "CANCELLED") throw new ConflictException(`Attendance is ${session.status.toLowerCase()}.`);
     if (session.status === "SUBMITTED" && !user.permissions.includes("attendance.edit_window")) {
       throw new ConflictException("Submitted attendance requires an approved correction request.");
@@ -176,7 +176,15 @@ export class AttendanceService {
   async ownSummary(user: AuthPrincipal) {
     const profile = await this.prisma.studentProfile.findUnique({ where: { userId: user.id } });
     if (!profile) throw new ForbiddenException("This account does not have a student profile.");
-    const records = await this.prisma.attendanceRecord.findMany({ where: { studentUserId: user.id, session: { status: { in: ["SUBMITTED", "LOCKED"] } } }, include: { session: { include: { subject: { select: { id: true, code: true, name: true } } } } } });
+    const [records, importedSummaries] = await Promise.all([
+      this.prisma.attendanceRecord.findMany({ where: { studentUserId: user.id, session: { status: { in: ["SUBMITTED", "LOCKED"] } } }, include: { session: { include: { subject: { select: { id: true, code: true, name: true } } } } } }),
+      this.prisma.attendanceSummary.findMany({
+        where: { studentUserId: user.id },
+        include: { subject: { select: { id: true, code: true, name: true } } },
+        orderBy: [{ dateTo: "desc" }, { updatedAt: "desc" }],
+        take: 100,
+      }),
+    ]);
     const grouped = new Map<string, { subject: { id: string; code: string; name: string }; total: number; attended: number }>();
     for (const record of records) {
       const row = grouped.get(record.session.subjectId) ?? { subject: record.session.subject, total: 0, attended: 0 };
@@ -184,7 +192,25 @@ export class AttendanceService {
       if (["PRESENT", "LATE", "ON_DUTY", "AUTHORIZED_LEAVE"].includes(record.status)) row.attended += 1;
       grouped.set(record.session.subjectId, row);
     }
-    return { overall: this.percentage(records.filter((record) => ["PRESENT", "LATE", "ON_DUTY", "AUTHORIZED_LEAVE"].includes(record.status)).length, records.length), subjects: [...grouped.values()].map((row) => ({ ...row, percentage: this.percentage(row.attended, row.total) })) };
+    const periodOverall = this.percentage(records.filter((record) => ["PRESENT", "LATE", "ON_DUTY", "AUTHORIZED_LEAVE"].includes(record.status)).length, records.length);
+    const latestOverallImport = importedSummaries.find((summary) => summary.subjectId === null);
+    return {
+      overall: latestOverallImport?.percentage ?? periodOverall,
+      periodOverall,
+      subjects: [...grouped.values()].map((row) => ({ ...row, percentage: this.percentage(row.attended, row.total) })),
+      importedSummaries: importedSummaries.map((summary) => ({
+        id: summary.id,
+        subject: summary.subject,
+        dateFrom: summary.dateFrom,
+        dateTo: summary.dateTo,
+        totalWorking: summary.totalWorking,
+        present: summary.present,
+        absent: summary.absent,
+        percentage: summary.percentage,
+        remarks: summary.remarks,
+        source: summary.source,
+      })),
+    };
   }
 
   async staffSummary(user: AuthPrincipal, filters: { departmentId?: string; staffId?: string; from?: string; to?: string }) {
@@ -400,11 +426,26 @@ export class AttendanceService {
     });
   }
 
-  private async authorizedSession(user: AuthPrincipal, sessionId: string) {
+  private async authorizedSession(user: AuthPrincipal, sessionId: string, requireMarkPermission = false) {
     await this.lockExpiredSessions(user.collegeId);
     const where = await this.sessionWhere(user);
     const session = await this.prisma.attendanceSession.findFirst({ where: { AND: [{ id: sessionId }, where] } });
     if (!session) throw new NotFoundException("Attendance session not found.");
+    if (requireMarkPermission && session.facultyId === user.id && !this.access.isCollegeWide(user)) {
+      const assignment = await this.prisma.facultySubjectAssignment.findFirst({
+        where: {
+          facultyId: user.id,
+          subjectId: session.subjectId,
+          sectionId: session.sectionId,
+          isActive: true,
+          attendancePermission: true,
+          validFrom: { lte: session.sessionDate },
+          OR: [{ validUntil: null }, { validUntil: { gte: session.sessionDate } }],
+        },
+        select: { id: true },
+      });
+      if (!assignment) throw new ForbiddenException("You no longer have attendance permission for this subject and section.");
+    }
     return session;
   }
 
@@ -542,7 +583,7 @@ export class AttendanceService {
   }
 
   private async sessionWhere(user: AuthPrincipal): Promise<Prisma.AttendanceSessionWhereInput> {
-    const college: Prisma.AttendanceSessionWhereInput = { section: { semester: { programme: { collegeId: user.collegeId } } } };
+    const college: Prisma.AttendanceSessionWhereInput = { archivedAt: null, section: { semester: { programme: { collegeId: user.collegeId } } } };
     if (user.permissions.includes("attendance.read_college") && this.access.isCollegeWide(user)) return college;
     const campuses = user.scopes.filter((scope) => scope.type === "CAMPUS" && scope.id).map((scope) => scope.id as string);
     const departments = user.scopes.filter((scope) => scope.type === "DEPARTMENT" && scope.id).map((scope) => scope.id as string);

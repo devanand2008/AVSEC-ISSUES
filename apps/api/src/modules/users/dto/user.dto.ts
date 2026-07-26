@@ -103,6 +103,15 @@ export class ResetUserPasswordDto {
   reason!: string;
 }
 
+export class ArchiveUserDto {
+  @ApiProperty() @IsString() @Length(3, 500) reason!: string;
+}
+
+export class DeleteUserDto extends ArchiveUserDto {
+  @ApiProperty() @IsString() @Matches(/^PERMANENTLY DELETE USER$/) confirmationPhrase!: string;
+  @ApiProperty() @IsString() @Length(3, 255) backupReference!: string;
+}
+
 export class CreateRoleDto {
   @ApiProperty() @IsString() @Matches(/^[A-Z][A-Z0-9_]{2,59}$/) code!: string;
   @ApiProperty() @IsString() @Length(2, 120) name!: string;

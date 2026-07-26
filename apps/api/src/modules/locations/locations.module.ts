@@ -1,6 +1,6 @@
 import { Module } from "@nestjs/common";
-import { LocationsController } from "./locations.controller";
+import { AdminLocationsController, LocationsController } from "./locations.controller";
 import { LocationsService } from "./locations.service";
 
-@Module({ controllers: [LocationsController], providers: [LocationsService], exports: [LocationsService] })
+@Module({ controllers: [LocationsController, AdminLocationsController], providers: [LocationsService], exports: [LocationsService] })
 export class LocationsModule {}

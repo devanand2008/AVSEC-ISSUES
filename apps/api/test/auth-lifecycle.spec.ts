@@ -107,15 +107,16 @@ describe("Auth lifecycle", () => {
 });
 
 describe("Password validation rules", () => {
-  const strongPasswords = ["Passw0rd!", "C0ll3g3@2024", "Secure#123XY"];
-  const weakPasswords = ["password", "12345678", "NOLOWER1!", "nouppercase1!"];
+  const strongPasswords = ["C0ll3g3@2024", "Secure#123XY"];
+  const weakPasswords = ["Passw0rd!", "password", "12345678", "NOLOWER1!", "nouppercase1!"];
 
   function isStrong(password: string): boolean {
     return (
-      password.length >= 8 &&
+      password.length >= 10 &&
       /[A-Z]/.test(password) &&
       /[a-z]/.test(password) &&
-      /\d/.test(password)
+      /\d/.test(password) &&
+      /[^A-Za-z0-9]/.test(password)
     );
   }
 

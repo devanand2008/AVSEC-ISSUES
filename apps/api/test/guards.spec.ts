@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import type { Reflector } from "@nestjs/core";
 import { CsrfGuard } from "../src/common/guards/csrf.guard";
 import { PasswordChangeGuard } from "../src/common/guards/password-change.guard";
+import { ProfileCompletionGuard } from "../src/common/guards/profile-completion.guard";
 import { PermissionsGuard } from "../src/common/guards/permissions.guard";
 import { PERMISSIONS_KEY } from "../src/common/decorators/permissions.decorator";
 import { IS_PUBLIC_KEY } from "../src/common/decorators/public.decorator";
@@ -160,6 +161,69 @@ describe("authorization guards", () => {
         context({
           originalUrl: "/service/v2/auth/change-password",
           user: { mustChangePassword: true },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("limits incomplete-profile sessions to profile setup endpoints", () => {
+    const guard = new ProfileCompletionGuard(
+      reflector(),
+      new ConfigService({ API_PREFIX: "service/v2" }),
+    );
+    expect(() =>
+      guard.canActivate(
+        context({
+          originalUrl: "/service/v2/learn/courses",
+          user: {
+            mustChangePassword: false,
+            profileCompletionStatus: "NOT_STARTED",
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+    expect(
+      guard.canActivate(
+        context({
+          originalUrl: "/service/v2/users/me/profile/submit",
+          user: {
+            mustChangePassword: false,
+            profileCompletionStatus: "NOT_STARTED",
+          },
+        }),
+      ),
+    ).toBe(true);
+    expect(() =>
+      guard.canActivate(
+        context({
+          originalUrl: "/service/v2/learn/courses",
+          user: {
+            mustChangePassword: false,
+            profileCompletionStatus: "SUBMITTED",
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+    expect(
+      guard.canActivate(
+        context({
+          originalUrl: "/service/v2/auth/me",
+          user: {
+            mustChangePassword: false,
+            profileCompletionStatus: "SUBMITTED",
+          },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      guard.canActivate(
+        context({
+          originalUrl: "/service/v2/admin/users",
+          user: {
+            mustChangePassword: false,
+            profileCompletionStatus: "SUBMITTED",
+            roles: ["MAIN_ADMIN"],
+          },
         }),
       ),
     ).toBe(true);

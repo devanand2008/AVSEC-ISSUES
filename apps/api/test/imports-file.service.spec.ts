@@ -1,5 +1,6 @@
 import { ConfigService } from "@nestjs/config";
 import { Workbook } from "exceljs";
+import * as XLSX from "xlsx";
 
 import type { AuthPrincipal } from "../src/common/http/request-context";
 import type { CredentialExportRow } from "../src/modules/imports/import.types";
@@ -213,6 +214,180 @@ describe("ImportsFileService", () => {
     expect(parsed.errors).toEqual([]);
   });
 
+  it("accepts minimum student email and password sheets", async () => {
+    const parsed = await service.parse(
+      csvFile(
+        "Student Email,Temporary Password\nBASIC.STUDENT@EXAMPLE.EDU,001234\n",
+      ),
+      "STUDENTS",
+    );
+
+    expect(parsed.headers).toEqual(["email", "temporary_password"]);
+    expect(parsed.rows[0]).toMatchObject({
+      college_identity_id: "basic.student@example.edu",
+      full_name: "Basic Student",
+      email: "basic.student@example.edu",
+      temporary_password: "001234",
+    });
+    expect(parsed.errors).toEqual([]);
+  });
+
+  it("accepts the basic four-column AVS user workbook and preserves numeric password text", async () => {
+    const workbook = new Workbook();
+    const worksheet = workbook.addWorksheet("Basic Users");
+    worksheet.addRow(["Name", "Email", "Password", "Department"]);
+    worksheet.addRow(["Sample Student", "sample.student@example.edu", "", "CSE-AIML"]);
+    worksheet.getCell("C2").value = 1234;
+    worksheet.getCell("C2").numFmt = "000000";
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    const parsed = await service.parse(
+      { buffer, originalname: "avs-user-import-template.xlsx", size: buffer.length } as Express.Multer.File,
+      "USERS",
+    );
+
+    expect(parsed.headers).toEqual(["full_name", "email", "temporary_password", "department_code"]);
+    expect(parsed.rows[0]).toMatchObject({
+      college_identity_id: "sample.student@example.edu",
+      full_name: "Sample Student",
+      email: "sample.student@example.edu",
+      temporary_password: "001234",
+      department_code: "CSE-AIML",
+    });
+    expect(parsed.errors).toEqual([]);
+  });
+
+  it("aggregates AVS student sheets with dynamic headers, department mappings, and filename year detection", async () => {
+    const workbook = new Workbook();
+    const cse = workbook.addWorksheet("CSE");
+    cse.addRows([
+      ["FIRST NAME", "LAST NAME", "EMAIL ID", "PASSWORD", "/PATH"],
+      ["Safe", "Student", "safe.student@avsenggcollege.ac.in", "TempPass@123", "/students/1"],
+    ]);
+    const mechanical = workbook.addWorksheet("MECH");
+    mechanical.addRows([
+      [],
+      ["FIRST NAME", "LAST NAME", "EMAIL ID", "PASSWORD", "/PATH"],
+      ["Second", "Student", "second.student@avsenggcollege.ac.in", "", "/students/2"],
+    ]);
+    mechanical.getCell("D3").value = 1234;
+    mechanical.getCell("D3").numFmt = "000000";
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    const parsed = await service.parse(
+      {
+        buffer,
+        originalname: "AVSEC USERS FOR 2RD YEAR.xlsx",
+        size: buffer.length,
+      } as Express.Multer.File,
+      "STUDENTS",
+      { departmentMappings: { MECH: "ME" } },
+    );
+
+    expect(parsed.selectedSheetName).toBeUndefined();
+    expect(parsed.detectedStudyYear).toBe("2");
+    expect(parsed.rows).toHaveLength(2);
+    expect(parsed.rows[0]).toMatchObject({
+      full_name: "Safe Student",
+      department_code: "CSE",
+      year: "2",
+      source_sheet: "CSE",
+      source_row_number: "2",
+    });
+    expect(parsed.rows[1]).toMatchObject({
+      full_name: "Second Student",
+      department_code: "ME",
+      temporary_password: "001234",
+      source_sheet: "MECH",
+      source_row_number: "3",
+    });
+    expect(parsed.passwordWarnings).toBe(1);
+    expect(parsed.sheetInspections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sheetName: "CSE", headerRowNumber: 1, rowCount: 1 }),
+        expect.objectContaining({ sheetName: "MECH", headerRowNumber: 2, rowCount: 1 }),
+      ]),
+    );
+    expect(parsed.errors).toEqual([]);
+  });
+
+  it("detects cross-sheet duplicate emails and supports skipping both rows", async () => {
+    const file = await multiSheetWorkbookFile(
+      {
+        CSE: [
+          ["FIRST NAME", "LAST NAME", "EMAIL ID", "PASSWORD", "/PATH"],
+          ["First", "Copy", "duplicate@avsenggcollege.ac.in", "TempPass@123", "/one"],
+        ],
+        ECE: [
+          [],
+          ["FIRST NAME", "LAST NAME", "EMAIL ID", "PASSWORD", "/PATH"],
+          ["Second", "Copy", "DUPLICATE@avsenggcollege.ac.in", "TempPass@456", "/two"],
+        ],
+      },
+      "THIRD YEAR USERS.xlsx",
+    );
+    const parsed = await service.parse(file, "STUDENTS", {
+      duplicateResolution: "SKIP_ALL",
+    });
+
+    expect(parsed.detectedStudyYear).toBe("3");
+    expect(parsed.duplicateGroups).toHaveLength(1);
+    expect(parsed.duplicateGroups[0]?.locations).toEqual([
+      expect.objectContaining({ sheetName: "CSE", sourceRowNumber: 2 }),
+      expect.objectContaining({ sheetName: "ECE", sourceRowNumber: 3 }),
+    ]);
+    expect(new Set(parsed.errors.map((error) => error.rowNumber))).toEqual(
+      new Set([2, 3]),
+    );
+    expect(parsed.errors[0]?.message).toContain("will be skipped");
+  });
+
+  it("enforces official domains and rejects inexact numeric password cells without exposing their values", async () => {
+    const restrictedService = new ImportsFileService(
+      new ConfigService({
+        S3_BUCKET: "private",
+        S3_ENDPOINT: "http://127.0.0.1:9000",
+        S3_REGION: "us-east-1",
+        S3_ACCESS_KEY: "test",
+        S3_SECRET_KEY: "test-secret",
+        S3_FORCE_PATH_STYLE: true,
+        OFFICIAL_EMAIL_DOMAINS: "avsenggcollege.ac.in",
+      }),
+    );
+    const workbook = new Workbook();
+    const sheet = workbook.addWorksheet("CSE");
+    sheet.addRows([
+      ["FIRST NAME", "LAST NAME", "EMAIL ID", "PASSWORD", "/PATH"],
+      ["Wrong", "Domain", "wrong@example.edu", "", "/one"],
+    ]);
+    sheet.getCell("D2").value = Number.MAX_SAFE_INTEGER + 1;
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    const parsed = await restrictedService.parse(
+      {
+        buffer,
+        originalname: "YEAR 3.xlsx",
+        size: buffer.length,
+      } as Express.Multer.File,
+      "STUDENTS",
+    );
+
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "email",
+          message: expect.stringContaining("official college domain") as string,
+        }),
+        expect.objectContaining({
+          field: "temporary_password",
+          message: expect.stringContaining("without losing precision") as string,
+        }),
+      ]),
+    );
+    expect(parsed.rows[0]?.temporary_password).toBe("");
+    expect(parsed.rows[0]?.password_status).toBe(
+      "Password value requires review",
+    );
+  });
+
   it("preserves leading-zero student temporary passwords and ignores mailbox passwords", async () => {
     const workbook = new Workbook();
     const worksheet = workbook.addWorksheet("Second year");
@@ -397,16 +572,30 @@ describe("ImportsFileService", () => {
     await expect(service.parse(file, "STAFF")).rejects.toThrow(
       "at most 5000 rows",
     );
-  });
+  }, 30_000);
 
-  it("rejects legacy XLS files with conversion guidance", () => {
-    expect(() =>
-      service.validateFile({
-        buffer: Buffer.from("legacy"),
-        originalname: "staff.xls",
-        size: 6,
-      } as Express.Multer.File),
-    ).toThrow("Save legacy .xls files as .xlsx");
+  it("accepts legacy XLS files and preserves formatted password text", async () => {
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      ["Mail ID", "Initial Password"],
+      ["legacy.student@example.edu", "001234"],
+    ]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Legacy");
+    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xls" }) as Buffer;
+    const file = {
+      buffer,
+      originalname: "students.xls",
+      size: buffer.length,
+    } as Express.Multer.File;
+
+    expect(() => service.validateFile(file)).not.toThrow();
+    const parsed = await service.parse(file, "STUDENTS");
+    expect(parsed.selectedSheetName).toBe("Legacy");
+    expect(parsed.rows[0]).toMatchObject({
+      email: "legacy.student@example.edu",
+      temporary_password: "001234",
+    });
+    expect(parsed.errors).toEqual([]);
   });
 });
 
@@ -425,8 +614,8 @@ describe("ImportsService Excel workbooks", () => {
     const worksheet = workbook.getWorksheet("Template");
 
     expect(result.fileName).toBe("staff-import-template.xlsx");
-    expect(worksheet?.getCell("A1").text).toBe("employee_id");
-    expect(worksheet?.getCell("A2").text).toBe("E101");
+    expect(worksheet?.getCell("A1").text).toBe("full_name");
+    expect(worksheet?.getCell("A2").text).toBe("Sample Faculty One");
   });
 
   it("generates formula-safe confidential credential workbooks", async () => {

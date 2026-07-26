@@ -83,6 +83,12 @@ docs
 backups
 scripts
 worker management system2
+.codex-run
+artifacts
+learn language
+legacy
+logo
+logs
 
 # ── Keep these (explicit re-includes after broad excludes) ──
 !apps/api/prisma/**

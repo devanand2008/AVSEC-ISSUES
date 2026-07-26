@@ -19,7 +19,11 @@ Only the following files are permitted to be tracked in this directory:
 - user_data/.gitkeep
 - user_data/README_SECURITY.txt
 - user_data/templates/student-import-template.xlsx (must contain FAKE sample data ONLY)
+- user_data/templates/avs-user-import-template.xlsx (must contain FAKE sample data ONLY)
 
 All real student workbooks (e.g., AVSEC USER NAME AND PASSWORD FOR 2RD YEAR.xlsx)
 MUST remain untracked and private on the local computer or secure local storage.
+Use user_data/private/ for real local import files. Production imports must be
+uploaded through the authenticated Admin Panel; Render cannot read this Windows
+folder.
 ================================================================================

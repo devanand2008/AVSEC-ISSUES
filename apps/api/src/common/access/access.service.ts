@@ -13,7 +13,7 @@ export class AccessService {
   }
 
   issueWhere(user: AuthPrincipal): Prisma.IssueWhereInput {
-    const base: Prisma.IssueWhereInput = { collegeId: user.collegeId };
+    const base: Prisma.IssueWhereInput = { collegeId: user.collegeId, archivedAt: null };
     if (user.permissions.includes("issues.read_all") && this.isCollegeWide(user)) return base;
 
     const conditions: Prisma.IssueWhereInput[] = [];

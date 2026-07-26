@@ -65,15 +65,16 @@ function checkSensitiveFiles() {
     /^user_data\/\.gitkeep$/i,
     /^user_data\/README_SECURITY\.txt$/i,
     /^user_data\/templates\/student-import-template\.xlsx$/i,
+    /^user_data\/templates\/avs-user-import-template\.xlsx$/i,
   ];
 
   const secretPatterns = [
-    /(mongodb(?:\+srv)?:\/\/(?![^:\s]+:(?:build|validation|test|password|strong-password|example|placeholder|ci-[^@\s]+)@)[^:\s]+:[^@\s]+@)/i,
-    /(postgres(?:ql)?:\/\/(?![^:\s]+:(?:build|validation|test|password|strong-password|example|placeholder|ci-[^@\s]+)@)[^:\s]+:[^@\s]+@)/i,
+    /(mongodb(?:\+srv)?:\/\/(?!\$\{)(?![^:\s]+:(?:build|validation|test|password|strong-password|example|placeholder|ci-[^@\s]+)@)[^:\s]+:[^@\s]+@)/i,
+    /(postgres(?:ql)?:\/\/(?!\$\{)(?![^:\s]+:(?:build|validation|test|password|strong-password|example|placeholder|ci-[^@\s]+)@)[^:\s]+:[^@\s]+@)/i,
     /(ghp_[a-zA-Z0-9]{36})/i,
     /(github_pat_[a-zA-Z0-9_]{22,})/i,
     /(rnd_[a-zA-Z0-9]{24,})/i,
-    /(JWT_(?:ACCESS|REFRESH)_SECRET|CSRF_SECRET|SMTP_PASSWORD|S3_SECRET_KEY|WHATSAPP_ACCESS_TOKEN|WHATSAPP_APP_SECRET|RENDER_API_KEY|GITHUB_TOKEN|FIREBASE_PRIVATE_KEY|DEVICE_TOKEN_ENCRYPTION_KEY|PASSWORD_PEPPER|FEEDBACK_SUBMISSION_SECRET)\s*[:=]\s*["']?(?!$|REPLACE|replace|change-this|ci-|example|placeholder|access-secret|refresh-secret|csrf-secret|smtp-password|production-storage-secret|z\.|optional|environment\.|process\.|config\.|Boolean\(|String\(|Number\()[^"'\s#]{16,}/i,
+    /(JWT_(?:ACCESS|REFRESH)_SECRET|CSRF_SECRET|SMTP_PASSWORD|S3_SECRET_KEY|WHATSAPP_ACCESS_TOKEN|WHATSAPP_APP_SECRET|RENDER_API_KEY|GITHUB_TOKEN|FIREBASE_PRIVATE_KEY|DEVICE_TOKEN_ENCRYPTION_KEY|PASSWORD_PEPPER|FEEDBACK_SUBMISSION_SECRET)[ \t]*[:=](?!-)[ \t]*["']?(?!\$\{?|REPLACE|replace|change-this|ci-|example|placeholder|access-secret|refresh-secret|csrf-secret|smtp-password|production-storage-secret|z\.|optional|environment\.|process\.|config\.|Boolean\(|String\(|Number\()[^"'\s#]{16,}/i,
     /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/,
   ];
 

@@ -191,6 +191,72 @@ describe("QrService", () => {
     );
   });
 
+  it("accepts generated QR scan URLs from configured app origins", async () => {
+    const configuredService = new QrService(
+      prisma as never,
+      new ConfigService({
+        WEB_URL: "http://localhost:3000",
+        CORS_ALLOWED_ORIGINS: "https://portal.avs.example.edu",
+      }),
+      audit as never,
+    );
+    prisma.qrCode.findUnique.mockResolvedValue({
+      id: "qr-app-1",
+      publicId: "qr-public-app-1",
+      collegeId: "college-1",
+      qrType: "APPLICATION",
+      label: "AVS app entry",
+      destination: "/",
+      entityType: null,
+      entityId: null,
+      metadata: null,
+      status: "ACTIVE",
+      expiryDate: null,
+    });
+    prisma.qrCode.update.mockResolvedValue({});
+    prisma.qrScanEvent.create.mockResolvedValue({});
+
+    const result = await configuredService.validate(
+      principal(),
+      `https://portal.avs.example.edu/qr/scan/${genericToken}`,
+      { requestId: "request-configured-origin" },
+      "CAMERA",
+    );
+
+    expect(result).toMatchObject({
+      valid: true,
+      qrType: "APPLICATION",
+      destination: "/",
+    });
+  });
+
+  it("generates app QR images that point to the configured local web app", async () => {
+    const configuredService = new QrService(
+      prisma as never,
+      new ConfigService({ WEB_URL: "http://localhost:3000" }),
+      audit as never,
+    );
+    prisma.qrCode.create.mockResolvedValue({
+      id: "qr-created-1",
+      publicId: "qr-public-created-1",
+      qrType: "APPLICATION",
+      label: "Open AVS app",
+      destination: "/",
+      status: "ACTIVE",
+      expiryDate: null,
+      qrUrl: `http://localhost:3000/scan-qr?token=${genericToken}`,
+    });
+
+    const result = await configuredService.createCode(
+      principal({ permissions: ["settings.manage"] }),
+      { qrType: "APPLICATION", label: "Open AVS app" },
+      { requestId: "request-create" },
+    );
+
+    expect(result.secureUrl).toBe(`http://localhost:3000/scan-qr?token=${genericToken}`);
+    expect(result.dataUrl).toMatch(/^data:image\/png;base64,/);
+  }, 20_000);
+
   it("rejects revoked generic QR tokens and records failed scan analytics", async () => {
     prisma.qrCode.findUnique.mockResolvedValue({
       id: "qr-2",

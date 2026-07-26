@@ -1,0 +1,36 @@
+name: avs_college_flutter
+description: AVS College Management mobile client.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.11.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.5.0
+  flutter_secure_storage: ^10.3.1
+  file_picker: 8.3.7
+  image_picker: ^1.2.3
+  socket_io_client: ^3.1.6
+  drift: ^2.34.2
+  drift_flutter: ^0.3.1
+  sqlite3: ^3.5.0
+  cryptography: ^2.9.0
+  file_saver: ^0.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.15.1
+  drift_dev: ^2.34.5
+
+flutter:
+  uses-material-design: true
+
+hooks:
+  user_defines:
+    sqlite3:
+      source: sqlite3mc

@@ -33,6 +33,7 @@ export class PasswordChangeGuard implements CanActivate {
     const allowed = [
       `${authBase}/me`,
       `${authBase}/change-password`,
+      `${authBase}/change-first-password`,
       `${authBase}/logout`,
       `${authBase}/sessions`,
     ];

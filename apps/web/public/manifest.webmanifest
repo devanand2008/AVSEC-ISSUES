@@ -1,12 +1,17 @@
 {
   "name": "AVS Engineering College Campus Management System",
   "short_name": "AVS Campus",
+  "id": "/",
   "description": "Attendance, issue reporting and college communication for AVS Engineering College",
   "start_url": "/",
+  "scope": "/",
+  "lang": "en-IN",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#F8FAFC",
   "theme_color": "#0B3D91",
   "orientation": "any",
+  "categories": ["education", "productivity"],
   "icons": [
     {
       "src": "/icons/avs-icon-192.png",
@@ -18,7 +23,13 @@
       "src": "/icons/avs-icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/avs-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

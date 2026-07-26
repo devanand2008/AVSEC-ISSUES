@@ -1,0 +1,63 @@
+services:
+  postgres:
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong POSTGRES_PASSWORD in .env}
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    ports: !reset []
+    security_opt:
+      - no-new-privileges:true
+
+  minio:
+    ports: !reset []
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?Set a production S3_ACCESS_KEY in .env}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?Set a production S3_SECRET_KEY in .env}
+    security_opt:
+      - no-new-privileges:true
+
+  minio-init:
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?Set a production S3_ACCESS_KEY in .env}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?Set a production S3_SECRET_KEY in .env}
+      S3_BUCKET: ${S3_BUCKET:?Set a private S3_BUCKET in .env}
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    environment:
+      NODE_ENV: production
+      WEB_URL: ${WEB_URL:?Set the public HTTPS WEB_URL in .env}
+      DATABASE_URL: ${DATABASE_URL:?Set the production container DATABASE_URL in .env}
+      COOKIE_SECURE: "true"
+      SWAGGER_ENABLED: "false"
+      SEED_DEVELOPMENT_DATA: "false"
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    pids_limit: 256
+
+  web:
+    environment:
+      NODE_ENV: production
+      HOSTNAME: "0.0.0.0"
+      PORT: "3000"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/apps/web/.next/cache
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    pids_limit: 256

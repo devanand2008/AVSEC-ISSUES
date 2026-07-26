@@ -42,6 +42,7 @@ user_data/*
 !user_data/README_SECURITY.txt
 !user_data/templates/
 !user_data/templates/student-import-template.xlsx
+!user_data/templates/avs-user-import-template.xlsx
 
 # Excel and CSV credential exports
 *.xlsx
@@ -50,6 +51,13 @@ user_data/*
 *.ods
 *.numbers
 !user_data/templates/student-import-template.xlsx
+!user_data/templates/avs-user-import-template.xlsx
+
+# Private user import data
+user_data/private/
+user_data/*.xlsx
+user_data/*.xls
+user_data/*.csv
 
 # Import reports and credential exports
 import-results/
@@ -66,6 +74,11 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
+
+# Local Codex verification and generated audit artifacts
+.codex-run/
+artifacts/
+attendance-page-check.png
 
 # Certificates and keys
 certs/

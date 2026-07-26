@@ -34,6 +34,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [pendingAnnouncements, setPendingAnnouncements] = useState<PendingAnnouncement[]>([]);
   const routeAllowed =
     !user || canAccessPortalPath(pathname, user.permissions, user.roles);
+  const isProfileVerificationExempt = Boolean(
+    user?.roles.some((role) => ["SUPER_ADMIN", "MAIN_ADMIN"].includes(role)),
+  );
+  const profileRestricted = Boolean(
+    user &&
+      !isProfileVerificationExempt &&
+      ["NOT_STARTED", "IN_PROGRESS", "REJECTED", "SUBMITTED"].includes(
+        user.profileCompletionStatus ?? "NOT_STARTED",
+      ),
+  );
   function handleLogout() {
     if (signingOut) return;
     setSigningOut(true);
@@ -48,12 +58,25 @@ export function AppShell({ children }: { children: ReactNode }) {
       router.replace("/suspended");
     else if (user?.mustChangePassword && pathname !== "/change-password")
       router.replace("/change-password");
+    else if (
+      user &&
+      !user.mustChangePassword &&
+      profileRestricted &&
+      pathname !== "/profile/setup"
+    )
+      router.replace("/profile/setup");
+    else if (
+      user &&
+      !profileRestricted &&
+      pathname === "/profile/setup"
+    )
+      router.replace("/");
     else if (user && !routeAllowed) router.replace("/unauthorized");
-  }, [loading, user, router, pathname, routeAllowed]);
+  }, [loading, user, router, pathname, routeAllowed, profileRestricted]);
   
   // Fetch pending announcements
   useEffect(() => {
-    if (loading || !user || !routeAllowed || user.mustChangePassword) return;
+    if (loading || !user || !routeAllowed || user.mustChangePassword || profileRestricted) return;
     if (["/login", "/change-password", "/suspended", "/unauthorized"].includes(pathname)) return;
     
     api.get<PendingAnnouncement[]>("/announcements/me/pending")
@@ -63,9 +86,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         }
       })
       .catch(console.error);
-  }, [loading, user, routeAllowed, pathname]);
+  }, [loading, user, routeAllowed, pathname, profileRestricted]);
   useEffect(() => {
-    if (loading || !user || user.mustChangePassword) return;
+    if (loading || !user || user.mustChangePassword || profileRestricted) return;
     const source = new EventSource(apiEventUrl("/announcements/stream"), { withCredentials: true });
     source.onmessage = () => {
       api.get<PendingAnnouncement[]>("/announcements/me/pending")
@@ -76,7 +99,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
     source.onerror = () => source.close();
     return () => source.close();
-  }, [loading, user]);
+  }, [loading, user, profileRestricted]);
   useEffect(() => {
     if (loading || !user) return;
     const frame = window.requestAnimationFrame(() => {

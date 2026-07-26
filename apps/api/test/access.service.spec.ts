@@ -10,11 +10,11 @@ describe("AccessService", () => {
   const service = new AccessService();
   it("limits a student issue predicate to reports owned by that student", () => {
     const user = principal();
-    expect(service.issueWhere(user)).toEqual({ collegeId: user.collegeId, OR: [{ reporterId: user.id }, { affectedUsers: { some: { userId: user.id } } }] });
+    expect(service.issueWhere(user)).toEqual({ collegeId: user.collegeId, archivedAt: null, OR: [{ reporterId: user.id }, { affectedUsers: { some: { userId: user.id } } }] });
   });
   it("allows a principal with college scope to use the college predicate", () => {
     const user = principal({ roles: ["PRINCIPAL"], permissions: ["issues.read_all"], scopes: [{ type: "COLLEGE", id: "00000000-0000-0000-0000-000000000003", issueCategoryId: null }] });
-    expect(service.issueWhere(user)).toEqual({ collegeId: user.collegeId });
+    expect(service.issueWhere(user)).toEqual({ collegeId: user.collegeId, archivedAt: null });
   });
   it("unions scopes inside one dimension and intersects distinct dimensions", () => {
     const user = principal({
@@ -28,6 +28,7 @@ describe("AccessService", () => {
     });
     expect(service.issueWhere(user)).toEqual({
       collegeId: user.collegeId,
+      archivedAt: null,
       OR: [{
         AND: [
           { OR: [{ blockId: "00000000-0000-0000-0000-000000000010" }, { roomId: "00000000-0000-0000-0000-000000000011" }] },
@@ -46,12 +47,13 @@ describe("AccessService", () => {
         { type: "ISSUE_CATEGORY", id: null, issueCategoryId: categoryId },
       ],
     });
-    expect(service.issueWhere(user)).toEqual({ collegeId: user.collegeId, OR: [{ AND: [{ OR: [{ categoryId }] }] }] });
+    expect(service.issueWhere(user)).toEqual({ collegeId: user.collegeId, archivedAt: null, OR: [{ AND: [{ OR: [{ categoryId }] }] }] });
   });
   it("honors ASSIGNED_ISSUES as a scoped dimension", () => {
     const user = principal({ permissions: ["issues.read_scope"], scopes: [{ type: "ASSIGNED_ISSUES", id: null, issueCategoryId: null }] });
     expect(service.issueWhere(user)).toEqual({
       collegeId: user.collegeId,
+      archivedAt: null,
       OR: [{ AND: [{ OR: [{ assignedToId: user.id }, { team: { members: { some: { userId: user.id, isActive: true } } } }] }] }],
     });
   });
@@ -59,6 +61,7 @@ describe("AccessService", () => {
     const user = principal({ permissions: ["issues.read_own", "issues.read_assigned"], scopes: [] });
     expect(service.issueWhere(user)).toEqual({
       collegeId: user.collegeId,
+      archivedAt: null,
       OR: [
         { reporterId: user.id },
         { affectedUsers: { some: { userId: user.id } } },

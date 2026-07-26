@@ -7,17 +7,21 @@ import type { Prisma } from "../../generated/prisma/client";
 import { AccountStatus, AttendanceCode, IssuePriority, RoomType, ScopeType } from "../../generated/prisma/enums";
 import type { CredentialExportRow, ImportEntityType, ImportMode, ImportedRecord, ImportRow, ImportRowError } from "./import.types";
 
+interface ImportCreateOptions {
+  resetExistingPasswords?: boolean;
+}
+
 @Injectable()
 export class ImportsHandlerService {
   constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) {}
 
-  async create(entityType: ImportEntityType, collegeId: string, row: ImportRow, rowNumber: number, importJobId: string, requestedById: string, importMode: ImportMode = "CREATE_ONLY"): Promise<ImportedRecord> {
+  async create(entityType: ImportEntityType, collegeId: string, row: ImportRow, rowNumber: number, importJobId: string, requestedById: string, importMode: ImportMode = "CREATE_ONLY", options: ImportCreateOptions = {}): Promise<ImportedRecord> {
     return this.prisma.$transaction(async (tx) => {
       let record: ImportedRecord;
       switch (entityType) {
-        case "USERS": record = await this.createUser(tx, collegeId, row, rowNumber, "USER", importMode); break;
-        case "STUDENTS": record = await this.createUser(tx, collegeId, row, rowNumber, "STUDENT", importMode); break;
-        case "STAFF": record = await this.createUser(tx, collegeId, row, rowNumber, "STAFF", importMode); break;
+        case "USERS": record = await this.createUser(tx, collegeId, row, rowNumber, "USER", importMode, importJobId, options); break;
+        case "STUDENTS": record = await this.createUser(tx, collegeId, row, rowNumber, "STUDENT", importMode, importJobId, options); break;
+        case "STAFF": record = await this.createUser(tx, collegeId, row, rowNumber, "STAFF", importMode, importJobId, options); break;
         case "DEPARTMENTS": record = await this.createDepartment(tx, collegeId, row, rowNumber); break;
         case "PROGRAMMES": record = await this.createProgramme(tx, collegeId, row, rowNumber); break;
         case "CLASSES": record = await this.createClass(tx, collegeId, row, rowNumber); break;
@@ -93,9 +97,9 @@ export class ImportsHandlerService {
     });
     if (roles.length !== new Set(roleCodes).size) throw new BadRequestException("One or more role codes do not exist or are inactive.");
 
-    const createsStudentProfile = kind === "STUDENT" || (kind === "USER" && roleCodes.includes("STUDENT"));
-    const staffRoleCodes = ["PRINCIPAL", "VICE_PRINCIPAL", "HOD", "CLASS_COORDINATOR", "FACULTY", "MAINTENANCE_ADMIN", "MAINTENANCE_SUPERVISOR", "MAINTENANCE_STAFF", "ELECTRICIAN", "PLUMBER", "IT_SUPPORT", "LAB_TECHNICIAN", "HOUSEKEEPING", "SECURITY", "OTHER_RESPONSIBLE"];
-    const createsStaffProfile = kind === "STAFF" || (kind === "USER" && roleCodes.some((code) => staffRoleCodes.includes(code)));
+    this.ensureAccountIdentity(row);
+    const createsStudentProfile = this.hasStudentProfileData(row);
+    const createsStaffProfile = this.hasStaffProfileData(row);
     const existing = await this.findExistingUserForValidation(collegeId, row, createsStudentProfile, createsStaffProfile);
     const normalizedEmail = row.email?.toLowerCase() || undefined;
     const duplicate = await this.prisma.user.findFirst({
@@ -107,6 +111,7 @@ export class ImportsHandlerService {
     if (!existing && importMode === "UPDATE_ONLY") throw new BadRequestException("No existing user matched the stable ID for update.");
 
     const accountStatus = this.accountStatus(row.account_status);
+    if (row.department_code && !(await this.resolveDepartmentByCodeOrName(this.prisma, collegeId, row.department_code))) throw new BadRequestException(`Department not found. Select an existing department or create it before importing.`);
     if (createsStudentProfile) await this.validateStudentReferences(collegeId, row);
     if (createsStaffProfile) await this.validateStaffReferences(collegeId, row, roleCodes, accountStatus, existing?.id);
   }
@@ -121,11 +126,12 @@ export class ImportsHandlerService {
       if (profile) return { id: profile.userId };
     }
     if (row.college_identity_id) return this.prisma.user.findFirst({ where: { collegeId, collegeIdentityId: row.college_identity_id.trim() }, select: { id: true } });
+    if (row.email) return this.prisma.user.findFirst({ where: { collegeId, normalizedEmail: row.email.trim().toLowerCase() }, select: { id: true } });
     return null;
   }
 
   private async validateStudentReferences(collegeId: string, row: ImportRow): Promise<void> {
-    const department = await this.prisma.department.findFirst({ where: { collegeId, code: this.code(row.department_code), isActive: true }, select: { id: true } });
+    const department = await this.resolveDepartmentByCodeOrName(this.prisma, collegeId, row.department_code);
     if (!department) throw new BadRequestException(`Department code ${row.department_code} was not found.`);
     const programme = await this.prisma.programme.findFirst({ where: { collegeId, departmentId: department.id, code: this.code(row.programme_code), isActive: true }, select: { id: true } });
     if (!programme) throw new BadRequestException(`Programme code ${row.programme_code} was not found in the selected department.`);
@@ -139,7 +145,7 @@ export class ImportsHandlerService {
   private async validateStaffReferences(collegeId: string, row: ImportRow, roleCodes: string[], accountStatus: AccountStatus, existingUserId?: string): Promise<void> {
     let departmentId: string | undefined;
     if (row.department_code) {
-      const department = await this.prisma.department.findFirst({ where: { collegeId, code: this.code(row.department_code), isActive: true }, select: { id: true } });
+      const department = await this.resolveDepartmentByCodeOrName(this.prisma, collegeId, row.department_code);
       if (!department) throw new BadRequestException(`Department code ${row.department_code} was not found.`);
       departmentId = department.id;
     }
@@ -153,7 +159,7 @@ export class ImportsHandlerService {
     }
   }
 
-  private async createUser(tx: Prisma.TransactionClient, collegeId: string, row: ImportRow, rowNumber: number, kind: "USER" | "STUDENT" | "STAFF", importMode: ImportMode): Promise<ImportedRecord> {
+  private async createUser(tx: Prisma.TransactionClient, collegeId: string, row: ImportRow, rowNumber: number, kind: "USER" | "STUDENT" | "STAFF", importMode: ImportMode, importJobId: string, options: ImportCreateOptions): Promise<ImportedRecord> {
     if (importMode === "VALIDATE_ONLY") throw new BadRequestException("Validate-only jobs cannot create or update users.");
     const roleCodes = kind === "STUDENT" ? ["STUDENT"] : this.list(row.role_codes);
     if (!roleCodes.length) throw new BadRequestException("At least one role code is required.");
@@ -163,15 +169,14 @@ export class ImportsHandlerService {
     const roles = await tx.role.findMany({ where: { code: { in: roleCodes }, isActive: true, OR: [{ collegeId }, { collegeId: null }] }, select: { id: true, code: true } });
     if (roles.length !== new Set(roleCodes).size) throw new BadRequestException("One or more role codes do not exist or are inactive.");
     const normalizedEmail = row.email?.toLowerCase() || undefined;
-    const createsStudentProfile = kind === "STUDENT" || (kind === "USER" && roleCodes.includes("STUDENT"));
-    const staffRoleCodes = ["PRINCIPAL", "VICE_PRINCIPAL", "HOD", "CLASS_COORDINATOR", "FACULTY", "MAINTENANCE_ADMIN", "MAINTENANCE_SUPERVISOR", "MAINTENANCE_STAFF", "ELECTRICIAN", "PLUMBER", "IT_SUPPORT", "LAB_TECHNICIAN", "HOUSEKEEPING", "SECURITY", "OTHER_RESPONSIBLE"];
-    const createsStaffProfile = kind === "STAFF" || (kind === "USER" && roleCodes.some((code) => staffRoleCodes.includes(code)));
+    const createsStudentProfile = this.hasStudentProfileData(row);
+    const createsStaffProfile = this.hasStaffProfileData(row);
     const existing = await this.findExistingUser(tx, collegeId, row, createsStudentProfile, createsStaffProfile);
     const duplicate = await tx.user.findFirst({ where: { collegeId, OR: [{ collegeIdentityId: row.college_identity_id }, ...(normalizedEmail ? [{ normalizedEmail }] : [])] }, select: { id: true } });
     if (duplicate && duplicate.id !== existing?.id) throw new BadRequestException("A user with this college ID or email already exists.");
     if (existing) {
       if (importMode === "CREATE_ONLY") throw new BadRequestException("A user with this stable ID already exists.");
-      return this.updateUser(tx, collegeId, row, rowNumber, existing.id, roleCodes, roles, createsStudentProfile, createsStaffProfile);
+      return this.updateUser(tx, collegeId, row, rowNumber, existing.id, roleCodes, roles, createsStudentProfile, createsStaffProfile, importJobId, options);
     }
     if (importMode === "UPDATE_ONLY") throw new BadRequestException("No existing user matched the stable ID for update.");
     const accountStatus = this.accountStatus(row.account_status);
@@ -187,9 +192,10 @@ export class ImportsHandlerService {
     const scopes: Array<{ scopeType: ScopeType; scopeId?: string; issueCategoryId?: string }> = [];
     let studentData: { departmentId: string; programmeId: string; sectionId: string } | undefined;
     let staffDepartmentId: string | undefined;
+    const basicDepartment = row.department_code ? await this.resolveDepartmentByCodeOrName(tx, collegeId, row.department_code) : null;
     if (createsStudentProfile) {
       if (!row.student_id) throw new BadRequestException("student_id is required for student accounts.");
-      const department = await tx.department.findFirst({ where: { collegeId, code: this.code(row.department_code), isActive: true } });
+      const department = basicDepartment;
       if (!department) throw new BadRequestException("department_code was not found.");
       const programme = await tx.programme.findFirst({ where: { collegeId, departmentId: department.id, code: this.code(row.programme_code), isActive: true } });
       if (!programme) throw new BadRequestException("programme_code was not found in the selected department.");
@@ -203,11 +209,12 @@ export class ImportsHandlerService {
       }
       if (!section) throw new BadRequestException("section_code was not found.");
       studentData = { departmentId: department.id, programmeId: programme.id, sectionId: section.id };
+      await this.assertSectionCapacity(tx, section.id);
       scopes.push({ scopeType: ScopeType.SECTION, scopeId: section.id });
     } else if (createsStaffProfile) {
       if (!row.employee_id) throw new BadRequestException("employee_id is required for staff accounts.");
       if (row.department_code) {
-        const department = await tx.department.findFirst({ where: { collegeId, code: this.code(row.department_code), isActive: true } });
+        const department = basicDepartment;
         if (!department) throw new BadRequestException("department_code was not found.");
         staffDepartmentId = department.id; scopes.push({ scopeType: ScopeType.DEPARTMENT, scopeId: department.id });
         if (accountStatus === AccountStatus.ACTIVE && roleCodes.includes("HOD")) {
@@ -223,6 +230,11 @@ export class ImportsHandlerService {
       if (issueCategory) scopes.push({ scopeType: ScopeType.ISSUE_CATEGORY, issueCategoryId: issueCategory.id });
       const locationScope = await this.resolveLocationScope(tx, collegeId, row);
       if (locationScope) scopes.push(locationScope);
+    } else if (basicDepartment) {
+      scopes.push({ scopeType: ScopeType.DEPARTMENT, scopeId: basicDepartment.id });
+    } else if (kind === "STUDENT") {
+      // Basic student imports may contain only email and a temporary password.
+      // Academic scope is added after the student completes the profile wizard.
     } else {
       const resolved = await this.resolveScope(tx, collegeId, row.scope_type, row.scope_code, roleCodes);
       scopes.push({ scopeType: resolved.scopeType, scopeId: resolved.scopeId });
@@ -236,12 +248,18 @@ export class ImportsHandlerService {
       normalizedEmail,
       mobile: row.mobile || undefined,
       whatsappNumber: row.whatsapp_number || undefined,
+      onboardingStudyYear: this.importStudyYear(row.year),
+      importBatchId: importJobId,
       status: accountStatus,
       mustChangePassword: true,
+      profileCompletionStatus: createsStudentProfile || createsStaffProfile ? "SUBMITTED" : "NOT_STARTED",
+      profileCompletionPercentage: createsStudentProfile || createsStaffProfile ? 100 : 0,
+      ...(createsStudentProfile || createsStaffProfile ? { profileSubmittedAt: new Date() } : {}),
       credential: { create: { passwordHash, passwordChangedAt: null } },
       roles: { create: roles.map((role) => ({ roleId: role.id })) },
       scopes: { create: scopes },
-      ...(studentData ? { studentProfile: { create: { collegeId, ...studentData, studentId: row.student_id, legacyId: row.legacy_id || undefined, admissionYear: this.integer(row.admission_year, "admission_year", 1990, 2200), rollNumber: row.roll_number || undefined } } } : {}),
+      ...(studentData ? { sectionMemberships: { create: { sectionId: studentData.sectionId, startsOn: this.today() } } } : {}),
+      ...(studentData ? { studentProfile: { create: { collegeId, ...studentData, studentId: row.student_id, legacyId: row.legacy_id || undefined, admissionYear: this.integer(row.admission_year, "admission_year", 1990, 2200), rollNumber: row.roll_number || undefined, studyYear: this.importStudyYear(row.year) } } } : {}),
       ...(createsStaffProfile ? { staffProfile: { create: { collegeId, departmentId: staffDepartmentId, employeeId: row.employee_id, designation: row.designation || undefined, joinedOn: this.date(row.joined_on) } } } : {}),
     } });
     if (createsStaffProfile && roleCodes.includes("CLASS_COORDINATOR") && row.section_code) {
@@ -279,7 +297,26 @@ export class ImportsHandlerService {
     if (row.college_identity_id) {
       return tx.user.findFirst({ where: { collegeId, collegeIdentityId: row.college_identity_id.trim() }, select: { id: true } });
     }
+    if (row.email) {
+      return tx.user.findFirst({ where: { collegeId, normalizedEmail: row.email.trim().toLowerCase() }, select: { id: true } });
+    }
     return null;
+  }
+
+  private async assertSectionCapacity(tx: Prisma.TransactionClient, sectionId: string, excludeUserId?: string): Promise<void> {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${sectionId}))`;
+    const section = await tx.section.findFirst({ where: { id: sectionId, isActive: true, archivedAt: null }, select: { capacity: true } });
+    if (!section) throw new BadRequestException("The selected section is not active.");
+    const currentStudentCount = await tx.studentProfile.count({
+      where: {
+        sectionId,
+        ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
+        user: { status: "ACTIVE", archivedAt: null },
+      },
+    });
+    if (currentStudentCount >= section.capacity) {
+      throw new BadRequestException("Section capacity reached. Create another section or move students before adding more.");
+    }
   }
 
   private async updateUser(
@@ -292,6 +329,8 @@ export class ImportsHandlerService {
     roles: Array<{ id: string; code: string }>,
     createsStudentProfile: boolean,
     createsStaffProfile: boolean,
+    importJobId: string,
+    options: ImportCreateOptions,
   ): Promise<ImportedRecord> {
     const accountStatus = this.accountStatus(row.account_status);
     const normalizedEmail = row.email?.toLowerCase() || undefined;
@@ -304,6 +343,8 @@ export class ImportsHandlerService {
     }
     if ("mobile" in row) data.mobile = row.mobile || null;
     if ("whatsapp_number" in row) data.whatsappNumber = row.whatsapp_number || null;
+    if (row.year) data.onboardingStudyYear = this.importStudyYear(row.year);
+    data.importBatchId = importJobId;
     if (row.account_status) data.status = accountStatus;
 
     if (accountStatus === AccountStatus.ACTIVE && roleCodes.includes("PRINCIPAL")) {
@@ -316,18 +357,19 @@ export class ImportsHandlerService {
     let staffDepartmentId: string | undefined;
 
     if (createsStudentProfile && row.department_code && row.programme_code && row.section_code) {
-      const department = await tx.department.findFirst({ where: { collegeId, code: this.code(row.department_code), isActive: true } });
+      const department = await this.resolveDepartmentByCodeOrName(tx, collegeId, row.department_code);
       if (!department) throw new BadRequestException("department_code was not found.");
       const programme = await tx.programme.findFirst({ where: { collegeId, departmentId: department.id, code: this.code(row.programme_code), isActive: true } });
       if (!programme) throw new BadRequestException("programme_code was not found in the selected department.");
       const section = await this.resolveAcademicSection(tx, collegeId, row);
       studentData = { departmentId: department.id, programmeId: programme.id, sectionId: section.id };
+      await this.assertSectionCapacity(tx, section.id, userId);
       scopes.push({ scopeType: ScopeType.SECTION, scopeId: section.id });
     }
 
     if (createsStaffProfile) {
       if (row.department_code) {
-        const department = await tx.department.findFirst({ where: { collegeId, code: this.code(row.department_code), isActive: true } });
+        const department = await this.resolveDepartmentByCodeOrName(tx, collegeId, row.department_code);
         if (!department) throw new BadRequestException("department_code was not found.");
         staffDepartmentId = department.id;
         scopes.push({ scopeType: ScopeType.DEPARTMENT, scopeId: department.id });
@@ -344,10 +386,14 @@ export class ImportsHandlerService {
       if (issueCategory) scopes.push({ scopeType: ScopeType.ISSUE_CATEGORY, issueCategoryId: issueCategory.id });
       const locationScope = await this.resolveLocationScope(tx, collegeId, row);
       if (locationScope) scopes.push(locationScope);
+    } else if (row.department_code) {
+      const department = await this.resolveDepartmentByCodeOrName(tx, collegeId, row.department_code);
+      if (!department) throw new BadRequestException("department_code was not found.");
+      scopes.push({ scopeType: ScopeType.DEPARTMENT, scopeId: department.id });
     }
 
     const now = new Date();
-    const temporaryPassword = row.temporary_password?.trim();
+    const temporaryPassword = options.resetExistingPasswords ? row.temporary_password?.trim() : "";
     let credential: CredentialExportRow | undefined;
     if (temporaryPassword) {
       this.assertTemporaryPassword(temporaryPassword);
@@ -376,10 +422,25 @@ export class ImportsHandlerService {
     }
 
     if (studentData) {
+      const existingProfile = await tx.studentProfile.findUnique({ where: { userId }, select: { sectionId: true } });
       await tx.studentProfile.upsert({
         where: { userId },
-        create: { collegeId, userId, ...studentData, studentId: row.student_id, legacyId: row.legacy_id || undefined, admissionYear: this.integer(row.admission_year, "admission_year", 1990, 2200), rollNumber: row.roll_number || undefined },
-        update: { ...studentData, studentId: row.student_id, legacyId: row.legacy_id || undefined, admissionYear: this.integer(row.admission_year, "admission_year", 1990, 2200), rollNumber: row.roll_number || undefined },
+        create: { collegeId, userId, ...studentData, studentId: row.student_id, legacyId: row.legacy_id || undefined, admissionYear: this.integer(row.admission_year, "admission_year", 1990, 2200), rollNumber: row.roll_number || undefined, studyYear: this.importStudyYear(row.year) },
+        update: { ...studentData, studentId: row.student_id, legacyId: row.legacy_id || undefined, admissionYear: this.integer(row.admission_year, "admission_year", 1990, 2200), rollNumber: row.roll_number || undefined, studyYear: this.importStudyYear(row.year) },
+      });
+      if (existingProfile?.sectionId !== studentData.sectionId) {
+        const startsOn = this.today();
+        await tx.sectionMembership.updateMany({ where: { studentUserId: userId, isActive: true }, data: { isActive: false, endsOn: startsOn } });
+        await tx.sectionMembership.create({ data: { studentUserId: userId, sectionId: studentData.sectionId, startsOn } });
+      }
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          profileCompletionStatus: "SUBMITTED",
+          profileCompletionPercentage: 100,
+          profileSubmittedAt: now,
+          profileRejectionReason: null,
+        },
       });
     }
     if (createsStaffProfile && row.employee_id) {
@@ -387,6 +448,15 @@ export class ImportsHandlerService {
         where: { userId },
         create: { collegeId, userId, departmentId: staffDepartmentId, employeeId: row.employee_id, designation: row.designation || undefined, joinedOn: this.date(row.joined_on) },
         update: { ...(row.department_code ? { departmentId: staffDepartmentId } : {}), employeeId: row.employee_id, designation: row.designation || undefined, joinedOn: this.date(row.joined_on) },
+      });
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          profileCompletionStatus: "SUBMITTED",
+          profileCompletionPercentage: 100,
+          profileSubmittedAt: now,
+          profileRejectionReason: null,
+        },
       });
     }
     if (createsStaffProfile && roleCodes.includes("CLASS_COORDINATOR") && row.section_code) {
@@ -459,7 +529,7 @@ export class ImportsHandlerService {
   }
 
   private async createProgramme(tx: Prisma.TransactionClient, collegeId: string, row: ImportRow, rowNumber: number): Promise<ImportedRecord> {
-    const department = await tx.department.findFirst({ where: { collegeId, code: this.code(row.department_code), isActive: true } });
+    const department = await this.resolveDepartmentByCodeOrName(tx, collegeId, row.department_code);
     if (!department) throw new BadRequestException("department_code was not found.");
     const item = await tx.programme.create({ data: { collegeId, departmentId: department.id, code: this.code(row.code), name: row.name, durationYears: this.integer(row.duration_years, "duration_years", 1, 12) } });
     return this.record(rowNumber, "Programme", item.id, `${item.code} - ${item.name}`);
@@ -474,7 +544,7 @@ export class ImportsHandlerService {
     if (!programme) throw new BadRequestException("programme_code was not found.");
     const semester = await tx.semester.findUnique({ where: { programmeId_academicYearId_number: { programmeId: programme.id, academicYearId: academicYear.id, number: this.integer(row.semester_number, "semester_number", 1, 30) } } });
     if (!semester?.isActive) throw new BadRequestException("The requested semester was not found or is inactive.");
-    const item = await tx.section.create({ data: { semesterId: semester.id, code: this.code(row.code), name: row.name, capacity: this.optionalInteger(row.capacity, "capacity", 1, 10_000) } });
+    const item = await tx.section.create({ data: { semesterId: semester.id, code: this.code(row.code), name: row.name, capacity: this.optionalInteger(row.capacity, "capacity", 1, 70) ?? 70 } });
     return this.record(rowNumber, "Section", item.id, `${item.code} - ${item.name}`);
   }
 
@@ -690,6 +760,56 @@ export class ImportsHandlerService {
     return undefined;
   }
 
+  private hasStudentProfileData(row: ImportRow): boolean {
+    return Boolean(row.programme_code || row.section_code || row.academic_year || row.semester_number || row.roll_number || row.admission_year);
+  }
+
+  private hasStaffProfileData(row: ImportRow): boolean {
+    return Boolean(row.employee_id || row.designation || row.joined_on || row.specialization || row.shift || row.assigned_block || row.assigned_floor || row.assigned_room || row.assigned_issue_category);
+  }
+
+  private async resolveDepartmentByCodeOrName(tx: Prisma.TransactionClient | PrismaService, collegeId: string, value: string): Promise<{ id: string; code: string; name: string } | null> {
+    const raw = value.trim();
+    if (!raw) return null;
+    const normalized = this.code(raw);
+    const compact = normalized.replace(/[^A-Z0-9]/g, "");
+    const aliases: Record<string, string> = {
+      CSEAIML: "CSE(AI&ML)",
+      CSEAI: "CSE(AI&ML)",
+      AIML: "CSE(AI&ML)",
+      AIANDML: "CSE(AI&ML)",
+      COMPUTERSCIENCEANDENGINEERINGAIANDML: "CSE(AI&ML)",
+      MECH: "ME",
+      MECHANICALENGINEERING: "ME",
+    };
+    const aliasCode = aliases[compact] ?? aliases[normalized] ?? normalized;
+    return tx.department.findFirst({
+      where: {
+        collegeId,
+        isActive: true,
+        OR: [
+          { code: raw },
+          { name: raw },
+          { code: { equals: raw, mode: "insensitive" } },
+          { name: { equals: raw, mode: "insensitive" } },
+          { shortName: { equals: raw, mode: "insensitive" } },
+          { code: aliasCode },
+          { code: { equals: aliasCode, mode: "insensitive" } },
+        ],
+      },
+      select: { id: true, code: true, name: true },
+    });
+  }
+
+  private ensureAccountIdentity(row: ImportRow): void {
+    if (!row.email?.trim() && !row.college_identity_id?.trim()) {
+      throw new BadRequestException("Email is required for basic account imports.");
+    }
+    if (!row.college_identity_id?.trim() && row.email?.trim()) {
+      row.college_identity_id = row.email.trim().toLowerCase().slice(0, 60);
+    }
+  }
+
   private record(rowNumber: number, model: string, id: string, label: string): ImportedRecord { return { rowNumber, model, id, label }; }
   private code(value: string): string { return value.trim().toUpperCase(); }
   private list(value: string): string[] { return [...new Set((value || "").split(/[;,|]/).map((item) => this.code(item)).filter(Boolean))]; }
@@ -697,6 +817,27 @@ export class ImportsHandlerService {
     const status = (value || "ACTIVE").trim().toUpperCase() as AccountStatus;
     if (!Object.values(AccountStatus).includes(status)) throw new BadRequestException("account_status is not recognized.");
     return status;
+  }
+  private importStudyYear(value?: string): number | undefined {
+    if (!value?.trim()) return undefined;
+    const aliases: Record<string, number> = {
+      "2": 2,
+      "2ND": 2,
+      "2RD": 2,
+      SECOND: 2,
+      SECOND_YEAR: 2,
+      "3": 3,
+      "3RD": 3,
+      THIRD: 3,
+      THIRD_YEAR: 3,
+    };
+    const normalized = value.trim().toUpperCase().replace(/[\s-]+/g, "_");
+    const year = aliases[normalized];
+    if (!year)
+      throw new BadRequestException(
+        "study_year must be Second Year or Third Year.",
+      );
+    return year;
   }
   private boolean(value?: string): boolean { return ["true", "yes", "1"].includes((value || "").toLowerCase()); }
   private date(value?: string): Date | undefined { return value ? new Date(`${value}T00:00:00.000Z`) : undefined; }

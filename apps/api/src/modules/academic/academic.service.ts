@@ -6,6 +6,8 @@ import { AuditService } from "../audit/audit.service";
 import type {
   CreateClassCoordinatorAssignmentDto,
   CreateClassRepresentativeAssignmentDto,
+  CreateClassStaffAssignmentDto,
+  AssignSectionStudentDto,
   CreateDepartmentDto,
   CreateFacultySubjectAssignmentDto,
   UpdateDepartmentDto,
@@ -210,14 +212,21 @@ export class AcademicService {
         },
         coordinatorAssignments: { where: { isActive: true }, take: 1, orderBy: { validFrom: "desc" }, include: { coordinator: { select: { publicId: true, fullName: true } } } },
         representativeAssignments: { where: { isActive: true }, take: 1, orderBy: { validFrom: "desc" }, include: { representative: { select: { publicId: true, fullName: true } } } },
-        _count: { select: { studentProfiles: true, attendanceSessions: true } },
+        staffAssignments: { where: { isActive: true }, include: { staff: { select: { publicId: true, fullName: true } } } },
+        _count: { select: { studentProfiles: { where: { user: { status: "ACTIVE", archivedAt: null } } }, attendanceSessions: true } },
       },
       orderBy: { code: "asc" },
     });
     const roomIds = [...new Set(sections.flatMap((section) => section.assignedRoomId ? [section.assignedRoomId] : []))];
     const rooms = roomIds.length ? await this.prisma.room.findMany({ where: { id: { in: roomIds } }, select: { id: true, code: true, name: true, floor: { select: { name: true, block: { select: { name: true } } } } } }) : [];
     const byId = new Map(rooms.map((room) => [room.id, room]));
-    return sections.map((section) => ({ ...section, assignedRoom: section.assignedRoomId ? byId.get(section.assignedRoomId) ?? null : null }));
+    return sections.map((section) => ({
+      ...section,
+      assignedRoom: section.assignedRoomId ? byId.get(section.assignedRoomId) ?? null : null,
+      currentStudentCount: section._count.studentProfiles,
+      maximumCapacity: section.capacity,
+      availableSeats: Math.max(0, section.capacity - section._count.studentProfiles),
+    }));
   }
 
   async section(user: AuthPrincipal, id: string) {
@@ -229,11 +238,13 @@ export class AcademicService {
         },
         coordinatorAssignments: { where: { isActive: true }, take: 1, orderBy: { validFrom: "desc" }, include: { coordinator: { select: { publicId: true, fullName: true } } } },
         representativeAssignments: { where: { isActive: true }, take: 1, orderBy: { validFrom: "desc" }, include: { representative: { select: { publicId: true, fullName: true } } } },
-        _count: { select: { studentProfiles: true, attendanceSessions: true } },
+        staffAssignments: { where: { isActive: true }, include: { staff: { select: { publicId: true, fullName: true, collegeIdentityId: true } } } },
+        memberships: { where: { isActive: true }, include: { student: { select: { publicId: true, fullName: true, collegeIdentityId: true } } }, orderBy: { startsOn: "asc" } },
+        _count: { select: { studentProfiles: { where: { user: { status: "ACTIVE", archivedAt: null } } }, attendanceSessions: true } },
       },
     });
     if (!section) throw new NotFoundException("Section not found.");
-    return section;
+    return { ...section, currentStudentCount: section._count.studentProfiles, maximumCapacity: section.capacity, availableSeats: Math.max(0, section.capacity - section._count.studentProfiles) };
   }
 
   allSubjects(user: AuthPrincipal, semesterId?: string) {
@@ -251,11 +262,11 @@ export class AcademicService {
 
   async assignments(user: AuthPrincipal) {
     const sectionCollege = { semester: { programme: { collegeId: user.collegeId } } };
-    const [faculty, coordinators, representatives] = await Promise.all([
+    const [faculty, coordinators, representatives, classStaff] = await Promise.all([
       this.prisma.facultySubjectAssignment.findMany({
         where: { section: sectionCollege },
         select: {
-          id: true, validFrom: true, validUntil: true, isActive: true,
+          id: true, validFrom: true, validUntil: true, isActive: true, assignmentType: true, attendancePermission: true, learningResourcePermission: true, assessmentPermission: true,
           faculty: { select: { publicId: true, collegeIdentityId: true, fullName: true } },
           subject: { select: { id: true, code: true, name: true, semesterId: true } },
           section: { select: { id: true, code: true, name: true, semesterId: true, semester: { select: { name: true, programme: { select: { name: true } } } } } },
@@ -280,8 +291,17 @@ export class AcademicService {
         },
         orderBy: [{ isActive: "desc" }, { validFrom: "desc" }],
       }),
+      this.prisma.classStaffAssignment.findMany({
+        where: { section: sectionCollege },
+        select: {
+          id: true, validFrom: true, validUntil: true, isActive: true, assignmentType: true,
+          staff: { select: { publicId: true, collegeIdentityId: true, fullName: true } },
+          section: { select: { id: true, code: true, name: true, semesterId: true, semester: { select: { name: true, programme: { select: { name: true } } } } } },
+        },
+        orderBy: [{ isActive: "desc" }, { validFrom: "desc" }],
+      }),
     ]);
-    return { faculty, coordinators, representatives };
+    return { faculty, coordinators, representatives, classStaff };
   }
 
   async assignmentOptions(user: AuthPrincipal) {
@@ -416,7 +436,7 @@ export class AcademicService {
         displayName: input.displayName?.trim(),
         assignedRoomId: input.assignedRoomId,
         officialGroupEnabled: input.officialGroupEnabled ?? true,
-        capacity: input.capacity,
+        capacity: input.capacity ?? 70,
       },
     });
     await this.audit.record({ actorId: user.id, action: "section.created", entityType: "Section", entityId: section.id, afterValue: { semesterId: section.semesterId, code: section.code, name: section.name }, requestId });
@@ -460,7 +480,17 @@ export class AcademicService {
       });
       if (conflict) throw new ConflictException("This faculty member already has an overlapping assignment for the subject and section.");
       const assignment = await tx.facultySubjectAssignment.create({
-        data: { facultyId: faculty.id, subjectId: subject.id, sectionId: section.id, validFrom, validUntil },
+        data: {
+          facultyId: faculty.id,
+          subjectId: subject.id,
+          sectionId: section.id,
+          validFrom,
+          validUntil,
+          assignmentType: input.assignmentType ?? "PRIMARY_FACULTY",
+          attendancePermission: input.attendancePermission ?? input.assignmentType !== "GUEST_FACULTY",
+          learningResourcePermission: input.learningResourcePermission ?? false,
+          assessmentPermission: input.assessmentPermission ?? false,
+        },
       });
       await this.audit.record({
         actorId: user.id, action: "faculty_subject_assignment.created", entityType: "FacultySubjectAssignment", entityId: assignment.id,
@@ -505,6 +535,8 @@ export class AcademicService {
     const created = await this.prisma.$transaction(async (tx) => {
       const representative = await this.assignmentUser(tx, user, input.representativePublicId, "CLASS_REPRESENTATIVE", "class representative");
       const section = await this.activeAssignmentSection(tx, user, input.sectionId);
+      const studentInSection = await tx.studentProfile.findFirst({ where: { userId: representative.id, sectionId: section.id, user: { status: "ACTIVE", archivedAt: null } }, select: { id: true } });
+      if (!studentInSection) throw new BadRequestException("The class representative must be an active student in this section.");
       this.assertPeriodWithinAcademicYear(validFrom, validUntil, section.semester.academicYear.startsOn, section.semester.academicYear.endsOn);
       const conflict = await tx.classRepresentativeAssignment.findFirst({
         where: {
@@ -526,6 +558,55 @@ export class AcademicService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     await this.officialGroups.synchronizeSection(user.collegeId, input.sectionId);
     return created;
+  }
+
+  async createClassStaffAssignment(user: AuthPrincipal, input: CreateClassStaffAssignmentDto, requestId: string) {
+    const { validFrom, validUntil } = this.assignmentPeriod(input.validFrom, input.validUntil);
+    const created = await this.prisma.$transaction(async (tx) => {
+      const staff = await this.assignmentUser(tx, user, input.staffPublicId, "FACULTY", "class staff member");
+      const section = await this.activeAssignmentSection(tx, user, input.sectionId);
+      this.assertPeriodWithinAcademicYear(validFrom, validUntil, section.semester.academicYear.startsOn, section.semester.academicYear.endsOn);
+      const assignmentType = input.assignmentType ?? "PROSPECTIVE_CLASS_STAFF";
+      const conflict = await tx.classStaffAssignment.findFirst({
+        where: { staffId: staff.id, sectionId: section.id, assignmentType, isActive: true, OR: [{ validUntil: null }, { validUntil: { gte: validFrom } }] },
+        select: { id: true },
+      });
+      if (conflict) throw new ConflictException("This staff member already has an active class-staff assignment for the section.");
+      const assignment = await tx.classStaffAssignment.create({ data: { staffId: staff.id, sectionId: section.id, assignmentType, validFrom, validUntil } });
+      await this.audit.record({ actorId: user.id, action: "class_staff_assignment.created", entityType: "ClassStaffAssignment", entityId: assignment.id, afterValue: assignment, requestId }, tx);
+      return assignment;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    await this.officialGroups.synchronizeSection(user.collegeId, input.sectionId);
+    return created;
+  }
+
+  async assignStudent(user: AuthPrincipal, sectionId: string, input: AssignSectionStudentDto, requestId: string) {
+    const startsOn = this.assignmentDate(input.startsOn, "membership start date");
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${sectionId}))`;
+      const section = await tx.section.findFirst({
+        where: { id: sectionId, isActive: true, archivedAt: null, semester: { programme: { collegeId: user.collegeId, isActive: true } } },
+        select: { id: true, capacity: true, semesterId: true, semester: { select: { academicYearId: true, programme: { select: { id: true, departmentId: true } } } } },
+      });
+      if (!section) throw new NotFoundException("Active section not found.");
+      const student = await tx.user.findFirst({
+        where: { publicId: input.studentPublicId, collegeId: user.collegeId, status: "ACTIVE", archivedAt: null, roles: { some: { role: { code: "STUDENT" } } } },
+        select: { id: true, publicId: true, studentProfile: { select: { id: true, sectionId: true } } },
+      });
+      if (!student?.studentProfile) throw new BadRequestException("The student must complete an approved student profile before section assignment.");
+      if (student.studentProfile.sectionId === section.id) throw new ConflictException("The selected user already belongs to this section.");
+      const currentStudentCount = await tx.studentProfile.count({ where: { sectionId, user: { status: "ACTIVE", archivedAt: null } } });
+      if (currentStudentCount >= section.capacity) throw new BadRequestException("Section capacity reached. Create another section or move students before adding more.");
+      await tx.sectionMembership.updateMany({ where: { studentUserId: student.id, isActive: true }, data: { isActive: false, endsOn: startsOn } });
+      await tx.sectionMembership.create({ data: { studentUserId: student.id, sectionId, academicYearId: section.semester.academicYearId, startsOn } });
+      await tx.studentProfile.update({ where: { id: student.studentProfile.id }, data: { sectionId, programmeId: section.semester.programme.id, departmentId: section.semester.programme.departmentId } });
+      await tx.userScope.deleteMany({ where: { userId: student.id, scopeType: "SECTION" } });
+      await tx.userScope.create({ data: { userId: student.id, scopeType: "SECTION", scopeId: sectionId } });
+      await this.audit.record({ actorId: user.id, action: "section.student_assigned", entityType: "SectionMembership", entityId: student.id, beforeValue: { sectionId: student.studentProfile.sectionId }, afterValue: { sectionId, startsOn }, reason: input.reason, requestId }, tx);
+      return { studentPublicId: student.publicId, sectionId, currentStudentCount: currentStudentCount + 1, maximumCapacity: section.capacity, availableSeats: section.capacity - currentStudentCount - 1 };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    await this.officialGroups.synchronizeSection(user.collegeId, sectionId);
+    return result;
   }
 
   async updateDepartment(user: AuthPrincipal, id: string, input: UpdateDepartmentDto, requestId: string) {
@@ -571,6 +652,10 @@ export class AcademicService {
     const existing = await this.prisma.section.findFirst({ where: { id, semester: { programme: { collegeId: user.collegeId } } } });
     if (!existing) throw new NotFoundException("Section not found.");
     if (input.assignedRoomId) await this.requireRoom(user.collegeId, input.assignedRoomId);
+    if (input.capacity !== undefined) {
+      const currentStudentCount = await this.prisma.studentProfile.count({ where: { sectionId: id, user: { status: "ACTIVE", archivedAt: null } } });
+      if (input.capacity < currentStudentCount) throw new BadRequestException(`Capacity cannot be lower than the ${currentStudentCount} active students already assigned.`);
+    }
     const section = await this.prisma.section.update({
       where: { id },
       data: {
@@ -578,7 +663,9 @@ export class AcademicService {
         ...(input.name !== undefined ? { name: input.name.trim() } : {}),
         ...(input.studyYear !== undefined ? { studyYear: input.studyYear } : {}),
         ...(input.displayName !== undefined ? { displayName: input.displayName?.trim() || null } : {}),
-        ...(input.assignedRoomId !== undefined ? { assignedRoomId: input.assignedRoomId } : {}),
+        ...(input.assignedRoomId !== undefined
+          ? { assignedRoom: input.assignedRoomId ? { connect: { id: input.assignedRoomId } } : { disconnect: true } }
+          : {}),
         ...(input.officialGroupEnabled !== undefined ? { officialGroupEnabled: input.officialGroupEnabled } : {}),
         ...(input.capacity !== undefined ? { capacity: input.capacity } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
@@ -701,6 +788,20 @@ export class AcademicService {
         actorId: user.id, action: "class_representative_assignment.deactivated", entityType: "ClassRepresentativeAssignment", entityId: id,
         beforeValue: { isActive: existing.isActive, validUntil: existing.validUntil }, afterValue: { isActive: false, validUntil: effectiveOn }, reason: input.reason.trim(), requestId,
       }, tx);
+      return assignment;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    await this.officialGroups.synchronizeSection(user.collegeId, updated.sectionId);
+    return updated;
+  }
+
+  async deactivateClassStaffAssignment(user: AuthPrincipal, id: string, input: DeactivateAcademicAssignmentDto, requestId: string) {
+    const effectiveOn = this.assignmentDate(input.effectiveOn, "effective date");
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.classStaffAssignment.findFirst({ where: { id, section: { semester: { programme: { collegeId: user.collegeId } } } } });
+      if (!existing) throw new NotFoundException("Class staff assignment not found.");
+      this.assertCanDeactivate(existing.validFrom, existing.validUntil, existing.isActive, effectiveOn);
+      const assignment = await tx.classStaffAssignment.update({ where: { id }, data: { isActive: false, validUntil: effectiveOn } });
+      await this.audit.record({ actorId: user.id, action: "class_staff_assignment.deactivated", entityType: "ClassStaffAssignment", entityId: id, beforeValue: existing, afterValue: assignment, reason: input.reason, requestId }, tx);
       return assignment;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     await this.officialGroups.synchronizeSection(user.collegeId, updated.sectionId);

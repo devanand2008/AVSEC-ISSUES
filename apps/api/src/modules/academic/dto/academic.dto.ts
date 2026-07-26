@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsBoolean, IsDateString, IsEmail, IsInt, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min } from "class-validator";
+import { IsBoolean, IsDateString, IsEmail, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min } from "class-validator";
 
 export class CreateDepartmentDto {
   @ApiProperty() @IsUUID() campusId!: string;
@@ -64,7 +64,7 @@ export class CreateSectionDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(180) displayName?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() assignedRoomId?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() officialGroupEnabled?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(100_000) capacity?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(70) capacity?: number;
   @ApiPropertyOptional() @IsOptional() @IsUUID() coordinatorPublicId?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsUUID() representativePublicId?: string | null;
 }
@@ -76,7 +76,7 @@ export class UpdateSectionDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(180) displayName?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsUUID() assignedRoomId?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() officialGroupEnabled?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(100_000) capacity?: number | null;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(70) capacity?: number;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsUUID() coordinatorPublicId?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsUUID() representativePublicId?: string | null;
@@ -102,6 +102,10 @@ export class CreateFacultySubjectAssignmentDto {
   @ApiProperty() @IsUUID() sectionId!: string;
   @ApiProperty() @IsDateString() validFrom!: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() validUntil?: string;
+  @ApiPropertyOptional() @IsOptional() @IsIn(["PRIMARY_FACULTY", "SUPPORTING_FACULTY", "LABORATORY_FACULTY", "CLASS_COORDINATOR", "PROSPECTIVE_CLASS_STAFF", "GUEST_FACULTY"]) assignmentType?: string;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() attendancePermission?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() learningResourcePermission?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() assessmentPermission?: boolean;
 }
 
 export class CreateClassCoordinatorAssignmentDto {
@@ -116,6 +120,20 @@ export class CreateClassRepresentativeAssignmentDto {
   @ApiProperty() @IsUUID() sectionId!: string;
   @ApiProperty() @IsDateString() validFrom!: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() validUntil?: string;
+}
+
+export class CreateClassStaffAssignmentDto {
+  @ApiProperty() @IsUUID() staffPublicId!: string;
+  @ApiProperty() @IsUUID() sectionId!: string;
+  @ApiPropertyOptional() @IsOptional() @IsIn(["PROSPECTIVE_CLASS_STAFF", "SUPPORTING_CLASS_STAFF"]) assignmentType?: string;
+  @ApiProperty() @IsDateString() validFrom!: string;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() validUntil?: string;
+}
+
+export class AssignSectionStudentDto {
+  @ApiProperty() @IsUUID() studentPublicId!: string;
+  @ApiProperty() @IsDateString() startsOn!: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(3, 500) reason?: string;
 }
 
 export class DeactivateAcademicAssignmentDto {

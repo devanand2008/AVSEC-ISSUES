@@ -52,3 +52,39 @@ export class CreateAssetDto {
 export class UpdateAssetStatusDto {
   @ApiProperty() isActive!: boolean;
 }
+
+export const DATA_MAINTENANCE_CATEGORIES = [
+  "ARCHIVE_OLD_ACADEMIC_YEAR",
+  "PROMOTE_STUDENTS",
+  "MOVE_STUDENTS_TO_NEW_SEMESTER",
+  "ARCHIVE_OLD_ATTENDANCE_SESSIONS",
+  "ARCHIVE_OLD_COURSE_ASSIGNMENTS",
+  "ARCHIVE_OLD_ANNOUNCEMENTS",
+  "ARCHIVE_CLOSED_ISSUES",
+  "DELETE_TEMPORARY_IMPORTS",
+  "CLEAN_EXPIRED_SESSIONS",
+  "CLEAN_ORPHANED_ATTACHMENTS",
+  "PREPARE_NEW_ACADEMIC_YEAR",
+] as const;
+
+export type DataMaintenanceCategory = typeof DATA_MAINTENANCE_CATEGORIES[number];
+
+export class DataMaintenanceDryRunDto {
+  @ApiProperty({ enum: DATA_MAINTENANCE_CATEGORIES })
+  @IsIn(DATA_MAINTENANCE_CATEGORIES) category!: DataMaintenanceCategory;
+
+  @ApiProperty({ required: false }) @IsOptional() @IsDateString() beforeDate?: string;
+  @ApiProperty({ required: false }) @IsOptional() @IsUUID() academicYearId?: string;
+  @ApiProperty({ required: false }) @IsOptional() @IsUUID() sourceSectionId?: string;
+  @ApiProperty({ required: false }) @IsOptional() @IsUUID() targetSectionId?: string;
+  @ApiProperty({ required: false }) @IsOptional() @IsUUID() targetAcademicYearId?: string;
+}
+
+export class DataMaintenanceBackupDto {
+  @ApiProperty() @IsString() @Length(3, 255) backupReference!: string;
+}
+
+export class ExecuteDataMaintenanceDto extends DataMaintenanceBackupDto {
+  @ApiProperty() @IsString() @Length(8, 300) confirmationPhrase!: string;
+  @ApiProperty() @IsString() @Length(10, 500) reason!: string;
+}
