@@ -82,7 +82,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       WEB_URL: ${WEB_URL:-http://localhost:3000}
