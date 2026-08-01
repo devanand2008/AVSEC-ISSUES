@@ -33,7 +33,7 @@ jobs:
       POSTGRES_DB: college_management
       POSTGRES_USER: college_app
       POSTGRES_PASSWORD: ci-database-password-2026
-      DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@postgres:5432/college_management?schema=public
+      DATABASE_URL: postgresql://college_app:ci-database-password-2026@postgres:5432/college_management?schema=public
       DATABASE_POOL_MAX: 10
       REDIS_URL: redis://redis:6379
       JWT_ACCESS_SECRET: ci-access-secret-2026-0123456789-abcdef
@@ -65,7 +65,7 @@ jobs:
       - name: Run security preflight sensitive-file scanner
         run: node scripts/check-sensitive-files.mjs
       - name: Install locked dependencies
-        run: npm ci
+        run: npm ci --include=dev
       - name: Generate Prisma client
         run: npm run prisma:generate
       - name: Validate production environment policy
