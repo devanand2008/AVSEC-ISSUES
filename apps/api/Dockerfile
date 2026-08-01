@@ -58,4 +58,4 @@ RUN mkdir -p /app/backups && chown college:college /app/backups
 
 USER college
 EXPOSE 4000
-CMD ["sh", "-c", "npm run prisma:deploy -w @college/api && node apps/api/dist/main.js"]
+CMD ["sh", "-c", "npm run prisma:deploy -w @college/api && npm run bootstrap:production -w @college/api && node apps/api/dist/main.js"]

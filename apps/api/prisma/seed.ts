@@ -46,7 +46,7 @@ function feedbackUrl(token: string): string {
   return `${feedbackBaseUrl.replace(/\/$/, "")}/feedback/scan/${token}`;
 }
 
-const permissions = [
+export const permissions = [
   "users.create",
   "users.read",
   "users.update",
@@ -153,7 +153,7 @@ const permissions = [
   "ai.usage.read",
 ];
 
-const rolePermissions: Record<string, string[]> = {
+export const rolePermissions: Record<string, string[]> = {
   SUPER_ADMIN: permissions,
   MAIN_ADMIN: permissions,
   PRINCIPAL: [
@@ -450,7 +450,7 @@ for (const codes of Object.values(rolePermissions)) {
   }
 }
 
-const roleNames: Record<string, string> = {
+export const roleNames: Record<string, string> = {
   SUPER_ADMIN: "Super Admin",
   MAIN_ADMIN: "Main Admin",
   PRINCIPAL: "Principal",
@@ -1695,9 +1695,11 @@ async function main() {
   );
 }
 
-main()
-  .catch((error) => {
-    console.error(error);
-    process.exitCode = 1;
-  })
-  .finally(async () => prisma.$disconnect());
+if (require.main === module) {
+  void main()
+    .catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    })
+    .finally(async () => prisma.$disconnect());
+}

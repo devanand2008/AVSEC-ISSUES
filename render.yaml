@@ -1,33 +1,75 @@
 services:
+  - type: keyvalue
+    name: avs-college-redis
+    plan: starter
+    region: singapore
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+    persistenceMode: journal-snapshot
+
   - type: web
     name: avs-college-api
-    runtime: node
-    rootDir: apps/api
+    runtime: docker
     plan: starter
-    autoDeploy: true
-    buildCommand: cd ../.. && npm ci && npm run build -w @college/shared-types -w @college/validation && cd apps/api && npm run prisma:generate && npm run build
-    startCommand: npm run prisma:deploy && npm run start:prod
+    region: singapore
+    dockerContext: .
+    dockerfilePath: ./apps/api/Dockerfile
+    autoDeployTrigger: checksPass
     healthCheckPath: /api/v1/health/ready/dependencies
+    maxShutdownDelaySeconds: 60
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 10000
+        value: 4000
       - key: API_PREFIX
         value: api/v1
+      - key: WEB_URL
+        value: https://avs-college-web.onrender.com
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://avs-college-web.onrender.com
       - key: TRUST_PROXY
         value: "1"
       - key: SWAGGER_ENABLED
         value: "false"
+      - key: SEED_DEVELOPMENT_DATA
+        value: "false"
       - key: COOKIE_SECURE
         value: "true"
+      - key: COOKIE_SAME_SITE
+        value: lax
+      - key: DATABASE_URL
+        fromDatabase:
+          name: avs-college-postgres
+          property: connectionString
+      - key: DATABASE_POOL_MAX
+        value: 10
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: avs-college-redis
+          property: connectionString
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
       - key: CSRF_SECRET
         generateValue: true
-      - key: MONGODB_URI
+      - key: FEEDBACK_SUBMISSION_SECRET
+        generateValue: true
+      - key: PASSWORD_PEPPER
+        generateValue: true
+      - key: DEVELOPMENT_COLLEGE_CODE
+        value: "6201"
+      - key: PRODUCTION_COLLEGE_NAME
+        value: AVS Engineering College
+      - key: PRODUCTION_ADMIN_IDENTITY_ID
+        value: ADM001
+      - key: DEVELOPMENT_ADMIN_NAME
+        value: Main Administrator
+      - key: DEVELOPMENT_ADMIN_EMAIL
         sync: false
-      - key: DATABASE_URL
-        sync: false
-      - key: REDIS_URL
+      - key: DEVELOPMENT_ADMIN_PASSWORD
         sync: false
       - key: S3_ENDPOINT
         sync: false
@@ -41,51 +83,60 @@ services:
         sync: false
       - key: S3_FORCE_PATH_STYLE
         value: "true"
-      - key: JWT_ACCESS_SECRET
+      - key: GOOGLE_DRIVE_ENABLED
+        value: "false"
+      - key: GOOGLE_DRIVE_OWNER_EMAIL
+        value: devanand.s2008@gmail.com
+      - key: GOOGLE_OAUTH_REDIRECT_URI
+        value: https://avs-college-api.onrender.com/api/v1/admin/storage/google-drive/callback
+      - key: GOOGLE_DRIVE_ENCRYPTION_KEY
         generateValue: true
-      - key: JWT_REFRESH_SECRET
+      - key: BACKUP_ENCRYPTION_KEY
         generateValue: true
-      - key: FRONTEND_URL
-        sync: false
-      - key: WEB_URL
-        sync: false
-      - key: CORS_ALLOWED_ORIGINS
-        sync: false
+      - key: BACKUP_SCHEDULE_ENABLED
+        value: "false"
       - key: EMAIL_ENABLED
         value: "false"
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_PORT
-        sync: false
-      - key: SMTP_USERNAME
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
+      - key: WHATSAPP_ENABLED
+        value: "false"
+      - key: AVS_BOT_ENABLED
+        value: "false"
+      - key: MALWARE_SCAN_ENABLED
+        value: "false"
       - key: STUDENT_IMPORT_ENABLED
         value: "true"
       - key: FORCE_PASSWORD_CHANGE
         value: "true"
       - key: MAX_EXCEL_FILE_SIZE_MB
-        value: "10"
+        value: 10
       - key: MAX_EXCEL_ROWS
-        value: "5000"
+        value: 5000
 
   - type: web
     name: avs-college-web
-    runtime: node
-    rootDir: apps/web
+    runtime: docker
     plan: starter
-    autoDeploy: true
-    buildCommand: cd ../.. && npm ci && npm run build -w @college/shared-types -w @college/validation && cd apps/web && npm run build
-    startCommand: npm run start
+    region: singapore
+    dockerContext: .
+    dockerfilePath: ./apps/web/Dockerfile
+    autoDeployTrigger: checksPass
+    healthCheckPath: /login
+    maxShutdownDelaySeconds: 60
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 3000
-      - key: VITE_API_BASE_URL
-        sync: false
       - key: NEXT_PUBLIC_API_URL
-        sync: false
+        value: https://avs-college-api.onrender.com/api/v1
       - key: NEXT_PUBLIC_SOCKET_URL
-        sync: false
+        value: wss://avs-college-api.onrender.com/realtime
+
+databases:
+  - name: avs-college-postgres
+    plan: basic-256mb
+    region: singapore
+    postgresMajorVersion: "17"
+    databaseName: college_management
+    user: college_app
+    ipAllowList: []

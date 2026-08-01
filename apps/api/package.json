@@ -15,6 +15,7 @@
     "prisma:validate": "prisma validate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
+    "bootstrap:production": "tsx prisma/bootstrap-production.ts",
     "env:validate:production": "tsx src/config/validate-production.ts",
     "seed": "tsx prisma/seed.ts"
   },
@@ -70,6 +71,7 @@
     "rxjs": "7.8.2",
     "sharp": "^0.35.3",
     "socket.io": "4.8.3",
+    "tsx": "4.20.6",
     "ulid": "3.0.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "4.4.3"
@@ -94,7 +96,6 @@
     "supertest": "7.1.4",
     "ts-jest": "29.4.12",
     "ts-node": "10.9.2",
-    "tsx": "4.20.6",
     "typescript": "5.9.3"
   }
 }

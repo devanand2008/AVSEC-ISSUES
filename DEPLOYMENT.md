@@ -35,6 +35,10 @@ On Windows, `START_AVS_APP.bat` is the supported local/LAN launcher. Production 
 
 The production override assumes one TLS reverse-proxy hop by default. Set `TRUST_PROXY` to the exact hop count and do not publish the PostgreSQL, Redis, or MinIO ports. The API and web ports remain localhost-bound for a same-host ingress; change that topology only with an explicit firewall/private-network review.
 
+The production API container runs `prisma migrate deploy` followed by the idempotent production bootstrap before starting NestJS. Set `DEVELOPMENT_COLLEGE_CODE`, `PRODUCTION_COLLEGE_NAME`, `PRODUCTION_ADMIN_IDENTITY_ID`, `DEVELOPMENT_ADMIN_NAME`, `DEVELOPMENT_ADMIN_EMAIL`, and a strong `DEVELOPMENT_ADMIN_PASSWORD` in the deployment secret manager. Despite the legacy environment-variable prefix, this bootstrap is production-only: it creates the college, RBAC catalog, and initial Main Admin, requires a password change, never resets an existing credential, and never inserts demo data.
+
+The root `render.yaml` is the supported one-click Docker deployment. It provisions PostgreSQL 17 and persistent Key Value storage and prompts for required private object-storage and initial-admin values. Review the selected paid plans in Render before approving the Blueprint. Google Drive, Firebase, WhatsApp, email, AVS Bot, and malware scanning remain disabled until their institution-owned credentials are configured and verified.
+
 ## Providers and files
 
 Firebase, WhatsApp, and malware scanning are independently configurable. Test each against an institution-owned sandbox before production enablement. Keep service-account and Meta secrets server-side. WhatsApp webhooks require the configured verify token and app secret. If attachments are enabled in production, configure `MALWARE_SCAN_ENABLED=true` and a reachable scanner returning `{ "clean": true }` only for accepted content.
@@ -44,6 +48,7 @@ Never expose the object bucket publicly. Preserve signed URL expiry, file size l
 ## Rollback
 
 Roll back application images independently. Prefer a reviewed forward corrective migration; restore a database only through the incident procedure. Preserve audit/history/outbox evidence and reconcile queues/providers after recovery. See `BACKUP_RESTORE.md`.
+
 # Smart Campus Module Deployment
 
 After pulling this upgrade, run:
@@ -51,7 +56,7 @@ After pulling this upgrade, run:
 ```powershell
 npm run prisma:deploy -w @college/api
 npm run prisma:generate -w @college/api
-npm run seed -w @college/api
+npm run bootstrap:production -w @college/api
 npm run build
 ```
 

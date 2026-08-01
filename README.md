@@ -74,6 +74,19 @@ GitHub Actions repeats the locked install, production environment policy check, 
 
 Read `DEPLOYMENT.md`, `BACKUP_RESTORE.md`, `MOBILE_LAN_ACCESS.md`, and `FINAL_DELIVERY_REPORT.md`. Production requires TLS, strong secrets, exact CORS/origin configuration, secure cookies, a restricted database identity, Redis persistence, private object storage, reviewed migrations, backups, and provider webhook verification.
 
+### Render Docker Blueprint
+
+[Deploy the production Docker stack to Render](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fdevanand2008%2FAVSEC-ISSUES)
+
+The Blueprint builds the tested API and web Dockerfiles, provisions PostgreSQL 17 and persistent Redis-compatible Key Value storage in Singapore, and deploys only after GitHub verification passes. During initial provisioning, supply the Main Admin email and a unique temporary password plus the private S3-compatible object-storage endpoint, region, bucket, access key, and secret key. Render displays the selected paid plans for approval before creating resources. The first API start applies migrations and creates only the college, RBAC catalog, and Main Admin account; it never loads development/demo records. The Main Admin must change the temporary password at first login.
+
+Published container images are also available from GitHub Container Registry:
+
+```powershell
+docker pull ghcr.io/devanand2008/avsec-issues-api:latest
+docker pull ghcr.io/devanand2008/avsec-issues-web:latest
+```
+
 ## Troubleshooting
 
 - Port collision: change the host port variables in `.env` and keep service URLs consistent.

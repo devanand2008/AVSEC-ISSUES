@@ -19,6 +19,11 @@
     "esModuleInterop": true,
     "types": ["node", "jest", "multer"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "prisma/seed.ts"],
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "prisma/seed.ts",
+    "prisma/bootstrap-production.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }
