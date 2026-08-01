@@ -4,7 +4,8 @@ import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { CurrentRequestId } from "../../common/decorators/request-id.decorator";
 import { Permissions } from "../../common/decorators/permissions.decorator";
 import type { AuthPrincipal } from "../../common/http/request-context";
-import { BroadcastService, type CreateBroadcastDto } from "./broadcast.service";
+import { BroadcastService } from "./broadcast.service";
+import { CreateBroadcastDto } from "./dto/broadcast.dto";
 
 @ApiTags("broadcasts")
 @Controller()

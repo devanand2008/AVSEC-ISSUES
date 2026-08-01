@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { Transform } from "class-transformer";
 import { IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min } from "class-validator";
 import { RoomType } from "../../../generated/prisma/enums";
+
+function normalizeRoomType({ value }: { value: unknown }): unknown {
+  return typeof value === "string"
+    ? value.trim().toUpperCase().replace(/[\s-]+/g, "_")
+    : value;
+}
 
 export class CreateCampusDto {
   @ApiProperty() @IsString() @Length(1, 30) code!: string;
@@ -35,7 +42,7 @@ export class CreateRoomDto {
   @ApiProperty() @IsString() @Length(1, 40) code!: string;
   @ApiProperty() @IsString() @Length(2, 140) name!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 40) roomNumber?: string;
-  @ApiProperty({ enum: RoomType }) @IsEnum(RoomType) roomType!: RoomType;
+  @ApiProperty({ enum: RoomType }) @Transform(normalizeRoomType) @IsEnum(RoomType) roomType!: RoomType;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(100_000) capacity?: number;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(10_000) sortOrder?: number;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
@@ -51,6 +58,7 @@ export class UpdateCampusDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) address?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(30) contactNumber?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() isTestData?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(10_000) sortOrder?: number;
 }
 
@@ -60,6 +68,7 @@ export class UpdateBlockDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(2, 120) name?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) description?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() isTestData?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(10_000) sortOrder?: number;
 }
 
@@ -69,6 +78,7 @@ export class UpdateFloorDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(2, 100) name?: string;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(-10) @Max(200) level?: number;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() isTestData?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(10_000) sortOrder?: number;
 }
 
@@ -78,10 +88,11 @@ export class UpdateRoomDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 40) code?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(2, 140) name?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 40) roomNumber?: string | null;
-  @ApiPropertyOptional({ enum: RoomType }) @IsOptional() @IsEnum(RoomType) roomType?: RoomType;
+  @ApiPropertyOptional({ enum: RoomType }) @IsOptional() @Transform(normalizeRoomType) @IsEnum(RoomType) roomType?: RoomType;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(100_000) capacity?: number | null;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(10_000) sortOrder?: number;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() isTestData?: boolean;
 }
 
 export class ArchiveLocationDto {

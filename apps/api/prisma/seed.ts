@@ -43,7 +43,7 @@ function feedbackTokenHash(token: string): string {
 }
 
 function feedbackUrl(token: string): string {
-  return `${feedbackBaseUrl.replace(/\/$/, "")}/student/feedback/target/${token}`;
+  return `${feedbackBaseUrl.replace(/\/$/, "")}/feedback/scan/${token}`;
 }
 
 const permissions = [
@@ -147,11 +147,15 @@ const permissions = [
   "notifications.read_own",
   "notifications.preferences",
   "notifications.retry",
+  "ai.use",
+  "ai.admin",
+  "ai.knowledge.manage",
+  "ai.usage.read",
 ];
 
 const rolePermissions: Record<string, string[]> = {
   SUPER_ADMIN: permissions,
-  MAIN_ADMIN: permissions.filter((code) => code !== "backups.manage"),
+  MAIN_ADMIN: permissions,
   PRINCIPAL: [
     "academic.read",
     "audit.read",
@@ -432,6 +436,7 @@ const rolePermissions: Record<string, string[]> = {
   ],
 };
 for (const codes of Object.values(rolePermissions)) {
+  if (!codes.includes("ai.use")) codes.push("ai.use");
   if (codes.includes("issues.create") && !codes.includes("issues.subscribe"))
     codes.push("issues.subscribe");
   if (codes.includes("messages.send")) {

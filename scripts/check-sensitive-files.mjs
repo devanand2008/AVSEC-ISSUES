@@ -15,6 +15,7 @@ try {
 
 function getTrackedAndStagedFiles() {
   const files = new Set();
+  const trackedFiles = new Set();
   let insideGitRepo = false;
   try {
     insideGitRepo = execSync("git rev-parse --is-inside-work-tree", { encoding: "utf8", cwd: rootDir }).trim() === "true";
@@ -31,21 +32,50 @@ function getTrackedAndStagedFiles() {
   }
   try {
     const lsFiles = execSync("git ls-files", { encoding: "utf8", cwd: rootDir });
-    lsFiles.split(/\r?\n/).forEach((f) => f && files.add(f.trim()));
+    lsFiles.split(/\r?\n/).forEach((f) => {
+      if (!f) return;
+      const normalized = f.trim().replace(/\\/g, "/");
+      files.add(normalized);
+      trackedFiles.add(normalized);
+    });
   } catch {
     // If git ls-files fails, fall back or continue
   }
   try {
     const stagedFiles = execSync("git diff --cached --name-only", { encoding: "utf8", cwd: rootDir });
-    stagedFiles.split(/\r?\n/).forEach((f) => f && files.add(f.trim()));
+    stagedFiles.split(/\r?\n/).forEach((f) => {
+      if (!f) return;
+      const normalized = f.trim().replace(/\\/g, "/");
+      files.add(normalized);
+      trackedFiles.add(normalized);
+    });
   } catch {
     // If git diff fails, continue
   }
-  return Array.from(files);
+
+  const buildRoots = [
+    "apps/flutter_app/build",
+    "apps/web/.next",
+    "apps/web/out",
+  ];
+  const visit = (relativePath) => {
+    const absolutePath = path.join(rootDir, relativePath);
+    if (!fs.existsSync(absolutePath)) return;
+    const stat = fs.statSync(absolutePath);
+    if (stat.isDirectory()) {
+      for (const entry of fs.readdirSync(absolutePath)) {
+        visit(path.join(relativePath, entry));
+      }
+      return;
+    }
+    if (stat.isFile()) files.add(relativePath.replace(/\\/g, "/"));
+  };
+  buildRoots.forEach(visit);
+  return { files: Array.from(files), trackedFiles };
 }
 
 function checkSensitiveFiles() {
-  const files = getTrackedAndStagedFiles();
+  const { files, trackedFiles } = getTrackedAndStagedFiles();
   const violations = new Set();
 
   const forbiddenPathPatterns = [
@@ -73,8 +103,9 @@ function checkSensitiveFiles() {
     /(postgres(?:ql)?:\/\/(?!\$\{)(?![^:\s]+:(?:build|validation|test|password|strong-password|example|placeholder|ci-[^@\s]+)@)[^:\s]+:[^@\s]+@)/i,
     /(ghp_[a-zA-Z0-9]{36})/i,
     /(github_pat_[a-zA-Z0-9_]{22,})/i,
+    /\bsk-(?:proj-)?[a-zA-Z0-9_-]{20,}\b/,
     /(rnd_[a-zA-Z0-9]{24,})/i,
-    /(JWT_(?:ACCESS|REFRESH)_SECRET|CSRF_SECRET|SMTP_PASSWORD|S3_SECRET_KEY|WHATSAPP_ACCESS_TOKEN|WHATSAPP_APP_SECRET|RENDER_API_KEY|GITHUB_TOKEN|FIREBASE_PRIVATE_KEY|DEVICE_TOKEN_ENCRYPTION_KEY|PASSWORD_PEPPER|FEEDBACK_SUBMISSION_SECRET)[ \t]*[:=](?!-)[ \t]*["']?(?!\$\{?|REPLACE|replace|change-this|ci-|example|placeholder|access-secret|refresh-secret|csrf-secret|smtp-password|production-storage-secret|z\.|optional|environment\.|process\.|config\.|Boolean\(|String\(|Number\()[^"'\s#]{16,}/i,
+    /(JWT_(?:ACCESS|REFRESH)_SECRET|CSRF_SECRET|SMTP_PASSWORD|S3_SECRET_KEY|WHATSAPP_ACCESS_TOKEN|WHATSAPP_APP_SECRET|OPENAI_API_KEY|GOOGLE_OAUTH_CLIENT_SECRET|GOOGLE_DRIVE_ENCRYPTION_KEY|BACKUP_ENCRYPTION_KEY|RENDER_API_KEY|GITHUB_TOKEN|FIREBASE_PRIVATE_KEY|DEVICE_TOKEN_ENCRYPTION_KEY|PASSWORD_PEPPER|FEEDBACK_SUBMISSION_SECRET)[ \t]*[:=](?!-)[ \t]*["']?(?!\$\{?|REPLACE|replace|change-this|ci-|example|placeholder|access-secret|refresh-secret|csrf-secret|smtp-password|production-storage-secret|z\.|optional|environment\.|process\.|config\.|Boolean\(|String\(|Number\()[^"'\s#]{16,}/i,
     /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/,
   ];
 
@@ -83,7 +114,10 @@ function checkSensitiveFiles() {
     const isAllowed = allowedExceptions.some((regex) => regex.test(normalizedPath));
     if (isAllowed) continue;
 
-    if (forbiddenPathPatterns.some((regex) => regex.test(normalizedPath))) {
+    if (
+      trackedFiles.has(normalizedPath) &&
+      forbiddenPathPatterns.some((regex) => regex.test(normalizedPath))
+    ) {
       violations.add(normalizedPath);
       continue;
     }

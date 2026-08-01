@@ -84,6 +84,15 @@ export class AdminLocationsController {
       : Promise.all((["campus", "block", "floor", "room"] as const).map(async (item) => ({ type: item, records: await this.locations.adminList(user, item, { status: "ARCHIVED", search }) })));
   }
 
+  @Get("campus-setup/:type/:id/dependencies")
+  campusSetupDependencies(@CurrentUser() user: AuthPrincipal, @Param("type") type: string, @Param("id", ParseUUIDPipe) id: string) {
+    return this.locations.dependencyReport(user, this.kind(type), id);
+  }
+  @Delete("campus-setup/:type/:id/permanent")
+  campusSetupPermanentDelete(@CurrentUser() user: AuthPrincipal, @Param("type") type: string, @Param("id", ParseUUIDPipe) id: string, @Body() input: DeleteLocationDto, @CurrentRequestId() requestId: string) {
+    return this.locations.removePermanently(user, this.kind(type), id, input.reason, input.confirmationPhrase, requestId);
+  }
+
   @Get(":type/:id/dependencies")
   dependencies(@CurrentUser() user: AuthPrincipal, @Param("type") type: string, @Param("id", ParseUUIDPipe) id: string) {
     return this.locations.dependencyReport(user, this.kind(type), id);

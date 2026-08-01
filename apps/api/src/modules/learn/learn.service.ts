@@ -35,6 +35,13 @@ type LearningAssessmentPayload = {
   questions?: LearningQuestion[];
 };
 
+export const COMPILER_PROVIDER_TIMEOUTS_MS = {
+  judge0: 6_000,
+  judge0Attempts: 2,
+  piston: 7_000,
+  pistonAttempts: 2,
+} as const;
+
 @Injectable()
 export class LearnService {
   constructor(private readonly prisma: PrismaService) {}
@@ -566,50 +573,83 @@ export class LearnService {
       sql: "main.sql",
     }[data.language];
 
-    try {
-      const response = await fetch("https://emkc.org/api/v2/piston/execute", {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json" },
-        signal: AbortSignal.timeout(20_000),
-        body: JSON.stringify({
-          language,
-          version: "*",
-          files: [{ name: fileName, content: data.sourceCode }],
-          stdin: data.stdin ?? "",
-          args: [],
-          run_timeout: 10_000,
-          compile_timeout: 15_000,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(`Compiler returned HTTP ${response.status}.`);
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const response = await fetch("https://emkc.org/api/v2/piston/execute", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          signal: AbortSignal.timeout(
+            COMPILER_PROVIDER_TIMEOUTS_MS.piston,
+          ),
+          body: JSON.stringify({
+            language,
+            version: "*",
+            files: [{ name: fileName, content: data.sourceCode }],
+            stdin: data.stdin ?? "",
+            args: [],
+            run_timeout: 7_000,
+            compile_timeout: 8_000,
+          }),
+        });
+        if (!response.ok) {
+          const error = new Error(
+            `Compiler returned HTTP ${response.status}.`,
+          );
+          lastError = error;
+          if (
+            attempt < 2 &&
+            (response.status === 408 ||
+              response.status === 429 ||
+              response.status >= 500)
+          ) {
+            continue;
+          }
+          break;
+        }
+        const result = (await response.json()) as {
+          compile?: { stdout?: string; stderr?: string; code?: number };
+          run?: {
+            stdout?: string;
+            stderr?: string;
+            output?: string;
+            code?: number;
+            signal?: string | null;
+          };
+        };
+        const compileError = result.compile?.stderr?.trim() ?? "";
+        const stdout =
+          result.run?.stdout?.trim() ?? result.run?.output?.trim() ?? "";
+        const stderr = result.run?.stderr?.trim() ?? "";
+        return {
+          ok: !compileError && (result.run?.code ?? 0) === 0,
+          stdout,
+          stderr: compileError || stderr,
+          exitCode: result.run?.code ?? result.compile?.code ?? 0,
+          signal: result.run?.signal ?? null,
+          provider: "piston",
+        };
+      } catch (error) {
+        lastError = error;
+        if (attempt >= 2) break;
       }
-      const result = (await response.json()) as {
-        compile?: { stdout?: string; stderr?: string; code?: number };
-        run?: { stdout?: string; stderr?: string; output?: string; code?: number; signal?: string | null };
-      };
-      const compileError = result.compile?.stderr?.trim() ?? "";
-      const stdout = result.run?.stdout?.trim() ?? result.run?.output?.trim() ?? "";
-      const stderr = result.run?.stderr?.trim() ?? "";
-      return {
-        ok: !compileError && (result.run?.code ?? 0) === 0,
-        stdout,
-        stderr: compileError || stderr,
-        exitCode: result.run?.code ?? result.compile?.code ?? 0,
-        signal: result.run?.signal ?? null,
-        provider: "piston",
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        stdout: "",
-        stderr: "The online compiler is temporarily unavailable. Your code is still saved in this lesson.",
-        exitCode: null,
-        signal: null,
-        provider: "unavailable",
-        detail: error instanceof Error ? error.message : "Compiler request failed.",
-      };
     }
+    return {
+      ok: false,
+      stdout: "",
+      stderr:
+        "The online compiler is temporarily unavailable. Your code is still saved in this lesson.",
+      exitCode: null,
+      signal: null,
+      provider: "unavailable",
+      detail:
+        lastError instanceof Error
+          ? lastError.message
+          : "Compiler request failed.",
+    };
   }
 
   async getAssessments(user: AuthPrincipal, courseId?: string) {
@@ -983,45 +1023,79 @@ export class LearnService {
     }[data.language];
     if (!languageId) return null;
 
-    try {
-      const response = await fetch(
-        "https://ce.judge0.com/submissions?base64_encoded=true&wait=true",
-        {
-          method: "POST",
-          headers: { "content-type": "application/json", accept: "application/json" },
-          signal: AbortSignal.timeout(20_000),
-          body: JSON.stringify({
-            language_id: languageId,
-            source_code: Buffer.from(data.sourceCode, "utf8").toString("base64"),
-            stdin: Buffer.from(data.stdin ?? "", "utf8").toString("base64"),
-          }),
-        },
-      );
-      if (!response.ok) return null;
-      const result = (await response.json()) as {
-        stdout?: string | null;
-        stderr?: string | null;
-        compile_output?: string | null;
-        message?: string | null;
-        status?: { id?: number; description?: string };
-      };
-      const decode = (value?: string | null) =>
-        value ? Buffer.from(value, "base64").toString("utf8").trim() : "";
-      const stdout = decode(result.stdout);
-      const compileError = decode(result.compile_output);
-      const stderr = decode(result.stderr) || decode(result.message);
-      const accepted = result.status?.id === 3;
-      return {
-        ok: accepted,
-        stdout,
-        stderr: compileError || stderr,
-        exitCode: accepted ? 0 : result.status?.id ?? 1,
-        signal: null,
-        provider: "judge0",
-      };
-    } catch {
-      return null;
+    for (
+      let attempt = 1;
+      attempt <= COMPILER_PROVIDER_TIMEOUTS_MS.judge0Attempts;
+      attempt += 1
+    ) {
+      try {
+        const response = await fetch(
+          "https://ce.judge0.com/submissions?base64_encoded=true&wait=true",
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              accept: "application/json",
+            },
+            signal: AbortSignal.timeout(
+              COMPILER_PROVIDER_TIMEOUTS_MS.judge0,
+            ),
+            body: JSON.stringify({
+              language_id: languageId,
+              source_code: Buffer.from(data.sourceCode, "utf8").toString(
+                "base64",
+              ),
+              stdin: Buffer.from(data.stdin ?? "", "utf8").toString(
+                "base64",
+              ),
+            }),
+          },
+        );
+        if (!response.ok) {
+          const transient =
+            response.status === 408 ||
+            response.status === 429 ||
+            response.status >= 500;
+          if (
+            transient &&
+            attempt < COMPILER_PROVIDER_TIMEOUTS_MS.judge0Attempts
+          ) {
+            continue;
+          }
+          return null;
+        }
+        const result = (await response.json()) as {
+          stdout?: string | null;
+          stderr?: string | null;
+          compile_output?: string | null;
+          message?: string | null;
+          status?: { id?: number; description?: string };
+        };
+        const decode = (value?: string | null) =>
+          value
+            ? Buffer.from(value, "base64").toString("utf8").trim()
+            : "";
+        const stdout = decode(result.stdout);
+        const compileError = decode(result.compile_output);
+        const stderr = decode(result.stderr) || decode(result.message);
+        const accepted = result.status?.id === 3;
+        return {
+          ok: accepted,
+          stdout,
+          stderr: compileError || stderr,
+          exitCode: accepted ? 0 : result.status?.id ?? 1,
+          signal: null,
+          provider: "judge0",
+        };
+      } catch {
+        if (
+          attempt >= COMPILER_PROVIDER_TIMEOUTS_MS.judge0Attempts
+        ) {
+          return null;
+        }
+      }
     }
+    return null;
   }
 
   private assessmentPayload(value: unknown): LearningAssessmentPayload {

@@ -6,7 +6,7 @@ import { IdempotencyService } from "../../common/idempotency/idempotency.service
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
 import { IssueStatus, Prisma } from "../../generated/prisma/client";
-import type { AssignIssueDto, CreateIssueDto, IssueCommentDto, IssueStatusDto, VerifyIssueDto } from "./dto/issue.dto";
+import type { AssignIssueDto, CreateIssueDto, FinishIssueDto, IssueCommentDto, IssueStatusDto, IssueTimelineDto, VerifyIssueDto } from "./dto/issue.dto";
 import { RoutingService } from "./routing.service";
 import { SlaService } from "./sla.service";
 import { DuplicateSubscriptionProofService } from "./duplicate-subscription-proof.service";
@@ -27,14 +27,15 @@ interface IssueRoomQrContext {
 
 const ACTIVE_STATUSES: IssueStatus[] = ["NEW", "NEEDS_MANUAL_ASSIGNMENT", "ASSIGNED", "ACKNOWLEDGED", "IN_PROGRESS", "WAITING_FOR_MATERIAL", "WAITING_FOR_VENDOR", "ON_HOLD", "RESOLVED", "VERIFICATION_PENDING", "REOPENED"];
 const GENERIC_ISSUE_QR_TOKEN = /^QR_[A-Za-z0-9_-]{24,160}$/;
+const UUID_REFERENCE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TRANSITIONS: Record<IssueStatus, IssueStatus[]> = {
   NEW: ["ASSIGNED", "NEEDS_MANUAL_ASSIGNMENT", "CANCELLED", "REJECTED"],
   NEEDS_MANUAL_ASSIGNMENT: ["ASSIGNED", "CANCELLED", "REJECTED"],
   ASSIGNED: ["ACKNOWLEDGED", "CANCELLED", "REJECTED"],
   ACKNOWLEDGED: ["IN_PROGRESS", "ON_HOLD", "CANCELLED"],
-  IN_PROGRESS: ["WAITING_FOR_MATERIAL", "WAITING_FOR_VENDOR", "ON_HOLD", "RESOLVED"],
-  WAITING_FOR_MATERIAL: ["IN_PROGRESS", "RESOLVED", "ON_HOLD"],
-  WAITING_FOR_VENDOR: ["IN_PROGRESS", "RESOLVED", "ON_HOLD"],
+  IN_PROGRESS: ["WAITING_FOR_MATERIAL", "WAITING_FOR_VENDOR", "ON_HOLD"],
+  WAITING_FOR_MATERIAL: ["IN_PROGRESS", "ON_HOLD"],
+  WAITING_FOR_VENDOR: ["IN_PROGRESS", "ON_HOLD"],
   ON_HOLD: ["IN_PROGRESS", "CANCELLED"],
   RESOLVED: ["VERIFICATION_PENDING", "VERIFIED", "REOPENED"],
   VERIFICATION_PENDING: ["VERIFIED", "REOPENED"],
@@ -83,15 +84,35 @@ export class IssuesService {
     }
     const duplicate = await this.prisma.issue.findFirst({
       where: { collegeId: user.collegeId, roomId: room.id, categoryId: category.id, issueTypeId: input.issueTypeId ?? null, assetId: input.assetId ?? null, status: { in: ACTIVE_STATUSES } },
-      select: { id: true, issueNumber: true, title: true, status: true, affectedUserCount: true },
+      select: { id: true, issueNumber: true, title: true, status: true, affectedUserCount: true, occurrenceCount: true, reporterId: true, assignedToId: true, priority: true, teamId: true, acknowledgementDueAt: true, resolutionDueAt: true },
       orderBy: { createdAt: "desc" },
     });
     if (duplicate && !input.createDespiteDuplicate) {
-      throw new ConflictException({
-        code: "PROBABLE_DUPLICATE",
-        message: "A probable active duplicate exists.",
-        duplicate: { ...duplicate, ...this.duplicateProofs.issue(user.id, duplicate.id) },
-      });
+      const linked = await this.prisma.$transaction(async (tx) => {
+        const existingReporter = await tx.issueAffectedUser.findUnique({ where: { issueId_userId: { issueId: duplicate.id, userId: user.id } } });
+        if (!existingReporter) await tx.issueAffectedUser.create({ data: { issueId: duplicate.id, userId: user.id } });
+        await tx.issueOccurrence.create({ data: { issueId: duplicate.id, reporterUserId: user.id, description: input.description.trim() } });
+        const updated = await tx.issue.update({ where: { id: duplicate.id }, data: {
+          occurrenceCount: { increment: 1 }, lastReportedAt: new Date(),
+          ...(!existingReporter ? { affectedUserCount: { increment: 1 } } : {}),
+        } });
+        const notification = await tx.notification.create({ data: {
+          type: "ISSUE_REPEATED", title: `${duplicate.issueNumber} was reported again`,
+          body: `Current report count: ${updated.occurrenceCount}.`, priority: duplicate.priority,
+          relatedEntityType: "Issue", relatedEntityId: duplicate.id,
+          recipients: { create: [...new Set([user.id, duplicate.reporterId, ...(duplicate.assignedToId ? [duplicate.assignedToId] : [])])].map((userId) => ({ userId })) },
+        } });
+        await tx.outboxEvent.create({ data: { aggregateType: "Issue", aggregateId: duplicate.id, eventType: "issue.repeated", payload: { issueId: duplicate.id, notificationId: notification.id, reporterId: user.id }, idempotencyKey: `issue.repeated:${duplicate.id}:${updated.occurrenceCount}` } });
+        const response = {
+          id: duplicate.id, issueNumber: duplicate.issueNumber, status: duplicate.status, linkedToExisting: true,
+          occurrenceCount: updated.occurrenceCount, assignedTeamId: duplicate.teamId, assignedToId: duplicate.assignedToId,
+          acknowledgementDueAt: duplicate.acknowledgementDueAt, resolutionDueAt: duplicate.resolutionDueAt,
+          message: `This issue has already been reported. You have been added to issue ${duplicate.issueNumber}. Current report count: ${updated.occurrenceCount}.`,
+        };
+        await tx.idempotencyKey.create({ data: { actorId: user.id, endpoint: "/issues", key: idempotencyKey, requestHash, responseStatus: 200, responseBody: response, resourceId: duplicate.id, expiresAt: addMinutes(new Date(), 24 * 60) } });
+        return response;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return linked;
     }
     const priority = input.prioritySuggestion ?? issueType?.defaultPriority ?? "MEDIUM";
     const decision = await this.routing.route({
@@ -106,7 +127,7 @@ export class IssuesService {
       const rows = await tx.$queryRaw<Array<{ value: bigint }>>(Prisma.sql`SELECT nextval('issue_number_seq') AS value`);
       const sequence = rows[0]?.value;
       if (sequence === undefined) throw new Error("Issue number sequence returned no value.");
-      const issueNumber = `ISS-${now.getUTCFullYear()}-${sequence.toString().padStart(6, "0")}`;
+      const issueNumber = `AVS-ISS-${now.getUTCFullYear()}-${sequence.toString().padStart(6, "0")}`;
       const issue = await tx.issue.create({
         data: {
           issueNumber, collegeId: user.collegeId, campusId: room.floor.block.campusId, blockId: room.floor.blockId,
@@ -123,6 +144,7 @@ export class IssuesService {
         },
       });
       await tx.issueAffectedUser.create({ data: { issueId: issue.id, userId: user.id } });
+      await tx.issueOccurrence.create({ data: { issueId: issue.id, reporterUserId: user.id, description: input.description.trim() } });
       await tx.issueStatusHistory.create({ data: { issueId: issue.id, newStatus: issue.status, changedById: user.id, comment: "Issue submitted.", requestId: metadata.requestId, ipAddress: metadata.ipAddress, userAgent: metadata.userAgent } });
       await tx.issueAssignmentHistory.create({ data: { issueId: issue.id, assignedUserId: decision.assignedToId, assignedTeamId: decision.teamId, routingRuleId: decision.routingRuleId, reason: decision.reason, snapshot: decision.snapshot } });
       const recipientIds = new Set([user.id, ...(decision.assignedToId ? [decision.assignedToId] : [])]);
@@ -179,17 +201,63 @@ export class IssuesService {
   }
 
   async detail(user: AuthPrincipal, id: string) {
+    id = await this.resolveIssueReference(user, id);
     const issue = await this.prisma.issue.findFirst({
       where: { AND: [{ id }, this.access.issueWhere(user)] },
-      include: { room: { include: { floor: { include: { block: { include: { campus: true } } } } } }, category: true, issueType: true, asset: true, reporter: { select: { publicId: true, fullName: true } }, assignedTo: { select: { publicId: true, fullName: true } }, team: { select: { id: true, name: true } }, comments: { where: { deletedAt: null, ...(user.permissions.includes("issues.update_work") ? {} : { isInternal: false }) }, include: { author: { select: { publicId: true, fullName: true } } }, orderBy: { createdAt: "asc" } }, statusHistory: { include: { changedBy: { select: { publicId: true, fullName: true } } }, orderBy: { createdAt: "asc" } }, attachments: { where: { deletedAt: null }, select: { id: true, originalName: true, mimeType: true, sizeBytes: true, purpose: true, sha256: true, createdAt: true, uploadedBy: { select: { publicId: true, fullName: true } } } } },
+      include: { room: { include: { floor: { include: { block: { include: { campus: true } } } } } }, category: true, issueType: true, asset: true, reporter: { select: { publicId: true, fullName: true } }, assignedTo: { select: { publicId: true, fullName: true } }, team: { select: { id: true, name: true } }, comments: { where: { deletedAt: null, ...(user.permissions.includes("issues.update_work") ? {} : { isInternal: false }) }, include: { author: { select: { publicId: true, fullName: true } } }, orderBy: { createdAt: "asc" } }, statusHistory: { include: { changedBy: { select: { publicId: true, fullName: true } } }, orderBy: { createdAt: "asc" } }, timelines: { include: { createdBy: { select: { publicId: true, fullName: true } } }, orderBy: { createdAt: "desc" } }, resolution: { include: { completedBy: { select: { publicId: true, fullName: true } } } }, attachments: { where: { deletedAt: null }, select: { id: true, originalName: true, mimeType: true, sizeBytes: true, purpose: true, sha256: true, createdAt: true, uploadedBy: { select: { publicId: true, fullName: true } } } } },
     });
     if (!issue) throw new NotFoundException("Issue not found.");
     return issue;
   }
 
+  async addTimeline(user: AuthPrincipal, id: string, input: IssueTimelineDto) {
+    id = await this.resolveIssueReference(user, id);
+    const issue = await this.requireWorkIssue(user, id);
+    const expectedCompletionAt = new Date(input.expectedCompletionAt);
+    if (expectedCompletionAt <= new Date()) throw new BadRequestException("Expected completion must be in the future.");
+    return this.prisma.$transaction(async (tx) => {
+      await tx.issueTimeline.updateMany({ where: { issueId: id, supersededAt: null }, data: { supersededAt: new Date() } });
+      const timeline = await tx.issueTimeline.create({ data: {
+        issueId: id, expectedCompletionAt, reason: input.reason.trim(), progressNote: input.progressNote.trim(),
+        requiredParts: input.requiredParts?.trim(), requiredApproval: input.requiredApproval ?? false, createdById: user.id,
+      } });
+      await tx.issue.update({ where: { id }, data: { expectedCompletionAt, version: { increment: 1 } } });
+      await this.notifyIssueUsers(tx, issue, "ISSUE_TIMELINE_UPDATED", `${issue.issueNumber} timeline updated`, input.progressNote.trim(), `issue.timeline:${timeline.id}`);
+      return timeline;
+    });
+  }
+
+  async finish(user: AuthPrincipal, id: string, input: FinishIssueDto, metadata: RequestMetadata) {
+    id = await this.resolveIssueReference(user, id);
+    const issue = await this.requireWorkIssue(user, id);
+    if (!["IN_PROGRESS", "WAITING_FOR_MATERIAL", "WAITING_FOR_VENDOR"].includes(issue.status)) throw new ConflictException("Only active work can be finished.");
+    const photo = await this.prisma.issueAttachment.findFirst({ where: {
+      id: input.completionPhotoFileId, issueId: id, purpose: "ISSUE_RESOLUTION", deletedAt: null,
+      mimeType: { in: ["image/jpeg", "image/png", "image/webp"] },
+    } });
+    if (!photo) throw new BadRequestException("A valid completion evidence photo is required.");
+    const completedAt = new Date(input.completedAt);
+    if (completedAt > new Date(Date.now() + 5 * 60_000)) throw new BadRequestException("Completion time cannot be in the future.");
+    return this.prisma.$transaction(async (tx) => {
+      const resolution = await tx.issueResolution.upsert({
+        where: { issueId: id },
+        create: { issueId: id, resolutionNote: input.resolutionNote.trim(), completionPhotoFileId: photo.id, partsUsed: input.partsUsed?.trim(), costNote: input.costNote?.trim(), supervisorComment: input.supervisorComment?.trim(), completedById: user.id, completedAt },
+        update: { resolutionNote: input.resolutionNote.trim(), completionPhotoFileId: photo.id, partsUsed: input.partsUsed?.trim(), costNote: input.costNote?.trim(), supervisorComment: input.supervisorComment?.trim(), completedById: user.id, completedAt },
+      });
+      await tx.issue.update({ where: { id }, data: { status: "VERIFICATION_PENDING", resolvedAt: completedAt, version: { increment: 1 } } });
+      await tx.issueStatusHistory.create({ data: { issueId: id, previousStatus: issue.status, newStatus: "VERIFICATION_PENDING", changedById: user.id, comment: input.resolutionNote.trim(), requestId: metadata.requestId, ipAddress: metadata.ipAddress, userAgent: metadata.userAgent } });
+      await this.notifyIssueUsers(tx, issue, "ISSUE_RESOLVED", `${issue.issueNumber} is ready for verification`, input.resolutionNote.trim(), `issue.finished:${resolution.id}`);
+      return resolution;
+    });
+  }
+
   async status(user: AuthPrincipal, id: string, input: IssueStatusDto, metadata: RequestMetadata, verificationAction = false) {
+    id = await this.resolveIssueReference(user, id);
     const issue = await this.prisma.issue.findFirst({ where: { AND: [{ id }, this.access.issueWhere(user)] } });
     if (!issue) throw new NotFoundException("Issue not found.");
+    if (["RESOLVED", "VERIFICATION_PENDING"].includes(input.status)) {
+      throw new BadRequestException("Use the finish-work action with verified completion photo evidence.");
+    }
     if (!TRANSITIONS[issue.status].includes(input.status)) throw new ConflictException(`Cannot move an issue from ${issue.status} to ${input.status}.`);
     const teamMember = issue.teamId ? Boolean(await this.prisma.responsibleTeamMember.findFirst({ where: { teamId: issue.teamId, userId: user.id, isActive: true } })) : false;
     if (["VERIFIED", "CLOSED"].includes(input.status) && !verificationAction) throw new ForbiddenException("Use the resolution verification action for this transition.");
@@ -213,7 +281,7 @@ export class IssuesService {
     return this.prisma.$transaction(async (tx) => {
       const changed = await tx.issue.updateMany({
         where: { id: issue.id, version: issue.version },
-        data: { status: input.status, version: { increment: 1 }, acknowledgedAt: input.status === "ACKNOWLEDGED" ? new Date() : undefined, resolvedAt: input.status === "RESOLVED" ? new Date() : undefined, closedAt: input.status === "CLOSED" ? new Date() : undefined },
+        data: { status: input.status, version: { increment: 1 }, acknowledgedAt: input.status === "ACKNOWLEDGED" ? new Date() : undefined, workStartedAt: input.status === "IN_PROGRESS" ? new Date() : undefined, resolvedAt: input.status === "RESOLVED" ? new Date() : undefined, closedAt: input.status === "CLOSED" ? new Date() : undefined },
       });
       if (changed.count !== 1) throw new ConflictException("The issue changed while this action was being processed. Refresh and try again.");
       const updated = await tx.issue.findUniqueOrThrow({ where: { id: issue.id } });
@@ -227,6 +295,7 @@ export class IssuesService {
   }
 
   async assign(user: AuthPrincipal, id: string, input: AssignIssueDto, metadata: RequestMetadata) {
+    id = await this.resolveIssueReference(user, id);
     const issue = await this.prisma.issue.findFirst({ where: { AND: [{ id }, this.access.issueWhere(user)] } });
     if (!issue) throw new NotFoundException("Issue not found.");
     if (!input.teamId && !input.userId) throw new BadRequestException("Select a team or responsible person.");
@@ -281,6 +350,7 @@ export class IssuesService {
   }
 
   async comment(user: AuthPrincipal, id: string, input: IssueCommentDto) {
+    id = await this.resolveIssueReference(user, id);
     const issue = await this.prisma.issue.findFirst({ where: { AND: [{ id }, this.access.issueWhere(user)] }, select: { id: true } });
     if (!issue) throw new NotFoundException("Issue not found.");
     if (input.isInternal && !user.permissions.includes("issues.update_work")) throw new ForbiddenException("Internal notes are restricted to responsible staff.");
@@ -288,6 +358,7 @@ export class IssuesService {
   }
 
   async subscribe(user: AuthPrincipal, id: string, duplicateSubscriptionProof?: string) {
+    id = await this.resolveIssueReference(user, id);
     const issue = await this.prisma.issue.findFirst({ where: { id, collegeId: user.collegeId, status: { in: ACTIVE_STATUSES } } });
     if (!issue) throw new NotFoundException("Active issue not found.");
     const visible = await this.prisma.issue.findFirst({
@@ -301,13 +372,14 @@ export class IssuesService {
       const existing = await tx.issueAffectedUser.findUnique({ where: { issueId_userId: { issueId: id, userId: user.id } } });
       if (!existing) {
         await tx.issueAffectedUser.create({ data: { issueId: id, userId: user.id } });
-        await tx.issue.update({ where: { id }, data: { affectedUserCount: { increment: 1 } } });
+        await tx.issue.update({ where: { id }, data: { affectedUserCount: { increment: 1 }, occurrenceCount: { increment: 1 }, lastReportedAt: new Date() } });
       }
       return { subscribed: true, alreadySubscribed: Boolean(existing) };
     });
   }
 
   async verify(user: AuthPrincipal, id: string, input: VerifyIssueDto, metadata: RequestMetadata) {
+    id = await this.resolveIssueReference(user, id);
     const issue = await this.prisma.issue.findFirst({ where: { AND: [{ id }, this.access.issueWhere(user)] } });
     if (!issue) throw new NotFoundException("Issue not found.");
     if (issue.reporterId !== user.id && !user.permissions.includes("issues.verify")) throw new ForbiddenException("You cannot verify this issue.");
@@ -321,6 +393,7 @@ export class IssuesService {
       });
       if (changed.count !== 1) throw new ConflictException("The issue changed while verification was being processed. Refresh and try again.");
       if (input.accepted) {
+        await tx.issueResolution.updateMany({ where: { issueId: id }, data: { verifiedAt: new Date() } });
         await tx.issueStatusHistory.createMany({ data: [
           { issueId: id, previousStatus: issue.status, newStatus: "VERIFIED", changedById: user.id, comment: input.comment?.trim() ?? "Resolution verified.", requestId: metadata.requestId, ipAddress: metadata.ipAddress, userAgent: metadata.userAgent },
           { issueId: id, previousStatus: "VERIFIED", newStatus: "CLOSED", changedById: user.id, comment: "Closed after successful reporter verification.", requestId: metadata.requestId, ipAddress: metadata.ipAddress, userAgent: metadata.userAgent },
@@ -395,7 +468,44 @@ export class IssuesService {
   }
 
   private issueListSelect() {
-    return { id: true, issueNumber: true, title: true, status: true, priority: true, submissionSource: true, affectedUserCount: true, createdAt: true, acknowledgementDueAt: true, resolutionDueAt: true, room: { select: { name: true, code: true } }, category: { select: { name: true } }, assignedTo: { select: { publicId: true, fullName: true } }, team: { select: { id: true, name: true } } } as const;
+    return { id: true, issueNumber: true, title: true, status: true, priority: true, submissionSource: true, affectedUserCount: true, occurrenceCount: true, createdAt: true, acknowledgementDueAt: true, resolutionDueAt: true, expectedCompletionAt: true, room: { select: { name: true, code: true } }, category: { select: { name: true } }, assignedTo: { select: { publicId: true, fullName: true } }, team: { select: { id: true, name: true } } } as const;
+  }
+
+  private async resolveIssueReference(user: AuthPrincipal, reference: string): Promise<string> {
+    if (UUID_REFERENCE.test(reference)) return reference;
+    if (!/^AVS-ISS-\d{4}-\d{6}$/.test(reference) && !/^ISS-\d{4}-\d{6}$/.test(reference)) {
+      throw new NotFoundException("Issue not found.");
+    }
+    const issue = await this.prisma.issue.findFirst({ where: { issueNumber: reference, collegeId: user.collegeId }, select: { id: true } });
+    if (!issue) throw new NotFoundException("Issue not found.");
+    return issue.id;
+  }
+
+  private async requireWorkIssue(user: AuthPrincipal, id: string) {
+    const issue = await this.prisma.issue.findFirst({ where: { AND: [{ id }, this.access.issueWhere(user)] } });
+    if (!issue) throw new NotFoundException("Issue not found.");
+    const teamMember = issue.teamId ? Boolean(await this.prisma.responsibleTeamMember.findFirst({ where: { teamId: issue.teamId, userId: user.id, isActive: true } })) : false;
+    if (!this.access.canWorkIssue(user, issue, teamMember)) throw new ForbiddenException("Only assigned responsible staff may update this issue.");
+    return issue;
+  }
+
+  private async notifyIssueUsers(
+    tx: Prisma.TransactionClient,
+    issue: { id: string; issueNumber: string; reporterId: string; assignedToId: string | null; priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | "EMERGENCY" },
+    type: string,
+    title: string,
+    body: string,
+    idempotencyKey: string,
+  ) {
+    const affected = await tx.issueAffectedUser.findMany({ where: { issueId: issue.id }, select: { userId: true } });
+    const recipientIds = new Set([issue.reporterId, ...(issue.assignedToId ? [issue.assignedToId] : []), ...affected.map(({ userId }) => userId)]);
+    const notification = await tx.notification.create({ data: {
+      type, title, body, priority: issue.priority, relatedEntityType: "Issue", relatedEntityId: issue.id,
+      recipients: { create: [...recipientIds].map((userId) => ({ userId })) },
+    } });
+    await tx.outboxEvent.create({ data: {
+      aggregateType: "Issue", aggregateId: issue.id, eventType: type.toLowerCase(), payload: { issueId: issue.id, notificationId: notification.id }, idempotencyKey,
+    } });
   }
 
   private async validateIssueQrToken(user: AuthPrincipal, qrToken: string, room: IssueRoomQrContext): Promise<void> {

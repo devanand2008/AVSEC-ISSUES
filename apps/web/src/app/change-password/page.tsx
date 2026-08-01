@@ -147,12 +147,15 @@ export default function ChangePasswordPage() {
         //    Router and does not cause a page reload, so BFCache is not
         //    involved here.
         router.replace(result.user.allowedNextRoute ?? "/");
-      } catch (caught) {
-        setError(
-          caught instanceof ApiError
-            ? caught.message
-            : "Password change failed. Please try again.",
-        );
+      } catch (caught: unknown) {
+        const status = caught instanceof ApiError ? caught.status : undefined;
+        if (status === 400) {
+          setError(caught instanceof ApiError ? caught.message : "Check the password requirements and try again.");
+        } else if (status === 401) {
+          setError("Your session expired or temporary password was incorrect.");
+        } else {
+          setError("Password change failed. Please try again.");
+        }
         busyRef.current = false;
         setBusyDisplay(false);
       }

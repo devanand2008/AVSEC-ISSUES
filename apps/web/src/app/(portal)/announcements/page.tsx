@@ -6,11 +6,12 @@ import { Image as ImageIcon, Pin } from "lucide-react";
 import { EmptyState, ErrorState, LoadingState } from "@/components/query-state";
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
+import { PageHeader } from "@/components/ui/page-header";
 import { AnnouncementModal } from "@/components/announcement-modal";
 
 interface Announcement {
   id: string;
-  title: string;
+  title: string | null;
   message: string;
   category: string;
   priority: string;
@@ -30,6 +31,19 @@ interface Announcement {
 }
 
 const TABS = ["NEW", "IMPORTANT", "ALL", "READ", "UNREAD", "EXPIRED", "PINNED"];
+
+const CATEGORY_COLORS: Record<string, { bg: string; color: string }> = {
+  GENERAL: { bg: "#eff6ff", color: "#2563eb" },
+  ACADEMIC: { bg: "#f0fdf4", color: "#16a34a" },
+  EXAM: { bg: "#fef3c7", color: "#d97706" },
+  PLACEMENT: { bg: "#fae8ff", color: "#a855f7" },
+  EVENT: { bg: "#ecfdf5", color: "#059669" },
+  EMERGENCY: { bg: "#fef2f2", color: "#dc2626" },
+  HOLIDAY: { bg: "#fefce8", color: "#ca8a04" },
+  DEPARTMENT: { bg: "#eff6ff", color: "#1d4ed8" },
+  TRANSPORT: { bg: "#f0f9ff", color: "#0284c7" },
+  OTHER: { bg: "#f1f5f9", color: "#475569" },
+};
 
 export default function AnnouncementsPage() {
   const client = useQueryClient();
@@ -65,13 +79,11 @@ export default function AnnouncementsPage() {
 
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <span className="eyebrow">College bulletin</span>
-          <h1 className="page-title" style={{ marginTop: 6 }}>Announcements</h1>
-          <p className="page-subtitle">Official updates for your assigned college groups.</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Announcements"
+        description="Official updates for your assigned college groups."
+        breadcrumbs={[{ label: "College Bulletin" }]}
+      />
 
       <div className="card announcement-tabs" style={{ display: "flex", gap: 10, padding: "12px 16px", marginBottom: 16, overflowX: "auto" }}>
         {TABS.map((item) => (
@@ -116,12 +128,24 @@ export default function AnnouncementsPage() {
                   <header style={{ marginBottom: 12 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8, gap: 8 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        <div className="announcement-category-chip">{item.category.replace("_", " ")}</div>
+                        <div 
+                          className="announcement-category-chip" 
+                          style={{
+                            background: CATEGORY_COLORS[item.category]?.bg || "var(--border)",
+                            color: CATEGORY_COLORS[item.category]?.color || "var(--text)",
+                            padding: "2px 8px",
+                            borderRadius: "12px",
+                            fontSize: "0.75rem",
+                            fontWeight: 600
+                          }}
+                        >
+                          {item.category.replace("_", " ")}
+                        </div>
                         <StatusBadge value={item.priority} />
                       </div>
                       {item.pinned && <Pin size={16} color="var(--primary)" />}
                     </div>
-                    <h2 style={{ fontSize: "1.1rem", margin: 0 }}>{item.title}</h2>
+                    <h2 className="announcement-title" style={{ fontSize: "1.1rem", margin: 0, fontWeight: 700 }}>{item.title?.trim() || "Announcement"}</h2>
                     <span className="muted" style={{ fontSize: "0.8rem", display: "block", marginTop: 4 }}>
                       {new Date(item.publishAt).toLocaleDateString()} - {item.author.fullName}
                     </span>

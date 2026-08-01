@@ -418,7 +418,7 @@ export function FeedbackScannerPage() {
             .catch(() => undefined)
             .finally(() => {
               router.push(
-                `/student/feedback/target/${encodeURIComponent(token)}`,
+                `/feedback/scan/${encodeURIComponent(token)}`,
               );
             });
         },
@@ -487,7 +487,7 @@ export function FeedbackScannerPage() {
     const token = extractFeedbackToken(manual);
     if (!token) return;
     if (!acquireDecodeLock(decodeLockRef)) return;
-    router.push(`/student/feedback/target/${encodeURIComponent(token)}`);
+    router.push(`/feedback/scan/${encodeURIComponent(token)}`);
   }
 
   return (
@@ -665,7 +665,7 @@ function TargetSearch() {
 
 export function FeedbackTargetRoutePage() {
   const params = useParams<{ token: string }>();
-  return <FeedbackForm lookup="scan" value={params.token} />;
+  return <FeedbackForm lookup="qr" value={params.token} />;
 }
 
 export function FeedbackTargetFormRoutePage() {
@@ -715,7 +715,7 @@ function FeedbackForm({
   lookup,
   value,
 }: {
-  lookup: "scan" | "target";
+  lookup: "qr" | "target";
   value: string;
 }) {
   const router = useRouter();
@@ -731,9 +731,9 @@ function FeedbackForm({
   const query = useQuery({
     queryKey: ["feedback-lookup", lookup, value],
     queryFn: () =>
-      lookup === "scan"
+      lookup === "qr"
         ? api.get<FeedbackLookupResponse>(
-            `/feedback/scan/${encodeURIComponent(value)}`,
+            `/feedback/qr/${encodeURIComponent(value)}/resolve`,
           )
         : api.get<FeedbackLookupResponse>(
             `/feedback/targets/${encodeURIComponent(value)}`,
@@ -751,10 +751,16 @@ function FeedbackForm({
   const submit = useMutation({
     mutationFn: () =>
       api.post<SubmitResponse>(
-        "/feedback/submit",
+        lookup === "qr"
+          ? `/feedback/qr/${encodeURIComponent(value)}/submit`
+          : "/feedback/submit",
         {
-          submissionTicket: query.data?.submissionTicket,
-          targetId: query.data?.target.id,
+          ...(lookup === "target"
+            ? {
+                submissionTicket: query.data?.submissionTicket,
+                targetId: query.data?.target.id,
+              }
+            : {}),
           ratings: Object.entries(ratings)
             .filter(([, rating]) => rating > 0)
             .map(([questionId, rating]) => ({ questionId, rating })),
@@ -996,7 +1002,7 @@ export function FeedbackSuccessPage() {
       <h1>{params.referenceNumber}</h1>
       <p>Your feedback has been recorded.</p>
       <div className="button-row" style={{ justifyContent: "center" }}>
-        <Link className="btn btn-primary" href="/student/feedback/scanner">
+        <Link className="btn btn-primary" href="/feedback/scanner">
           <QrCode size={17} />
           Scan another
         </Link>
@@ -1029,7 +1035,7 @@ export function FeedbackHistoryPage() {
             Your own feedback references and ratings.
           </p>
         </div>
-        <Link href="/student/feedback/scanner" className="btn btn-primary">
+        <Link href="/feedback/scanner" className="btn btn-primary">
           <QrCode size={17} />
           Scan QR
         </Link>

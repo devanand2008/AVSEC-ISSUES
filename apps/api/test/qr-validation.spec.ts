@@ -124,7 +124,7 @@ describe("QrService", () => {
     expect(result).toMatchObject({
       valid: true,
       qrType: "STAFF_FEEDBACK",
-      destination: `/student/feedback/target/${feedbackToken}`,
+      destination: `/feedback/scan/${feedbackToken}`,
       context: {
         targetName: "Faculty Feedback",
         staff: { id: "staff-public-1", fullName: "Asha Nair" },

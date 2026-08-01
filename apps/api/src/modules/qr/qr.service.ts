@@ -393,7 +393,7 @@ export class QrService {
     return {
       valid: true,
       qrType: "STAFF_FEEDBACK",
-      destination: `/student/feedback/target/${encodeURIComponent(token)}`,
+      destination: `/feedback/scan/${encodeURIComponent(token)}`,
       label: qr.target.targetName,
       context: {
         qrId: qr.id,

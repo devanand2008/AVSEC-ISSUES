@@ -108,8 +108,12 @@ export class ArchiveUserDto {
 }
 
 export class DeleteUserDto extends ArchiveUserDto {
-  @ApiProperty() @IsString() @Matches(/^PERMANENTLY DELETE USER$/) confirmationPhrase!: string;
+  @ApiProperty() @IsString() @Matches(/^(PERMANENTLY DELETE USER|DELETE USER [0-9a-fA-F-]{36})$/) confirmationPhrase!: string;
   @ApiProperty() @IsString() @Length(3, 255) backupReference!: string;
+}
+
+export class BulkPeopleDto extends ArchiveUserDto {
+  @ApiProperty({ type: [String] }) @IsArray() @ArrayMinSize(1) @ArrayMaxSize(100) @IsUUID(undefined, { each: true }) ids!: string[];
 }
 
 export class CreateRoleDto {
@@ -124,4 +128,11 @@ export class UpdateRoleDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) description?: string;
   @ApiProperty({ type: [String] }) @IsArray() @ArrayMinSize(1) @ArrayMaxSize(150) @IsString({ each: true }) permissionCodes!: string[];
   @ApiProperty() @IsString() @Length(3, 500) reason!: string;
+}
+
+export class NotificationPreferencesDto {
+  @ApiProperty() @IsBoolean() in_app!: boolean;
+  @ApiProperty() @IsBoolean() push!: boolean;
+  @ApiProperty() @IsBoolean() email!: boolean;
+  @ApiProperty() @IsBoolean() whatsapp!: boolean;
 }

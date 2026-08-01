@@ -1,8 +1,13 @@
 import { expect, request as playwrightRequest, test, type APIRequestContext, type APIResponse } from "@playwright/test";
+import { getE2EConfig } from "./config";
 
-const apiBase = process.env.E2E_API_URL ?? "http://localhost:4000/api/v1";
-const webOrigin = process.env.E2E_BASE_URL ?? "http://localhost:3000";
-const password = process.env.E2E_SEED_PASSWORD ?? "deva1253";
+const {
+  apiBase,
+  webBase: webOrigin,
+  collegeCode,
+  studentEmail,
+  studentPassword,
+} = getE2EConfig();
 
 async function body<T>(response: APIResponse): Promise<T> {
   const text = await response.text();
@@ -12,7 +17,7 @@ async function body<T>(response: APIResponse): Promise<T> {
 
 async function login(identifier: string): Promise<APIRequestContext> {
   const context = await playwrightRequest.newContext();
-  await body(await context.post(`${apiBase}/auth/login`, { data: { identifier, password, collegeCode: "6201" } }));
+  await body(await context.post(`${apiBase}/auth/login`, { data: { identifier, password: studentPassword, collegeCode } }));
   return context;
 }
 
@@ -27,9 +32,9 @@ test("student signs in and sees the scoped portal", async ({ page }) => {
   const initialAuth = page.waitForResponse((response) => response.url().endsWith("/api/v1/auth/me"));
   await page.goto("/login");
   await initialAuth;
-  await page.getByLabel(/college id or email|email or college id/i).fill("student@college.local");
-  await page.getByLabel(/College code/).fill("6201");
-  await page.locator("#password").fill(password);
+  await page.getByLabel(/college id or email|email or college id/i).fill(studentEmail);
+  await page.getByLabel(/College code/).fill(collegeCode);
+  await page.locator("#password").fill(studentPassword);
   await page.getByRole("button", { name: /login|secure sign in/i }).click();
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: /Good day, Aarav/ })).toBeVisible({ timeout: 30_000 });
@@ -39,7 +44,7 @@ test("student signs in and sees the scoped portal", async ({ page }) => {
 
 test("issue lifecycle routes, uploads, closes, and enforces authorization", async ({}, testInfo) => {
   test.skip(testInfo.project.name === "mobile", "API lifecycle is exercised once; mobile is covered by the portal test.");
-  const student = await login("student@college.local");
+  const student = await login(studentEmail);
   const studentHeaders = await csrfHeaders(student);
 
   const campuses = await body<Array<{ id: string; name: string }>>(await student.get(`${apiBase}/locations/campuses`));
@@ -93,7 +98,52 @@ test("issue lifecycle routes, uploads, closes, and enforces authorization", asyn
   const electricianHeaders = await csrfHeaders(electrician);
   expect((await body<{ status: string }>(await electrician.post(`${apiBase}/issues/${issue.id}/acknowledge`, { headers: electricianHeaders }))).status).toBe("ACKNOWLEDGED");
   expect((await body<{ status: string }>(await electrician.post(`${apiBase}/issues/${issue.id}/start`, { headers: electricianHeaders }))).status).toBe("IN_PROGRESS");
-  expect((await body<{ status: string }>(await electrician.post(`${apiBase}/issues/${issue.id}/resolve`, { headers: electricianHeaders, data: { body: "Replaced the regulator and tested the fan under load." } }))).status).toBe("RESOLVED");
+  const completionUpload = await body<{ storageKey: string; uploadUrl: string; requiredHeaders: Record<string, string> }>(
+    await electrician.post(`${apiBase}/issues/${issue.id}/attachments/presign`, {
+      headers: electricianHeaders,
+      data: {
+        fileName: "completion.png",
+        mimeType: "image/png",
+        sizeBytes: evidence.length,
+        purpose: "ISSUE_RESOLUTION",
+      },
+    }),
+  );
+  await bodyless(
+    await electrician.put(completionUpload.uploadUrl, {
+      data: evidence,
+      headers: completionUpload.requiredHeaders,
+    }),
+  );
+  const completion = await body<{ id: string }>(
+    await electrician.post(`${apiBase}/issues/${issue.id}/attachments/complete`, {
+      headers: electricianHeaders,
+      data: {
+        fileName: "completion.png",
+        mimeType: "image/png",
+        sizeBytes: evidence.length,
+        purpose: "ISSUE_RESOLUTION",
+        storageKey: completionUpload.storageKey,
+      },
+    }),
+  );
+  await body(
+    await electrician.post(`${apiBase}/issues/${issue.id}/finish`, {
+      headers: electricianHeaders,
+      data: {
+        resolutionNote: "Replaced the regulator and tested the fan under load.",
+        completionPhotoFileId: completion.id,
+        completedAt: new Date().toISOString(),
+      },
+    }),
+  );
+  expect(
+    (
+      await body<{ status: string }>(
+        await electrician.get(`${apiBase}/issues/${issue.id}`),
+      )
+    ).status,
+  ).toBe("VERIFICATION_PENDING");
 
   const closed = await body<{ status: string }>(await student.post(`${apiBase}/issues/${issue.id}/verify`, { headers: studentHeaders, data: { accepted: true, comment: "The fan is operating normally." } }));
   expect(closed.status).toBe("CLOSED");

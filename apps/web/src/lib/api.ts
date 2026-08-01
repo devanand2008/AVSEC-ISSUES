@@ -17,6 +17,26 @@ export function apiEventUrl(path: string): string {
   return `${apiUrl()}${path}`;
 }
 
+export function authenticatedStream(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const headers = new Headers({
+    accept: "text/event-stream",
+    "content-type": "application/json",
+  });
+  const csrf = cookie("college_csrf");
+  if (csrf) headers.set("x-csrf-token", decodeURIComponent(csrf));
+  return fetch(`${apiUrl()}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    credentials: "include",
+    signal,
+  });
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,

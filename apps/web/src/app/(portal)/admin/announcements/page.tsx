@@ -100,8 +100,8 @@ export default function AdminAnnouncementsPage() {
                   
                   return (
                     <tr key={item.id}>
-                      <td>
-                        <strong>{item.title}</strong>
+                      <td className="announcement-title-cell">
+                        <strong className="announcement-title">{item.title?.trim() || "Announcement"}</strong>
                         <div className="muted" style={{ fontSize: "0.8rem", marginTop: 4 }}>
                           {item.category.replace("_", " ")} · {item.priority}
                         </div>

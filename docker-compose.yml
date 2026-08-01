@@ -97,6 +97,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    volumes:
+      - backup_cache:/app/backups
     ports:
       - "${API_BIND_ADDRESS:-0.0.0.0}:${API_HOST_PORT:-4000}:4000"
     healthcheck:
@@ -156,3 +158,4 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  backup_cache:

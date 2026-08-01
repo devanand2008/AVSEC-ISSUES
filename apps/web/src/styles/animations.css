@@ -1,0 +1,93 @@
+/* ── AVS Animations ── */
+
+/* Fade in */
+@keyframes avs-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Slide up */
+@keyframes avs-slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Slide down (for dropdowns, sheets) */
+@keyframes avs-slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Scale in (for dialogs) */
+@keyframes avs-scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Skeleton shimmer */
+@keyframes avs-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Spinner */
+@keyframes avs-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Pulse (for live indicators) */
+@keyframes avs-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Bounce subtle (for attention) */
+@keyframes avs-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+/* Utility classes */
+.avs-animate-fade-in {
+  animation: avs-fade-in 0.2s ease-out;
+}
+
+.avs-animate-slide-up {
+  animation: avs-slide-up 0.25s ease-out;
+}
+
+.avs-animate-slide-down {
+  animation: avs-slide-down 0.2s ease-out;
+}
+
+.avs-animate-scale-in {
+  animation: avs-scale-in 0.2s ease-out;
+}
+
+.avs-animate-shimmer {
+  background: linear-gradient(90deg, var(--border) 25%, var(--page) 50%, var(--border) 75%);
+  background-size: 200% 100%;
+  animation: avs-shimmer 1.5s infinite;
+}
+
+.avs-animate-spin {
+  animation: avs-spin 0.8s linear infinite;
+}
+
+.avs-animate-pulse {
+  animation: avs-pulse 2s ease-in-out infinite;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .avs-animate-fade-in,
+  .avs-animate-slide-up,
+  .avs-animate-slide-down,
+  .avs-animate-scale-in,
+  .avs-animate-shimmer,
+  .avs-animate-spin,
+  .avs-animate-pulse {
+    animation: none !important;
+  }
+}

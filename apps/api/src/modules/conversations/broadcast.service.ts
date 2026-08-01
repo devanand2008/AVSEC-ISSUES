@@ -2,14 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
 import { AuditService } from "../audit/audit.service";
-
-export interface CreateBroadcastDto {
-  title: string;
-  body: string;
-  audienceType: "ALL" | "ROLE" | "DEPARTMENT" | "SECTION" | "INDIVIDUAL";
-  audienceValue?: string;
-  scheduledAt?: string;
-}
+import type { CreateBroadcastDto } from "./dto/broadcast.dto";
 
 @Injectable()
 export class BroadcastService {

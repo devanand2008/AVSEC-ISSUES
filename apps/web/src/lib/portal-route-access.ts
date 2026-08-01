@@ -1,6 +1,6 @@
 interface PortalRouteRule {
   prefix: string;
-  roles: readonly string[];
+  roles?: readonly string[];
   any?: readonly string[];
   all?: readonly string[];
 }
@@ -9,6 +9,10 @@ const adminRoles = ["SUPER_ADMIN", "MAIN_ADMIN"] as const;
 const studentRoles = ["STUDENT", "CLASS_REPRESENTATIVE"] as const;
 
 const portalRouteRules: readonly PortalRouteRule[] = [
+  {
+    prefix: "/settings/storage",
+    any: ["settings.read", "integrations.manage", "backups.manage"],
+  },
   {
     prefix: "/admin/feedback/dashboard",
     roles: adminRoles,
@@ -176,7 +180,8 @@ export function canAccessPortalPath(
   );
   if (!rule) return true;
   const assignedRoles = new Set(roles);
-  if (!rule.roles.some((role) => assignedRoles.has(role))) return false;
+  if (rule.roles && !rule.roles.some((role) => assignedRoles.has(role)))
+    return false;
   const granted = new Set(permissions);
   if (rule.all && !rule.all.every((permission) => granted.has(permission)))
     return false;

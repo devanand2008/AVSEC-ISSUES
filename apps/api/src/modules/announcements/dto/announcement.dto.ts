@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { Type } from "class-transformer";
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min, ValidateNested } from "class-validator";
+import { Transform, Type } from "class-transformer";
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, ValidateNested } from "class-validator";
 import { AnnouncementCategory, AnnouncementDeliveryStatus, IssuePriority, ScopeType } from "../../../generated/prisma/enums";
 
 export class AnnouncementAudienceDto {
@@ -11,7 +11,12 @@ export class AnnouncementAudienceDto {
 }
 
 export class CreateAnnouncementDto {
-  @ApiProperty() @IsString() @Length(3, 180) title!: string;
+  @ApiProperty({ minLength: 2, maxLength: 200 })
+  @Transform(({ value }) => typeof value === "string" ? value.trim() : value)
+  @IsString()
+  @Length(2, 200)
+  @Matches(/^[^<>]+$/u, { message: "title must not contain HTML markup" })
+  title!: string;
   @ApiProperty() @IsString() @Length(3, 10000) message!: string;
   @ApiPropertyOptional({ enum: AnnouncementCategory }) @IsOptional() @IsEnum(AnnouncementCategory) category?: AnnouncementCategory;
   @ApiPropertyOptional({ enum: IssuePriority }) @IsOptional() @IsEnum(IssuePriority) priority?: IssuePriority;
@@ -28,7 +33,13 @@ export class CreateAnnouncementDto {
 }
 
 export class UpdateAnnouncementDto {
-  @ApiPropertyOptional() @IsOptional() @IsString() @Length(3, 180) title?: string;
+  @ApiPropertyOptional({ minLength: 2, maxLength: 200 })
+  @IsOptional()
+  @Transform(({ value }) => typeof value === "string" ? value.trim() : value)
+  @IsString()
+  @Length(2, 200)
+  @Matches(/^[^<>]+$/u, { message: "title must not contain HTML markup" })
+  title?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(3, 10000) message?: string;
   @ApiPropertyOptional({ enum: AnnouncementCategory }) @IsOptional() @IsEnum(AnnouncementCategory) category?: AnnouncementCategory;
   @ApiPropertyOptional({ enum: IssuePriority }) @IsOptional() @IsEnum(IssuePriority) priority?: IssuePriority;

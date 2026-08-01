@@ -18,6 +18,8 @@ interface Campus { id: string; code: string; name: string }
 type StructureTab = "departments" | "programmes" | "years" | "semesters" | "sections" | "subjects";
 type Tab = StructureTab | "assignments";
 
+import { PageHeader } from "@/components/ui/page-header";
+
 export default function AcademicAdminPage() {
   const [tab, setTab] = useState<Tab>("departments");
   const [creating, setCreating] = useState(false);
@@ -32,7 +34,17 @@ export default function AcademicAdminPage() {
   ];
 
   return <>
-    <div className="page-heading"><div><span className="eyebrow">Administration</span><h1 className="page-title" style={{ marginTop: 6 }}>Academic structure</h1><p className="page-subtitle">Manage structure and the people assigned to each class.</p></div><button className="btn btn-primary" onClick={() => setCreating(!creating)}><Plus size={17} />{creating ? "Cancel" : "Add new"}</button></div>
+    <PageHeader
+      title="Academic Structure"
+      description="Manage hierarchy, courses, and the people assigned to each class."
+      breadcrumbs={[{ label: "Admin" }, { label: "Academic Setup" }]}
+      actions={
+        <button className="btn btn-primary" onClick={() => setCreating(!creating)}>
+          <Plus size={17} />
+          {creating ? "Cancel" : "Add new"}
+        </button>
+      }
+    />
     <div className="tab-bar" style={{ marginBottom: 18 }}>{tabs.map(({ key, label, icon: Icon }) => <button key={key} className={`tab-item ${tab === key ? "active" : ""}`} onClick={() => { setTab(key); setCreating(false); }}><Icon size={16} />{label}</button>)}</div>
     {creating && tab !== "assignments" && <CreateForm tab={tab} onCreated={() => setCreating(false)} />}
     {tab === "departments" && <DepartmentsTable />}
@@ -121,7 +133,83 @@ function SectionsTable() {
   const years = uniqueValues(query.data ?? [], (item) => item.semester.academicYear.id, (item) => item.semester.academicYear.name);
   const semesters = uniqueValues(query.data ?? [], (item) => item.semester.id, (item) => item.semester.name);
   const filtered = query.data?.filter((item) => (programme === "ALL" || item.semester.programme.id === programme) && (year === "ALL" || item.semester.academicYear.id === year) && (semester === "ALL" || item.semester.id === semester) && (active === "ALL" || item.isActive === (active === "ACTIVE"))) ?? [];
-  return <><div className="academic-filters class-filters"><FilterSelect label="Programme" value={programme} options={programmes} onChange={setProgramme} /><FilterSelect label="Academic year" value={year} options={years} onChange={setYear} /><FilterSelect label="Semester" value={semester} options={semesters} onChange={setSemester} /><select className="input" aria-label="Section status" value={active} onChange={(event) => setActive(event.target.value)}><option value="ALL">All statuses</option><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option></select></div><div className="class-grid">{filtered.map((item) => <article className="class-card" key={item.id}><header><div><span className="eyebrow">{item.semester.academicYear.name}</span><h3>{item.displayName || `${item.semester.programme.name} ${item.name}`}</h3></div><ToggleButton entityType="section" id={item.id} isActive={item.isActive} /></header><p>{item.semester.programme.name} <ChevronRight size={13} /> {item.semester.name} <ChevronRight size={13} /> Section {item.code}</p><dl><div><dt>Study year</dt><dd>{item.studyYear ?? "Not set"}</dd></div><div><dt>Students</dt><dd>{item._count.studentProfiles}{item.capacity ? ` / ${item.capacity}` : ""}</dd></div><div><dt>Class coordinator</dt><dd>{item.coordinatorAssignments[0]?.coordinator.fullName ?? "Not assigned"}</dd></div><div><dt>Class representative</dt><dd>{item.representativeAssignments[0]?.representative.fullName ?? "Not assigned"}</dd></div><div><dt>Classroom</dt><dd>{item.assignedRoom ? `${item.assignedRoom.floor.block.name}, ${item.assignedRoom.floor.name}, ${item.assignedRoom.name}` : "Not assigned"}</dd></div></dl><footer><span className={`badge ${item.officialGroupEnabled ? "badge-success" : ""}`}>{item.officialGroupEnabled ? "Official group active" : "Group disabled"}</span>{item.officialGroupEnabled && <a className="btn btn-secondary" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, color: "var(--primary)", borderColor: "var(--primary)" }} href={`/messages?search=${encodeURIComponent(item.displayName || `${item.semester.programme.name} ${item.name}`)}`}><MessageCircle size={16} />Open group</a>}</footer></article>)}{!filtered.length && <div className="empty">No classes match these filters.</div>}</div></>;
+  
+  return (
+    <>
+      <div className="academic-filters class-filters">
+        <FilterSelect label="Programme" value={programme} options={programmes} onChange={setProgramme} />
+        <FilterSelect label="Academic year" value={year} options={years} onChange={setYear} />
+        <FilterSelect label="Semester" value={semester} options={semesters} onChange={setSemester} />
+        <select className="input" aria-label="Section status" value={active} onChange={(event) => setActive(event.target.value)}>
+          <option value="ALL">All statuses</option>
+          <option value="ACTIVE">Active</option>
+          <option value="INACTIVE">Inactive</option>
+        </select>
+      </div>
+      <div className="class-grid">
+        {filtered.map((item) => {
+          const maxCapacity = item.capacity ?? 70;
+          const students = item._count.studentProfiles;
+          const isFull = students >= maxCapacity;
+          const isNearFull = students >= maxCapacity * 0.9 && !isFull;
+          
+          return (
+            <article className="class-card" key={item.id}>
+              <header>
+                <div>
+                  <span className="eyebrow">{item.semester.academicYear.name}</span>
+                  <h3>{item.displayName || `${item.semester.programme.name} ${item.name}`}</h3>
+                </div>
+                <ToggleButton entityType="section" id={item.id} isActive={item.isActive} />
+              </header>
+              <p>{item.semester.programme.name} <ChevronRight size={13} /> {item.semester.name} <ChevronRight size={13} /> Section {item.code}</p>
+              <dl>
+                <div>
+                  <dt>Study year</dt>
+                  <dd>{item.studyYear ?? "Not set"}</dd>
+                </div>
+                <div>
+                  <dt>Students</dt>
+                  <dd>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ color: isFull ? "var(--danger)" : isNearFull ? "var(--warning)" : "inherit", fontWeight: isFull ? 600 : "normal" }}>
+                        {students} / {maxCapacity}
+                      </span>
+                      {isFull && <span className="badge badge-danger">Full</span>}
+                      {isNearFull && <span className="badge badge-warning">Filling</span>}
+                    </div>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Class coordinator</dt>
+                  <dd>{item.coordinatorAssignments[0]?.coordinator.fullName ?? "Not assigned"}</dd>
+                </div>
+                <div>
+                  <dt>Class representative</dt>
+                  <dd>{item.representativeAssignments[0]?.representative.fullName ?? "Not assigned"}</dd>
+                </div>
+                <div>
+                  <dt>Classroom</dt>
+                  <dd>{item.assignedRoom ? `${item.assignedRoom.floor.block.name}, ${item.assignedRoom.floor.name}, ${item.assignedRoom.name}` : "Not assigned"}</dd>
+                </div>
+              </dl>
+              <footer>
+                <span className={`badge ${item.officialGroupEnabled ? "badge-success" : ""}`}>
+                  {item.officialGroupEnabled ? "Official group active" : "Group disabled"}
+                </span>
+                {item.officialGroupEnabled && (
+                  <a className="btn btn-secondary" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, color: "var(--primary)", borderColor: "var(--primary)" }} href={`/messages?search=${encodeURIComponent(item.displayName || `${item.semester.programme.name} ${item.name}`)}`}>
+                    <MessageCircle size={16} />Open group
+                  </a>
+                )}
+              </footer>
+            </article>
+          );
+        })}
+        {!filtered.length && <div className="empty">No classes match these filters.</div>}
+      </div>
+    </>
+  );
 }
 
 function FilterSelect({ label, value, options, onChange }: { label: string; value: string; options: Array<{ value: string; label: string }>; onChange: (value: string) => void }) {

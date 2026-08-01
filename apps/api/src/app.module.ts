@@ -35,6 +35,18 @@ import { ProfileCompletionGuard } from "./common/guards/profile-completion.guard
 import { ImportsModule } from "./modules/imports/imports.module";
 import { LearnModule } from "./modules/learn/learn.module";
 import { resolve } from "node:path";
+import { AiModule } from "./modules/ai/ai.module";
+import { GoogleDriveModule } from "./modules/google-drive/google-drive.module";
+import {
+  GOOGLE_DRIVE_CONNECTION_STORE,
+  GOOGLE_DRIVE_FOLDER_CACHE,
+  GOOGLE_DRIVE_OAUTH_STATE_STORE,
+  type GoogleDriveConfig,
+} from "./modules/google-drive/google-drive.types";
+import { PrismaConnectionStore } from "./modules/google-drive/connection-store";
+import { InMemoryOAuthStateStore } from "./modules/google-drive/oauth-state-store";
+import { InMemoryFolderCacheStore } from "./modules/google-drive/folder-cache-store";
+import { BackupsModule } from "./modules/backups/backups.module";
 
 @Module({
   imports: [
@@ -57,6 +69,17 @@ import { resolve } from "node:path";
             "password",
             "accessToken",
             "refreshToken",
+            "refresh_token",
+            "client_secret",
+            "GOOGLE_OAUTH_CLIENT_SECRET",
+            "GOOGLE_DRIVE_ENCRYPTION_KEY",
+            "BACKUP_ENCRYPTION_KEY",
+            "OPENAI_API_KEY",
+            "openaiApiKey",
+            "apiKey",
+            "req.body.message",
+            "req.body.prompt",
+            "req.body.content",
           ],
           censor: "[REDACTED]",
         },
@@ -95,6 +118,50 @@ import { resolve } from "node:path";
     FeedbackModule,
     QrModule,
     LearnModule,
+    AiModule,
+    GoogleDriveModule.registerAsync({
+      imports: [DatabaseModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService): GoogleDriveConfig => ({
+        enabled: config.get<boolean>("GOOGLE_DRIVE_ENABLED", false),
+        clientId: config.get<string>("GOOGLE_OAUTH_CLIENT_ID", ""),
+        clientSecret: config.get<string>("GOOGLE_OAUTH_CLIENT_SECRET", ""),
+        redirectUri: config.get<string>("GOOGLE_OAUTH_REDIRECT_URI", ""),
+        tokenEncryptionKey: config.get<string>(
+          "GOOGLE_DRIVE_ENCRYPTION_KEY",
+          "",
+        ),
+        ownerEmail: config.get<string>("GOOGLE_DRIVE_OWNER_EMAIL"),
+        rootFolderId: config.get<string>("GOOGLE_DRIVE_ROOT_FOLDER_ID"),
+        maxDownloadBytes:
+          config.get<number>("GOOGLE_DRIVE_MAX_FILE_SIZE_MB", 500) *
+          1024 *
+          1024,
+        maxUploadBytes:
+          config.get<number>("GOOGLE_DRIVE_MAX_FILE_SIZE_MB", 500) *
+          1024 *
+          1024,
+        uploadChunkSizeBytes:
+          config.get<number>("GOOGLE_DRIVE_UPLOAD_CHUNK_SIZE_MB", 8) *
+          1024 *
+          1024,
+      }),
+      persistenceProviders: [
+        {
+          provide: GOOGLE_DRIVE_OAUTH_STATE_STORE,
+          useClass: InMemoryOAuthStateStore,
+        },
+        {
+          provide: GOOGLE_DRIVE_CONNECTION_STORE,
+          useClass: PrismaConnectionStore,
+        },
+        {
+          provide: GOOGLE_DRIVE_FOLDER_CACHE,
+          useClass: InMemoryFolderCacheStore,
+        },
+      ],
+    }),
+    BackupsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

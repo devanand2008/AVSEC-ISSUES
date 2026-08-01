@@ -16,6 +16,11 @@ const optionalSecret = z.preprocess(
   z.string().min(32).optional(),
 );
 
+const optionalPositiveNumber = z.preprocess(
+  (value) => (value === "" || value === undefined ? undefined : value),
+  z.coerce.number().positive().optional(),
+);
+
 const trustProxy = z
   .string()
   .default("false")
@@ -110,6 +115,45 @@ export const environmentSchema = z
       .min(60)
       .max(3600)
       .default(300),
+    GOOGLE_DRIVE_ENABLED: booleanString(),
+    GOOGLE_DRIVE_OWNER_EMAIL: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.email().optional(),
+    ),
+    GOOGLE_OAUTH_CLIENT_ID: optionalString,
+    GOOGLE_OAUTH_CLIENT_SECRET: optionalSecret,
+    GOOGLE_OAUTH_REDIRECT_URI: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.url().optional(),
+    ),
+    GOOGLE_DRIVE_ROOT_FOLDER_ID: optionalString,
+    GOOGLE_DRIVE_BACKUP_FOLDER_ID: optionalString,
+    GOOGLE_DRIVE_FILES_FOLDER_ID: optionalString,
+    GOOGLE_DRIVE_ENCRYPTION_KEY: optionalSecret,
+    GOOGLE_DRIVE_MAX_FILE_SIZE_MB: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(500)
+      .default(500),
+    GOOGLE_DRIVE_UPLOAD_CHUNK_SIZE_MB: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(256)
+      .default(8),
+    BACKUP_ENCRYPTION_KEY: optionalSecret,
+    BACKUP_ENCRYPTION_KEY_VERSION: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(2_147_483_647)
+      .default(1),
+    BACKUP_SCHEDULE_ENABLED: booleanString(),
+    BACKUP_SCHEDULE_HOUR: z.coerce.number().int().min(0).max(23).default(2),
+    BACKUP_DAILY_RETENTION: z.coerce.number().int().min(1).max(365).default(14),
+    BACKUP_WEEKLY_RETENTION: z.coerce.number().int().min(1).max(260).default(12),
+    BACKUP_MONTHLY_RETENTION: z.coerce.number().int().min(1).max(120).default(24),
     WHATSAPP_ENABLED: booleanString(),
     WHATSAPP_PHONE_NUMBER_ID: optionalString,
     WHATSAPP_BUSINESS_ACCOUNT_ID: optionalString,
@@ -158,6 +202,43 @@ export const environmentSchema = z
       (value) => (value === "" ? undefined : value),
       z.url().optional(),
     ),
+    AVS_BOT_ENABLED: booleanString(),
+    OPENAI_API_KEY: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.string().min(20).optional(),
+    ),
+    OPENAI_MODEL: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.string().trim().regex(/^[a-zA-Z0-9._-]+$/).max(100).optional(),
+    ),
+    OPENAI_VECTOR_STORE_ID: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.string().trim().max(160).optional(),
+    ),
+    OPENAI_MAX_OUTPUT_TOKENS: z.coerce
+      .number()
+      .int()
+      .min(100)
+      .max(8_000)
+      .default(1_200),
+    OPENAI_REQUEST_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(5_000)
+      .max(120_000)
+      .default(45_000),
+    OPENAI_DAILY_USER_LIMIT: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(10_000)
+      .default(50),
+    OPENAI_MONTHLY_BUDGET_USD: optionalPositiveNumber,
+    OPENAI_INPUT_COST_PER_MILLION_USD: optionalPositiveNumber,
+    OPENAI_OUTPUT_COST_PER_MILLION_USD: optionalPositiveNumber,
+    AI_KNOWLEDGE_PROVIDER: z
+      .enum(["internal", "openai_file_search"])
+      .default("internal"),
     SEED_DEVELOPMENT_DATA: booleanString(),
     DEVELOPMENT_COLLEGE_CODE: optionalString,
     DEVELOPMENT_ADMIN_EMAIL: optionalString,
@@ -216,6 +297,57 @@ export const environmentSchema = z
       });
     }
 
+    if (environment.AVS_BOT_ENABLED) {
+      for (const field of ["OPENAI_API_KEY", "OPENAI_MODEL"] as const) {
+        if (!environment[field]) {
+          context.addIssue({
+            code: "custom",
+            path: [field],
+            message: "is required when AVS_BOT_ENABLED=true",
+          });
+        }
+      }
+    }
+
+    if (environment.GOOGLE_DRIVE_ENABLED) {
+      for (const field of [
+        "GOOGLE_DRIVE_OWNER_EMAIL",
+        "GOOGLE_OAUTH_CLIENT_ID",
+        "GOOGLE_OAUTH_CLIENT_SECRET",
+        "GOOGLE_OAUTH_REDIRECT_URI",
+        "GOOGLE_DRIVE_ENCRYPTION_KEY",
+        "BACKUP_ENCRYPTION_KEY",
+      ] as const) {
+        if (!environment[field]) {
+          context.addIssue({
+            code: "custom",
+            path: [field],
+            message: "is required when GOOGLE_DRIVE_ENABLED=true",
+          });
+        }
+      }
+    }
+
+    if (environment.BACKUP_SCHEDULE_ENABLED && !environment.BACKUP_ENCRYPTION_KEY) {
+      context.addIssue({
+        code: "custom",
+        path: ["BACKUP_ENCRYPTION_KEY"],
+        message: "is required when BACKUP_SCHEDULE_ENABLED=true",
+      });
+    }
+
+    if (
+      environment.AI_KNOWLEDGE_PROVIDER === "openai_file_search" &&
+      !environment.OPENAI_VECTOR_STORE_ID
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["OPENAI_VECTOR_STORE_ID"],
+        message:
+          "is required when AI_KNOWLEDGE_PROVIDER=openai_file_search",
+      });
+    }
+
     if (environment.NODE_ENV !== "production") return;
 
     if (!environment.COOKIE_SECURE) {
@@ -269,6 +401,10 @@ export const environmentSchema = z
       ["S3_SECRET_KEY", environment.S3_SECRET_KEY],
       ["DEVICE_TOKEN_ENCRYPTION_KEY", environment.DEVICE_TOKEN_ENCRYPTION_KEY],
       ["SMTP_PASSWORD", environment.SMTP_PASSWORD],
+      ["OPENAI_API_KEY", environment.OPENAI_API_KEY],
+      ["GOOGLE_OAUTH_CLIENT_SECRET", environment.GOOGLE_OAUTH_CLIENT_SECRET],
+      ["GOOGLE_DRIVE_ENCRYPTION_KEY", environment.GOOGLE_DRIVE_ENCRYPTION_KEY],
+      ["BACKUP_ENCRYPTION_KEY", environment.BACKUP_ENCRYPTION_KEY],
       ["DEVELOPMENT_ADMIN_PASSWORD", environment.DEVELOPMENT_ADMIN_PASSWORD],
     ] as const;
     for (const [field, value] of secrets) {

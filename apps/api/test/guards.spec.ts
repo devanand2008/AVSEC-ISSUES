@@ -166,12 +166,9 @@ describe("authorization guards", () => {
     ).toBe(true);
   });
 
-  it("limits incomplete-profile sessions to profile setup endpoints", () => {
-    const guard = new ProfileCompletionGuard(
-      reflector(),
-      new ConfigService({ API_PREFIX: "service/v2" }),
-    );
-    expect(() =>
+  it("does not globally lock incomplete-profile users out of authorised features", () => {
+    const guard = new ProfileCompletionGuard(reflector());
+    expect(
       guard.canActivate(
         context({
           originalUrl: "/service/v2/learn/courses",
@@ -181,48 +178,14 @@ describe("authorization guards", () => {
           },
         }),
       ),
-    ).toThrow(ForbiddenException);
-    expect(
-      guard.canActivate(
-        context({
-          originalUrl: "/service/v2/users/me/profile/submit",
-          user: {
-            mustChangePassword: false,
-            profileCompletionStatus: "NOT_STARTED",
-          },
-        }),
-      ),
-    ).toBe(true);
-    expect(() =>
-      guard.canActivate(
-        context({
-          originalUrl: "/service/v2/learn/courses",
-          user: {
-            mustChangePassword: false,
-            profileCompletionStatus: "SUBMITTED",
-          },
-        }),
-      ),
-    ).toThrow(ForbiddenException);
-    expect(
-      guard.canActivate(
-        context({
-          originalUrl: "/service/v2/auth/me",
-          user: {
-            mustChangePassword: false,
-            profileCompletionStatus: "SUBMITTED",
-          },
-        }),
-      ),
     ).toBe(true);
     expect(
       guard.canActivate(
         context({
-          originalUrl: "/service/v2/admin/users",
+          originalUrl: "/service/v2/issues",
           user: {
             mustChangePassword: false,
-            profileCompletionStatus: "SUBMITTED",
-            roles: ["MAIN_ADMIN"],
+            profileCompletionStatus: "REJECTED",
           },
         }),
       ),

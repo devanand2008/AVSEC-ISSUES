@@ -64,7 +64,7 @@ describe("Smart Campus QR security", () => {
   });
 
   it("accepts opaque feedback tokens embedded in student feedback URLs", () => {
-    const url = "https://avs.example.edu/student/feedback/target/FB_abcdefghijklmnopqrstuvwxyz123456";
+    const url = "https://avs.example.edu/feedback/scan/FB_abcdefghijklmnopqrstuvwxyz123456";
     expect(extractFeedbackToken(url)).toBe("FB_abcdefghijklmnopqrstuvwxyz123456");
   });
 

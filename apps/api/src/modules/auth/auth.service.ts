@@ -207,12 +207,15 @@ export class AuthService {
       tokens,
       user: {
         ...this.safeUser(user),
-        ...this.profileRouting(user.roles.map((mapping) => mapping.role.code), {
-          studentProfile: user.studentProfile,
-          staffProfile: user.staffProfile,
-          mustChangePassword: user.mustChangePassword,
-          status: user.status,
-        }),
+        ...this.profileRouting(
+          user.roles.map((mapping) => mapping.role.code),
+          {
+            studentProfile: user.studentProfile,
+            staffProfile: user.staffProfile,
+            mustChangePassword: user.mustChangePassword,
+            status: user.status,
+          },
+        ),
         roles: activeRoles.map((mapping) => mapping.role.code),
         permissions: [
           ...new Set(
@@ -390,7 +393,10 @@ export class AuthService {
       throw new ConflictException("The new password must be different.");
     const [credential, account] = await Promise.all([
       this.prisma.userCredential.findUnique({ where: { userId } }),
-      this.prisma.user.findUnique({ where: { id: userId }, select: { collegeIdentityId: true, email: true, fullName: true } }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { collegeIdentityId: true, email: true, fullName: true },
+      }),
     ]);
     if (!credential) throw new UnauthorizedException();
     const pepper = this.config.get<string>("PASSWORD_PEPPER", "");
@@ -403,17 +409,23 @@ export class AuthService {
     const collegeId = account?.collegeIdentityId?.toLowerCase();
     const email = account?.email?.toLowerCase();
     if (collegeId && loweredNewPassword.includes(collegeId)) {
-      throw new ConflictException("The new password must not contain your college ID.");
+      throw new ConflictException(
+        "The new password must not contain your college ID.",
+      );
     }
     if (email && loweredNewPassword.includes(email)) {
-      throw new ConflictException("The new password must not contain your email address.");
+      throw new ConflictException(
+        "The new password must not contain your email address.",
+      );
     }
     const fullNameTokens = (account?.fullName ?? "")
       .toLowerCase()
       .split(/\s+/)
       .filter((part) => part.length >= 3);
     if (fullNameTokens.some((part) => loweredNewPassword.includes(part))) {
-      throw new ConflictException("The new password must not contain your name.");
+      throw new ConflictException(
+        "The new password must not contain your name.",
+      );
     }
     const passwordHash = await argon2.hash(newPassword + pepper, {
       type: argon2.argon2id,
@@ -545,7 +557,12 @@ export class AuthService {
       select: { id: true },
     });
     for (const session of sessions) {
-      await this.revokeSession(session.id, "USER_REVOKED_ALL_OTHERS", metadata, userId);
+      await this.revokeSession(
+        session.id,
+        "USER_REVOKED_ALL_OTHERS",
+        metadata,
+        userId,
+      );
     }
     return { revoked: sessions.length };
   }
@@ -806,7 +823,10 @@ export class AuthService {
     );
     return {
       ...this.safeUser(user),
-      ...this.profileRouting(activeRoles.map((mapping) => mapping.role.code), user),
+      ...this.profileRouting(
+        activeRoles.map((mapping) => mapping.role.code),
+        user,
+      ),
       roles: activeRoles.map((mapping) => mapping.role.code),
       permissions: [
         ...new Set(
@@ -827,7 +847,15 @@ export class AuthService {
       studentProfile?: { id: string } | null;
       staffProfile?: { id: string } | null;
     },
-  ): { profileCompletionStatus: "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED" | "VERIFIED" | "REJECTED"; allowedNextRoute: string } {
+  ): {
+    profileCompletionStatus:
+      | "NOT_STARTED"
+      | "IN_PROGRESS"
+      | "SUBMITTED"
+      | "VERIFIED"
+      | "REJECTED";
+    allowedNextRoute: string;
+  } {
     if (roles.some((role) => ["SUPER_ADMIN", "MAIN_ADMIN"].includes(role))) {
       return {
         profileCompletionStatus: "VERIFIED",
@@ -839,7 +867,8 @@ export class AuthService {
               : "/",
       };
     }
-    const needsStudentProfile = roles.includes("STUDENT") || roles.includes("CLASS_REPRESENTATIVE");
+    const needsStudentProfile =
+      roles.includes("STUDENT") || roles.includes("CLASS_REPRESENTATIVE");
     const staffRoles = new Set([
       "FACULTY",
       "HOD",
@@ -858,23 +887,26 @@ export class AuthService {
       "OTHER_RESPONSIBLE",
     ]);
     const needsStaffProfile = roles.some((role) => staffRoles.has(role));
-    const hasRequiredProfileRows = (!needsStudentProfile || Boolean(user.studentProfile)) && (!needsStaffProfile || Boolean(user.staffProfile));
+    const hasRequiredProfileRows =
+      (!needsStudentProfile || Boolean(user.studentProfile)) &&
+      (!needsStaffProfile || Boolean(user.staffProfile));
     const storedStatus = user.profileCompletionStatus;
     const profileCompletionStatus =
-      storedStatus === "VERIFIED" || storedStatus === "REJECTED" || storedStatus === "IN_PROGRESS"
+      storedStatus === "VERIFIED" ||
+      storedStatus === "REJECTED" ||
+      storedStatus === "IN_PROGRESS"
         ? storedStatus
         : hasRequiredProfileRows
-          ? (storedStatus === "NOT_STARTED" ? "SUBMITTED" : (storedStatus as "SUBMITTED" | undefined) ?? "SUBMITTED")
+          ? storedStatus === "NOT_STARTED"
+            ? "SUBMITTED"
+            : ((storedStatus as "SUBMITTED" | undefined) ?? "SUBMITTED")
           : "NOT_STARTED";
-    const complete = ["SUBMITTED", "VERIFIED"].includes(profileCompletionStatus);
     const allowedNextRoute =
       user.status !== "ACTIVE"
         ? "/suspended"
         : user.mustChangePassword
           ? "/change-password"
-          : !complete || profileCompletionStatus === "REJECTED"
-            ? "/profile/setup"
-            : "/";
+          : "/";
     return { profileCompletionStatus, allowedNextRoute };
   }
 }

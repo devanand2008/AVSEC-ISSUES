@@ -22,8 +22,12 @@ import { GlobalSearch } from "@/components/global-search";
 import { navigation, visibleNavigation } from "@/components/navigation";
 import { canAccessPortalPath } from "@/lib/portal-route-access";
 import { api, apiEventUrl } from "@/lib/api";
-import { AnnouncementModal, type PendingAnnouncement } from "@/components/announcement-modal";
-
+import {
+  AnnouncementModal,
+  type PendingAnnouncement,
+} from "@/components/announcement-modal";
+import { MobileBottomNavigation } from "@/components/ui/mobile-bottom-navigation";
+import { AvsBotWidget } from "@/components/avs-bot-widget";
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, loading, logout } = useAuth();
   const pathname = usePathname();
@@ -31,19 +35,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
-  const [pendingAnnouncements, setPendingAnnouncements] = useState<PendingAnnouncement[]>([]);
+  const [pendingAnnouncements, setPendingAnnouncements] = useState<
+    PendingAnnouncement[]
+  >([]);
   const routeAllowed =
     !user || canAccessPortalPath(pathname, user.permissions, user.roles);
-  const isProfileVerificationExempt = Boolean(
-    user?.roles.some((role) => ["SUPER_ADMIN", "MAIN_ADMIN"].includes(role)),
-  );
-  const profileRestricted = Boolean(
-    user &&
-      !isProfileVerificationExempt &&
-      ["NOT_STARTED", "IN_PROGRESS", "REJECTED", "SUBMITTED"].includes(
-        user.profileCompletionStatus ?? "NOT_STARTED",
-      ),
-  );
   function handleLogout() {
     if (signingOut) return;
     setSigningOut(true);
@@ -58,40 +54,36 @@ export function AppShell({ children }: { children: ReactNode }) {
       router.replace("/suspended");
     else if (user?.mustChangePassword && pathname !== "/change-password")
       router.replace("/change-password");
-    else if (
-      user &&
-      !user.mustChangePassword &&
-      profileRestricted &&
-      pathname !== "/profile/setup"
-    )
-      router.replace("/profile/setup");
-    else if (
-      user &&
-      !profileRestricted &&
-      pathname === "/profile/setup"
-    )
-      router.replace("/");
     else if (user && !routeAllowed) router.replace("/unauthorized");
-  }, [loading, user, router, pathname, routeAllowed, profileRestricted]);
-  
+  }, [loading, user, router, pathname, routeAllowed]);
+
   // Fetch pending announcements
   useEffect(() => {
-    if (loading || !user || !routeAllowed || user.mustChangePassword || profileRestricted) return;
-    if (["/login", "/change-password", "/suspended", "/unauthorized"].includes(pathname)) return;
-    
-    api.get<PendingAnnouncement[]>("/announcements/me/pending")
-      .then(data => {
+    if (loading || !user || !routeAllowed || user.mustChangePassword) return;
+    if (
+      ["/login", "/change-password", "/suspended", "/unauthorized"].includes(
+        pathname,
+      )
+    )
+      return;
+
+    api
+      .get<PendingAnnouncement[]>("/announcements/me/pending")
+      .then((data) => {
         if (data && data.length > 0) {
           setPendingAnnouncements(data);
         }
       })
       .catch(console.error);
-  }, [loading, user, routeAllowed, pathname, profileRestricted]);
+  }, [loading, user, routeAllowed, pathname]);
   useEffect(() => {
-    if (loading || !user || user.mustChangePassword || profileRestricted) return;
-    const source = new EventSource(apiEventUrl("/announcements/stream"), { withCredentials: true });
+    if (loading || !user || user.mustChangePassword) return;
+    const source = new EventSource(apiEventUrl("/announcements/stream"), {
+      withCredentials: true,
+    });
     source.onmessage = () => {
-      api.get<PendingAnnouncement[]>("/announcements/me/pending")
+      api
+        .get<PendingAnnouncement[]>("/announcements/me/pending")
         .then((data) => {
           if (data?.length) setPendingAnnouncements(data);
         })
@@ -99,7 +91,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
     source.onerror = () => source.close();
     return () => source.close();
-  }, [loading, user, profileRestricted]);
+  }, [loading, user]);
   useEffect(() => {
     if (loading || !user) return;
     const frame = window.requestAnimationFrame(() => {
@@ -246,6 +238,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main className="content">{children}</main>
+        {user.permissions.includes("ai.use") && pathname !== "/avs-bot" && (
+          <AvsBotWidget />
+        )}
         <nav className="bottom-nav" aria-label="Mobile navigation">
           <Link href="/">
             <Gauge />
@@ -284,6 +279,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span>Profile</span>
           </Link>
         </nav>
+        <MobileBottomNavigation />
       </div>
 
       {/* Announcements Auto-Display Popup */}
@@ -291,7 +287,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <AnnouncementModal
           key={currentAnnouncement.id}
           announcement={currentAnnouncement}
-          onClose={() => setPendingAnnouncements(prev => prev.slice(1))}
+          onClose={() => setPendingAnnouncements((prev) => prev.slice(1))}
         />
       )}
     </div>

@@ -70,10 +70,12 @@ export class LocationsService {
     const archived = filters.status === "ARCHIVED";
     const active = filters.status === "ACTIVE";
     const inactive = filters.status === "INACTIVE";
+    const testData = filters.status === "TEST_DATA";
     const common = {
       ...(search ? { OR: [{ name: { contains: search, mode: "insensitive" as const } }, { code: { contains: search, mode: "insensitive" as const } }] } : {}),
       ...(archived ? { archivedAt: { not: null } } : filters.status ? { archivedAt: null } : {}),
       ...(active ? { isActive: true } : inactive ? { isActive: false } : {}),
+      ...(testData ? { isTestData: true } : {}),
     };
     switch (kind) {
       case "campus":
@@ -192,6 +194,7 @@ export class LocationsService {
         ...(input.address !== undefined ? { address: input.address?.trim() || null } : {}),
         ...(input.contactNumber !== undefined ? { contactNumber: input.contactNumber?.trim() || null } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+        ...(input.isTestData !== undefined ? { isTestData: input.isTestData } : {}),
         ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
       } });
       await this.audit.record({ actorId: user.id, action: "location.campus_updated", entityType: "Campus", entityId: id, beforeValue: existing, afterValue: updated, requestId }, tx);
@@ -209,6 +212,7 @@ export class LocationsService {
         ...(input.name !== undefined ? { name: input.name.trim() } : {}),
         ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+        ...(input.isTestData !== undefined ? { isTestData: input.isTestData } : {}),
         ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
       } });
       await this.audit.record({ actorId: user.id, action: "location.block_updated", entityType: "Block", entityId: id, beforeValue: existing, afterValue: updated, requestId }, tx);
@@ -226,6 +230,7 @@ export class LocationsService {
         ...(input.name !== undefined ? { name: input.name.trim() } : {}),
         ...(input.level !== undefined ? { level: input.level } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+        ...(input.isTestData !== undefined ? { isTestData: input.isTestData } : {}),
         ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
       } });
       await this.audit.record({ actorId: user.id, action: "location.floor_updated", entityType: "Floor", entityId: id, beforeValue: existing, afterValue: updated, requestId }, tx);
@@ -248,6 +253,7 @@ export class LocationsService {
         ...(input.roomType !== undefined ? { roomType: input.roomType } : {}),
         ...(input.capacity !== undefined ? { capacity: input.capacity } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+        ...(input.isTestData !== undefined ? { isTestData: input.isTestData } : {}),
         ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
       } });
       await this.audit.record({ actorId: user.id, action: "location.room_updated", entityType: "Room", entityId: id, beforeValue: existing, afterValue: updated, requestId }, tx);

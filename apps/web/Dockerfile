@@ -5,7 +5,11 @@ COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared-types/package.json packages/shared-types/package.json
 COPY packages/validation/package.json packages/validation/package.json
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund \
+    --fetch-retries=5 \
+    --fetch-retry-mintimeout=20000 \
+    --fetch-retry-maxtimeout=120000
 
 FROM dependencies AS build
 ARG NEXT_PUBLIC_API_URL

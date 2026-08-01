@@ -927,7 +927,7 @@ export class AnnouncementsService {
     announcement: { imageStorageKey?: string | null; [k: string]: unknown },
     receipt: unknown,
   ): Promise<Record<string, unknown>> {
-    return this.getSignedImageUrl(announcement.imageStorageKey).then((imageUrl) => ({ ...announcement, imageUrl, receipt }));
+    return this.getSignedImageUrl(announcement.imageStorageKey).then((imageUrl) => ({ ...announcement, title: typeof announcement.title === "string" && announcement.title.trim() ? announcement.title : "Announcement", imageUrl, receipt }));
   }
 
   private async countActiveRecipients(

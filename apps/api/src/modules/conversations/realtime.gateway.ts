@@ -15,6 +15,7 @@ import {
   isAllowedOrigin,
   parseAllowedOrigins,
 } from "../../common/http/allowed-origins";
+import { serializeForTransport } from "../../common/http/serialization.interceptor";
 import { PrismaService } from "../../database/prisma.service";
 
 interface SocketData {
@@ -151,15 +152,19 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   messageCreated(conversationId: string, message: unknown): void {
     this.server
       .to(`conversation:${conversationId}`)
-      .emit("message.created", message);
+      .emit("message.created", serializeForTransport(message));
   }
 
   messageUpdated(conversationId: string, message: unknown): void {
-    this.server.to(`conversation:${conversationId}`).emit("message.updated", message);
+    this.server
+      .to(`conversation:${conversationId}`)
+      .emit("message.updated", serializeForTransport(message));
   }
 
   readChanged(conversationId: string, receipt: unknown): void {
-    this.server.to(`conversation:${conversationId}`).emit("message.read", receipt);
+    this.server
+      .to(`conversation:${conversationId}`)
+      .emit("message.read", serializeForTransport(receipt));
   }
 
   private async emitPresence(userId: string, isOnline: boolean, lastSeenAt = new Date()): Promise<void> {

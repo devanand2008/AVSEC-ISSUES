@@ -2,6 +2,19 @@ import { describe, expect, it } from "vitest";
 import { canAccessPortalPath } from "./portal-route-access";
 
 describe("canAccessPortalPath", () => {
+  it("gates storage settings by its read, integration, or backup permission", () => {
+    for (const permission of [
+      "settings.read",
+      "integrations.manage",
+      "backups.manage",
+    ]) {
+      expect(
+        canAccessPortalPath("/settings/storage", [permission], []),
+      ).toBe(true);
+    }
+    expect(canAccessPortalPath("/settings/storage", [], [])).toBe(false);
+  });
+
   it("allows dynamic student feedback routes only to a permitted student role", () => {
     expect(
       canAccessPortalPath(

@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { ApiProperty, ApiPropertyOptional, OmitType } from "@nestjs/swagger";
 import { Transform, Type } from "class-transformer";
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min, ValidateNested } from "class-validator";
 import { FeedbackCycleStatus, FeedbackPriority, FeedbackQrStatus, FeedbackQuestionType, FeedbackSentiment, FeedbackSubmissionRule, FeedbackSubmissionStatus, FeedbackTargetType } from "../../../generated/prisma/enums";
@@ -106,6 +106,8 @@ export class SubmitFeedbackDto {
   @IsBoolean()
   isAnonymous?: boolean;
 }
+
+export class SubmitFeedbackByTokenDto extends OmitType(SubmitFeedbackDto, ["submissionTicket", "targetId"] as const) {}
 
 export class FeedbackTargetQueryDto {
   @ApiPropertyOptional({ enum: FeedbackTargetType })

@@ -5,7 +5,7 @@ import { CollegeBranding } from "@/components/college-branding";
 
 export type PendingAnnouncement = {
   id: string;
-  title: string;
+  title: string | null;
   message: string;
   category: string;
   priority: string;
@@ -89,7 +89,7 @@ export function AnnouncementModal({
             {getPriorityIcon()}
             <div>
               <div className="announcement-category-chip">{announcement.category.replace("_", " ")}</div>
-              <h2 className="announcement-modal-title">{announcement.title}</h2>
+              <h2 className="announcement-modal-title">{announcement.title?.trim() || "Announcement"}</h2>
             </div>
           </div>
         </div>

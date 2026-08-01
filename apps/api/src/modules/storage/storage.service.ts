@@ -10,7 +10,7 @@ import { AccessService } from "../../common/access/access.service";
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
 import type { Prisma } from "../../generated/prisma/client";
-import type { CompleteIssueAttachmentDto, CompleteMessageAttachmentUploadDto, CompleteModelQuestionPaperDto, CompleteSubjectResourceDto, PresignIssueAttachmentDto, PresignLearningFileDto, PresignMessageAttachmentDto } from "./dto/storage.dto";
+import type { CompleteIssueAttachmentDto, CompleteMessageAttachmentUploadDto, CompleteModelQuestionPaperDto, CompleteProfilePhotoDto, CompleteSubjectResourceDto, PresignIssueAttachmentDto, PresignLearningFileDto, PresignMessageAttachmentDto, PresignProfilePhotoDto } from "./dto/storage.dto";
 import { AuditService } from "../audit/audit.service";
 
 const MIME_EXTENSIONS: Record<string, string[]> = {
@@ -35,6 +35,66 @@ export class StorageService {
     this.client = new S3Client(this.clientOptions);
   }
 
+  async storeAiKnowledgeFile(
+    user: AuthPrincipal,
+    file: Pick<Express.Multer.File, "originalname" | "mimetype" | "size" | "buffer">,
+  ): Promise<{ storageKey: string; originalName: string; sha256: string }> {
+    const extension = extname(file.originalname).toLowerCase();
+    const allowed: Record<string, string[]> = {
+      ".pdf": ["application/pdf"],
+      ".docx": [
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ],
+      ".txt": ["text/plain"],
+      ".md": ["text/markdown", "text/plain"],
+      ".html": ["text/html"],
+      ".htm": ["text/html"],
+    };
+    if (!allowed[extension]?.includes(file.mimetype)) {
+      throw new BadRequestException(
+        "Knowledge files must be PDF, DOCX, TXT, MD, or HTML and the content type must match the extension.",
+      );
+    }
+    const limitBytes =
+      this.config.get<number>("MAX_DOCUMENT_SIZE_MB", 15) * 1024 * 1024;
+    if (file.size <= 0 || file.size > limitBytes || file.buffer.length !== file.size) {
+      throw new BadRequestException(
+        `Knowledge file must be non-empty and no larger than ${this.config.get<number>("MAX_DOCUMENT_SIZE_MB", 15)} MB.`,
+      );
+    }
+    const signatureMime =
+      extension === ".md" || extension === ".html" || extension === ".htm"
+        ? "text/plain"
+        : file.mimetype;
+    if (!this.matchesSignature(signatureMime, file.buffer)) {
+      throw new BadRequestException(
+        "Knowledge file content does not match its declared file type.",
+      );
+    }
+    const sha256 = createHash("sha256").update(file.buffer).digest("hex");
+    await this.scan(file.buffer, file.mimetype, sha256);
+    const storageKey = `colleges/${user.collegeId}/ai/knowledge/${randomUUID()}${extension}`;
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: storageKey,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+        ContentLength: file.size,
+        Metadata: {
+          uploader: user.id,
+          purpose: "AI_KNOWLEDGE",
+          sha256,
+        },
+      }),
+    );
+    return {
+      storageKey,
+      originalName: this.safeName(file.originalname),
+      sha256,
+    };
+  }
+
   async presign(user: AuthPrincipal, issueId: string, input: PresignIssueAttachmentDto, publicEndpoint?: string) {
     await this.requireIssue(user, issueId, true);
     if (!["ISSUE_REPORT", "ISSUE_UPDATE", "ISSUE_RESOLUTION"].includes(input.purpose)) throw new BadRequestException("Attachment purpose is not valid for an issue.");
@@ -44,6 +104,125 @@ export class StorageService {
     const expiresIn = this.config.get<number>("S3_SIGNED_URL_EXPIRY_SECONDS", 300);
     const uploadUrl = await getSignedUrl(this.signingClient(publicEndpoint), new PutObjectCommand({ Bucket: this.bucket, Key: storageKey, ContentType: input.mimeType, ContentLength: input.sizeBytes, Metadata: { uploader: user.id, purpose: input.purpose } }), { expiresIn });
     return { storageKey, uploadUrl, expiresIn, requiredHeaders: { "content-type": input.mimeType } };
+  }
+
+  async presignProfilePhoto(user: AuthPrincipal, input: PresignProfilePhotoDto, publicEndpoint?: string) {
+    this.validateFile(input);
+    const extension = extname(input.fileName).toLowerCase();
+    const storageKey = `colleges/${user.collegeId}/profiles/${user.id}/${randomUUID()}${extension}`;
+    const expiresIn = this.config.get<number>("S3_SIGNED_URL_EXPIRY_SECONDS", 300);
+    const uploadUrl = await getSignedUrl(
+      this.signingClient(publicEndpoint),
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: storageKey,
+        ContentType: input.mimeType,
+        ContentLength: input.sizeBytes,
+        Metadata: { uploader: user.id, purpose: "PROFILE_PHOTO" },
+      }),
+      { expiresIn },
+    );
+    return {
+      storageKey,
+      uploadUrl,
+      expiresIn,
+      requiredHeaders: { "content-type": input.mimeType },
+    };
+  }
+
+  async completeProfilePhoto(user: AuthPrincipal, input: CompleteProfilePhotoDto, requestId: string) {
+    this.validateFile(input);
+    const prefix = `colleges/${user.collegeId}/profiles/${user.id}/`;
+    if (!input.storageKey.startsWith(prefix)) {
+      throw new ForbiddenException("Storage key is outside the authorized profile path.");
+    }
+    const { content } = await this.verifyObject(input);
+    const processed = await this.processImage(input.storageKey, input.mimeType, content);
+    const previous = await this.prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { profilePhotoKey: true },
+    });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: { profilePhotoKey: input.storageKey, version: { increment: 1 } },
+      });
+      await this.audit.record({
+        actorId: user.id,
+        action: "profile.photo_updated",
+        entityType: "User",
+        entityId: user.id,
+        beforeValue: { profilePhotoKey: previous.profilePhotoKey },
+        afterValue: {
+          profilePhotoKey: input.storageKey,
+          thumbnailKey: processed.thumbnailKey,
+          width: processed.width,
+          height: processed.height,
+        },
+        requestId,
+      }, tx);
+    });
+    if (previous.profilePhotoKey && previous.profilePhotoKey !== input.storageKey) {
+      await this.deleteMaintenanceObjects([
+        previous.profilePhotoKey,
+        `${previous.profilePhotoKey}.thumbnail.webp`,
+      ]);
+    }
+    return {
+      profilePhotoKey: input.storageKey,
+      width: processed.width,
+      height: processed.height,
+      updated: true,
+    };
+  }
+
+  async profilePhoto(user: AuthPrincipal, publicEndpoint?: string) {
+    const account = await this.prisma.user.findFirst({
+      where: { id: user.id, collegeId: user.collegeId, archivedAt: null },
+      select: { profilePhotoKey: true },
+    });
+    if (!account?.profilePhotoKey) throw new NotFoundException("Profile photo not found.");
+    const thumbnailKey = `${account.profilePhotoKey}.thumbnail.webp`;
+    const expiresIn = this.config.get<number>("S3_SIGNED_URL_EXPIRY_SECONDS", 300);
+    const downloadUrl = await getSignedUrl(
+      this.signingClient(publicEndpoint),
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: thumbnailKey,
+        ResponseContentType: "image/webp",
+        ResponseContentDisposition: "inline",
+      }),
+      { expiresIn },
+    );
+    return { downloadUrl, expiresIn };
+  }
+
+  async removeProfilePhoto(user: AuthPrincipal, requestId: string) {
+    const account = await this.prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { profilePhotoKey: true },
+    });
+    if (!account.profilePhotoKey) return { removed: false };
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: { profilePhotoKey: null, version: { increment: 1 } },
+      });
+      await this.audit.record({
+        actorId: user.id,
+        action: "profile.photo_removed",
+        entityType: "User",
+        entityId: user.id,
+        beforeValue: { profilePhotoKey: account.profilePhotoKey },
+        afterValue: { profilePhotoKey: null },
+        requestId,
+      }, tx);
+    });
+    const storage = await this.deleteMaintenanceObjects([
+      account.profilePhotoKey,
+      `${account.profilePhotoKey}.thumbnail.webp`,
+    ]);
+    return { removed: true, storage };
   }
 
   async deleteMaintenanceObjects(keys: string[]): Promise<{ deleted: number; failed: number }> {

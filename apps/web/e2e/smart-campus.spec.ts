@@ -169,7 +169,7 @@ test.describe("student feedback on a phone", () => {
       return false;
     });
 
-    await gotoPortal(page, "/student/feedback/scanner");
+    await gotoPortal(page, "/feedback/scanner");
     await expect(
       page.getByRole("heading", { name: "Scan QR code" }),
     ).toBeVisible({ timeout: 30_000 });
@@ -224,7 +224,7 @@ test.describe("student feedback on a phone", () => {
     page,
   }) => {
     await mockApi(page, student, async (route, path) => {
-      if (path === "/feedback/scan/DISABLED_TOKEN") {
+      if (path === "/feedback/qr/DISABLED_TOKEN/resolve") {
         await fulfillJson(
           route,
           { error: { message: "This QR code is disabled." } },
@@ -235,7 +235,7 @@ test.describe("student feedback on a phone", () => {
       return false;
     });
 
-    await gotoPortal(page, "/student/feedback/target/DISABLED_TOKEN");
+    await gotoPortal(page, "/feedback/scan/DISABLED_TOKEN");
 
     await expect(page.getByText("This QR code is disabled.")).toBeVisible({
       timeout: 30_000,
@@ -268,7 +268,7 @@ test.describe("student feedback on a phone", () => {
     });
     await mockApi(page, student);
 
-    await gotoPortal(page, "/student/feedback/scanner");
+    await gotoPortal(page, "/feedback/scanner");
     await page.getByRole("button", { name: "Start camera" }).click();
 
     const guidance = page.locator(".camera-guidance");

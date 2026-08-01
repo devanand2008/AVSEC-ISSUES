@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsBoolean, IsEnum, IsOptional, IsString, IsUUID, Length, MaxLength } from "class-validator";
+import { IsBoolean, IsDateString, IsEnum, IsOptional, IsString, IsUUID, Length, MaxLength } from "class-validator";
 import { IssuePriority, IssueStatus } from "../../../generated/prisma/enums";
 
 export class CreateIssueDto {
@@ -43,6 +43,23 @@ export class SubscribeIssueDto {
 export class VerifyIssueDto {
   @ApiProperty() @IsBoolean() accepted!: boolean;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) comment?: string;
+}
+
+export class IssueTimelineDto {
+  @ApiProperty() @IsDateString() expectedCompletionAt!: string;
+  @ApiProperty() @IsString() @Length(3, 1000) reason!: string;
+  @ApiProperty() @IsString() @Length(2, 2000) progressNote!: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) requiredParts?: string;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() requiredApproval?: boolean;
+}
+
+export class FinishIssueDto {
+  @ApiProperty() @IsString() @Length(3, 5000) resolutionNote!: string;
+  @ApiProperty() @IsUUID() completionPhotoFileId!: string;
+  @ApiProperty() @IsDateString() completedAt!: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) partsUsed?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) costNote?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) supervisorComment?: string;
 }
 
 export class CreateIssueCategoryDto {

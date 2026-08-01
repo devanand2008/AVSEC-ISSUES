@@ -23,6 +23,21 @@ describe("visibleNavigation", () => {
     },
   );
 
+  it.each(["settings.read", "integrations.manage", "backups.manage"])(
+    "shows storage and backups for %s",
+    (permission) => {
+      expect(
+        visibleNavigation([permission]).map((item) => item.href),
+      ).toContain("/settings/storage");
+    },
+  );
+
+  it("hides storage and backups without an administrative storage permission", () => {
+    expect(
+      visibleNavigation(["issues.read"]).map((item) => item.href),
+    ).not.toContain("/settings/storage");
+  });
+
   it("shows scoped staff rating and insights routes to management roles", () => {
     const hod = visibleNavigation(["feedback.read_department"], ["HOD"]).map(
       (item) => item.href,
@@ -47,6 +62,15 @@ describe("visibleNavigation", () => {
         (item) => item.href,
       ),
     ).not.toContain("/vice-principal/management-insights");
+  });
+
+  it("shows AVS Bot only to users with AI access", () => {
+    expect(visibleNavigation(["ai.use"]).map((item) => item.href)).toContain(
+      "/avs-bot",
+    );
+    expect(visibleNavigation([]).map((item) => item.href)).not.toContain(
+      "/avs-bot",
+    );
   });
 
   it("maps each feedback administration route to its exact permission and admin role", () => {

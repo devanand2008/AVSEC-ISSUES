@@ -145,7 +145,7 @@ export default function AnnouncementAnalyticsPage() {
             <ArrowLeft size={16} /> Back to announcements
           </Link>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
-            <h1 className="page-title">{announcement.title}</h1>
+            <h1 className="page-title announcement-title">{announcement.title?.trim() || "Announcement"}</h1>
             <StatusBadge value={announcement.status} />
           </div>
           <div className="muted" style={{ marginTop: 4, display: "flex", gap: 16, fontSize: "0.9rem", flexWrap: "wrap" }}>

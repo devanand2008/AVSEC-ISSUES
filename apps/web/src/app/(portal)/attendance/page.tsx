@@ -45,6 +45,15 @@ interface ClassStudent {
 
 const defaultStudentPassword = "Student@2026!";
 
+const getTodayInKolkata = () => {
+  if (typeof window === "undefined") return new Date().toISOString().slice(0, 10);
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+};
+
 export default function AttendancePage() {
   const { user } = useAuth();
   const client = useQueryClient();
@@ -53,7 +62,7 @@ export default function AttendancePage() {
   const [selectedSectionId, setSelectedSectionId] = useState("");
   const [activeSessionId, setActiveSessionId] = useState("");
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ academicYearId: "", sectionId: "", subjectId: "", sessionDate: new Date().toISOString().slice(0, 10), periodNumber: 1 });
+  const [form, setForm] = useState({ academicYearId: "", sectionId: "", subjectId: "", sessionDate: getTodayInKolkata(), periodNumber: 1 });
   const [studentForm, setStudentForm] = useState({ fullName: "", studentId: "", email: "", mobile: "", rollNumber: "", admissionYear: new Date().getFullYear(), temporaryPassword: defaultStudentPassword });
   const permissions = user?.permissions ?? [];
   const canCreate = permissions.includes("attendance.session.create");

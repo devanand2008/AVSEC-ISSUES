@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   BarChart2,
   Bell,
+  Bot,
   BookOpen,
   Box,
   Building2,
@@ -14,6 +15,7 @@ import {
   FileWarning,
   Gauge,
   GraduationCap,
+  HardDrive,
   History,
   HeartPulse,
   Megaphone,
@@ -39,6 +41,7 @@ export interface NavigationItem {
 
 export const navigation: NavigationItem[] = [
   { href: "/", label: "Overview", icon: Gauge },
+  { href: "/avs-bot", label: "AVS Bot", icon: Bot, any: ["ai.use"] },
   { href: "/scan-qr", label: "Scan QR", icon: QrCode },
   {
     href: "/analytics",
@@ -77,7 +80,7 @@ export const navigation: NavigationItem[] = [
     any: ["academic.read", "academic.manage"],
   },
   {
-    href: "/student/feedback/scanner",
+    href: "/feedback/scanner",
     label: "Feedback QR",
     icon: QrCode,
     any: ["feedback.scan"],
@@ -240,7 +243,12 @@ export const navigation: NavigationItem[] = [
     any: ["announcements.publish_college"],
   },
   { href: "/admin/users", label: "People", icon: Users, any: ["users.read"] },
-  { href: "/admin/maintenance-staff", label: "Maintenance staff", icon: Wrench, any: ["users.create"] },
+  {
+    href: "/admin/maintenance-staff",
+    label: "Maintenance staff",
+    icon: Wrench,
+    any: ["users.create"],
+  },
   {
     href: "/admin/roles",
     label: "Roles & permissions",
@@ -400,6 +408,12 @@ export const navigation: NavigationItem[] = [
     icon: Settings,
     any: ["settings.read", "settings.manage", "integrations.manage"],
   },
+  {
+    href: "/settings/storage",
+    label: "Storage & backups",
+    icon: HardDrive,
+    any: ["settings.read", "integrations.manage", "backups.manage"],
+  },
 ];
 
 export function visibleNavigation(
@@ -417,3 +431,48 @@ export function visibleNavigation(
     return permissionAllowed && roleAllowed;
   });
 }
+
+/* ════════════════════════════════════════════════════════════
+   Mobile Bottom Navigation Presets
+   ════════════════════════════════════════════════════════════ */
+
+export interface BottomNavItem {
+  href: string;
+  label: string;
+  iconName: "home" | "attendance" | "learn" | "messages" | "people" | "issues" | "reports" | "profile" | "assigned" | "more";
+}
+
+export function getMobileBottomNav(roles: readonly string[] = []): BottomNavItem[] {
+  const isAdmin = roles.some((r) => ["SUPER_ADMIN", "MAIN_ADMIN", "PRINCIPAL", "VICE_PRINCIPAL"].includes(r));
+  const isMaintenance = roles.some((r) => r.startsWith("MAINTENANCE_") || ["ELECTRICIAN", "PLUMBER", "IT_SUPPORT", "HOUSEKEEPING"].includes(r));
+
+  if (isAdmin) {
+    return [
+      { href: "/", label: "Dashboard", iconName: "home" },
+      { href: "/admin/people", label: "People", iconName: "people" },
+      { href: "/issues", label: "Issues", iconName: "issues" },
+      { href: "/admin/exports", label: "Reports", iconName: "reports" },
+      { href: "/profile/me", label: "Profile", iconName: "profile" },
+    ];
+  }
+
+  if (isMaintenance) {
+    return [
+      { href: "/assigned", label: "Assigned", iconName: "assigned" },
+      { href: "/issues?status=IN_PROGRESS", label: "Progress", iconName: "issues" },
+      { href: "/issues?status=OVERDUE", label: "Overdue", iconName: "reports" },
+      { href: "/messages", label: "Messages", iconName: "messages" },
+      { href: "/profile/me", label: "Profile", iconName: "profile" },
+    ];
+  }
+
+  // Student / Faculty / General
+  return [
+    { href: "/", label: "Home", iconName: "home" },
+    { href: "/attendance", label: "Attendance", iconName: "attendance" },
+    { href: "/academic-learn", label: "Learn", iconName: "learn" },
+    { href: "/messages", label: "Messages", iconName: "messages" },
+    { href: "/profile/me", label: "Profile", iconName: "profile" },
+  ];
+}
+

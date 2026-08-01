@@ -5,7 +5,11 @@ COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared-types/package.json packages/shared-types/package.json
 COPY packages/validation/package.json packages/validation/package.json
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund \
+    --fetch-retries=5 \
+    --fetch-retry-mintimeout=20000 \
+    --fetch-retry-maxtimeout=120000
 
 FROM dependencies AS production-dependencies
 RUN npm prune --omit=dev --ignore-scripts
@@ -14,12 +18,15 @@ RUN test -x node_modules/.bin/prisma
 FROM dependencies AS build
 ARG DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build
 ENV DATABASE_URL=$DATABASE_URL
+ENV NODE_OPTIONS=--max-old-space-size=3072
 COPY . .
 RUN npm run prisma:generate && npm run build -w @college/shared-types && npm run build -w @college/validation && npm run build -w @college/api
 
 FROM node:24-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
+
+RUN apk add --no-cache postgresql17-client
 
 RUN addgroup -S college && adduser -S college -G college
 
@@ -46,6 +53,8 @@ COPY --from=build --chown=college:college /app/packages/shared-types/dist ./pack
 COPY --from=build --chown=college:college /app/packages/shared-types/package.json ./packages/shared-types/package.json
 COPY --from=build --chown=college:college /app/packages/validation/dist ./packages/validation/dist
 COPY --from=build --chown=college:college /app/packages/validation/package.json ./packages/validation/package.json
+
+RUN mkdir -p /app/backups && chown college:college /app/backups
 
 USER college
 EXPOSE 4000

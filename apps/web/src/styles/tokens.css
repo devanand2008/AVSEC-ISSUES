@@ -1,0 +1,186 @@
+/* ═══════════════════════════════════════════════════════════
+   AVS Design System — Tokens
+   Single source of truth for all design decisions
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Primary Palette ── */
+  --avs-primary: #0b3d91;
+  --avs-primary-light: #1d4ed8;
+  --avs-primary-lighter: #3b82f6;
+  --avs-primary-surface: #dbeafe;
+  --avs-primary-ghost: #eff6ff;
+  --avs-primary-dark: #172554;
+
+  /* ── Secondary ── */
+  --avs-secondary: #6366f1;
+  --avs-secondary-light: #818cf8;
+  --avs-secondary-surface: #e0e7ff;
+  --avs-secondary-dark: #3730a3;
+
+  /* ── Accent ── */
+  --avs-accent: #0ea5e9;
+  --avs-accent-light: #38bdf8;
+  --avs-accent-surface: #e0f2fe;
+  --avs-accent-dark: #0369a1;
+
+  /* ── Semantic: Success ── */
+  --avs-success: #16a34a;
+  --avs-success-light: #22c55e;
+  --avs-success-surface: #dcfce7;
+  --avs-success-dark: #15803d;
+
+  /* ── Semantic: Warning ── */
+  --avs-warning: #d97706;
+  --avs-warning-light: #f59e0b;
+  --avs-warning-surface: #fef3c7;
+  --avs-warning-dark: #b45309;
+
+  /* ── Semantic: Error / Danger ── */
+  --avs-error: #dc2626;
+  --avs-error-light: #ef4444;
+  --avs-error-surface: #fee2e2;
+  --avs-error-dark: #b91c1c;
+  --avs-danger: var(--avs-error);
+  --avs-danger-surface: var(--avs-error-surface);
+
+  /* ── Semantic: Info ── */
+  --avs-info: #2563eb;
+  --avs-info-light: #3b82f6;
+  --avs-info-surface: #dbeafe;
+
+  /* ── Surfaces & Backgrounds ── */
+  --avs-page: #f8fafc;
+  --avs-page-alt: #f1f5f9;
+  --avs-card: #ffffff;
+  --avs-card-hover: #fafbfd;
+  --avs-sidebar: #0b3d91;
+  --avs-sidebar-active: rgba(255, 255, 255, 0.15);
+  --avs-overlay: rgba(15, 23, 42, 0.45);
+  --avs-scrim: rgba(0, 0, 0, 0.35);
+
+  /* ── Text ── */
+  --avs-text: #0f172a;
+  --avs-text-secondary: #475569;
+  --avs-text-muted: #64748b;
+  --avs-text-disabled: #94a3b8;
+  --avs-text-inverse: #ffffff;
+  --avs-text-link: #1d4ed8;
+  --avs-text-link-hover: #1e40af;
+
+  /* ── Borders ── */
+  --avs-border: #e2e8f0;
+  --avs-border-light: #f1f5f9;
+  --avs-border-strong: #cbd5e1;
+  --avs-border-focus: #3b82f6;
+  --avs-border-error: #ef4444;
+
+  /* ── Spacing (8px base) ── */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-14: 56px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+
+  /* ── Typography ── */
+  --font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+
+  --text-xs: 0.6875rem;    /* 11px */
+  --text-sm: 0.8125rem;    /* 13px */
+  --text-base: 0.875rem;   /* 14px */
+  --text-md: 0.9375rem;    /* 15px */
+  --text-lg: 1.0625rem;    /* 17px */
+  --text-xl: 1.25rem;      /* 20px */
+  --text-2xl: 1.5rem;      /* 24px */
+  --text-3xl: 1.875rem;    /* 30px */
+  --text-4xl: 2.25rem;     /* 36px */
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+
+  /* ── Border Radius ── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
+  --radius-full: 9999px;
+
+  /* ── Shadows ── */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.06), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.07), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
+  --shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+  --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.04);
+  --shadow-dialog: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+
+  /* ── Responsive Breakpoints (for reference, use media queries) ── */
+  /* --bp-xs: 320px;  */
+  /* --bp-sm: 480px;  */
+  /* --bp-md: 768px;  */
+  /* --bp-lg: 1024px; */
+  /* --bp-xl: 1280px; */
+  /* --bp-2xl: 1440px;*/
+
+  /* ── Animation ── */
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --duration-slow: 350ms;
+  --duration-enter: 250ms;
+  --duration-exit: 180ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ── Z-index Scale ── */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-sidebar: 300;
+  --z-modal-backdrop: 400;
+  --z-modal: 500;
+  --z-toast: 600;
+  --z-tooltip: 700;
+
+  /* ── Touch Target ── */
+  --touch-target: 44px;
+
+  /* ── Backwards compat aliases (used in existing CSS) ── */
+  --primary-blue: var(--avs-primary);
+  --secondary-blue: var(--avs-primary-light);
+  --light-blue: var(--avs-primary-surface);
+  --very-light-blue: var(--avs-primary-ghost);
+  --dark-blue: var(--avs-primary-dark);
+  --page: var(--avs-page);
+  --card: var(--avs-card);
+  --primary: var(--avs-primary);
+  --primary-dark: var(--avs-primary-dark);
+  --success: var(--avs-success);
+  --warning: var(--avs-warning);
+  --danger: var(--avs-error);
+  --critical: var(--avs-error-dark);
+  --text: var(--avs-text);
+  --muted: var(--avs-text-muted);
+  --border: var(--avs-border);
+  --sidebar: var(--avs-sidebar);
+  --radius: var(--radius-lg);
+  --shadow: var(--shadow-card);
+}

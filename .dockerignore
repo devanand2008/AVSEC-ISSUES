@@ -108,3 +108,4 @@ logs
 !packages/**/tsconfig*.json
 !package.json
 !package-lock.json
+apps/flutter_app

@@ -73,12 +73,15 @@ export default function LoginPage() {
         );
       else window.localStorage.removeItem("avs_login_hint");
       router.push(user.allowedNextRoute ?? (user.mustChangePassword ? "/change-password" : "/"));
-    } catch (caught) {
-      setError(
-        caught instanceof ApiError
-          ? caught.message
-          : "Sign-in failed. Check your connection and try again.",
-      );
+    } catch (caught: unknown) {
+      const status = caught instanceof ApiError ? caught.status : undefined;
+      if (status === 401 || status === 404) {
+        setError("Invalid college ID, email, or password.");
+      } else if (caught instanceof ApiError && status !== undefined && status >= 400) {
+        setError(caught.message);
+      } else {
+        setError("Sign-in failed. Check your connection and try again.");
+      }
       setBusy(false);
     }
   }

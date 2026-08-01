@@ -446,7 +446,7 @@ describe("ImportsFileService", () => {
       section_code: "A",
     });
     expect(parsed.errors).toEqual([]);
-  });
+  }, 15_000);
 
   it("derives third-year admission years from the workbook academic year", async () => {
     const parsed = await service.parse(

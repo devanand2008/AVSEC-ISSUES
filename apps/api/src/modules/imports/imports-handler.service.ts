@@ -857,7 +857,11 @@ export class ImportsHandlerService {
     if (!Object.values(AttendanceCode).includes(status)) throw new BadRequestException("status is not a supported attendance code.");
     return status;
   }
-  private roomType(value: string): RoomType { return value.toUpperCase() as RoomType; }
+  private roomType(value: string): RoomType {
+    const normalized = value.trim().toUpperCase().replace(/[\s-]+/g, "_") as RoomType;
+    if (!Object.values(RoomType).includes(normalized)) throw new BadRequestException("room_type is not a supported room type.");
+    return normalized;
+  }
   private errorMessage(error: unknown): string {
     if (error instanceof BadRequestException) {
       const response = error.getResponse();

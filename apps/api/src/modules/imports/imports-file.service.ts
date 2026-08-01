@@ -644,7 +644,7 @@ export class ImportsFileService {
           "PARKING_AREA",
           "PLAYGROUND",
           "OTHER",
-        ].includes(row.room_type.toUpperCase())
+        ].includes(row.room_type.trim().toUpperCase().replace(/[\s-]+/g, "_"))
       )
         errors.push({
           rowNumber,

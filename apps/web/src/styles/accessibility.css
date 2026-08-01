@@ -1,0 +1,84 @@
+/* ═══════════════════════════════════════════════════════════
+   AVS Design System — Accessibility
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Focus visible ── */
+:focus-visible {
+  outline: 2px solid var(--avs-border-focus);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ── Skip Link ── */
+.avs-skip-link {
+  position: absolute;
+  top: -100%;
+  left: var(--space-4);
+  z-index: 1000;
+  padding: var(--space-3) var(--space-4);
+  background: var(--avs-primary);
+  color: var(--avs-text-inverse);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  text-decoration: none;
+  transition: top var(--duration-fast);
+}
+.avs-skip-link:focus {
+  top: 0;
+}
+
+/* ── Screen Reader Only ── */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* ── Reduced Motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── High Contrast Adjustments ── */
+@media (forced-colors: active) {
+  .avs-badge,
+  .avs-btn,
+  .avs-tab {
+    forced-color-adjust: none;
+  }
+}
+
+/* ── Minimum touch target for interactive elements ── */
+.touch-target {
+  position: relative;
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+}
+
+/* Enlarge small click targets on touch devices */
+@media (pointer: coarse) {
+  .avs-action-menu-item {
+    min-height: var(--touch-target);
+    padding: var(--space-3);
+  }
+  .avs-tab {
+    min-height: 48px;
+    padding: var(--space-3) var(--space-5);
+  }
+}

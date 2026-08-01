@@ -78,7 +78,7 @@ export class DeliveryService implements OnModuleInit, OnModuleDestroy {
   async escalateOverdue(): Promise<void> {
     const now = new Date();
     const issues = await this.prisma.issue.findMany({
-      where: { status: { notIn: ["RESOLVED", "VERIFIED", "CLOSED", "REJECTED", "CANCELLED"] }, OR: [{ acknowledgedAt: null, acknowledgementDueAt: { lt: now } }, { resolutionDueAt: { lt: now } }] },
+      where: { status: { notIn: ["RESOLVED", "VERIFIED", "CLOSED", "REJECTED", "CANCELLED"] }, OR: [{ acknowledgedAt: null, acknowledgementDueAt: { lt: now } }, { resolutionDueAt: { lt: now } }, { expectedCompletionAt: { lt: now } }] },
       include: { routingRule: true, escalations: { orderBy: { escalatedAt: "desc" }, take: 1 } }, take: 50, orderBy: { priority: "desc" },
     });
     for (const issue of issues) {
@@ -89,13 +89,14 @@ export class DeliveryService implements OnModuleInit, OnModuleDestroy {
       if (await this.prisma.issueEscalation.findUnique({ where: { deduplicationKey } })) continue;
       let recipientUserId = level === 1 ? issue.routingRule?.backupUserId : issue.routingRule?.escalationUserId;
       if (!recipientUserId) {
-        const admin = await this.prisma.user.findFirst({ where: { collegeId: issue.collegeId, status: "ACTIVE", roles: { some: { role: { code: level >= 2 ? "MAIN_ADMIN" : "MAINTENANCE_ADMIN" } } } }, select: { id: true } });
+        const escalationRole = level === 1 ? "MAINTENANCE_ADMIN" : level === 2 ? "VICE_PRINCIPAL" : "PRINCIPAL";
+        const admin = await this.prisma.user.findFirst({ where: { collegeId: issue.collegeId, status: "ACTIVE", roles: { some: { role: { code: escalationRole } } } }, select: { id: true } });
         recipientUserId = admin?.id ?? issue.assignedToId;
       }
       if (!recipientUserId) continue;
       await this.prisma.$transaction(async (tx) => {
         await tx.issueEscalation.create({ data: { issueId: issue.id, level, recipientUserId, reason: kind, deduplicationKey, nextEscalationAt: new Date(now.getTime() + 60 * 60_000), notificationStatus: "QUEUED" } });
-        await tx.issue.update({ where: { id: issue.id }, data: { escalationLevel: level } });
+        await tx.issue.update({ where: { id: issue.id }, data: { escalationLevel: level, overdueAt: issue.overdueAt ?? now } });
         const notification = await tx.notification.create({ data: { type: "ISSUE_ESCALATED", title: `${issue.issueNumber} requires escalation`, body: kind.replaceAll("_", " "), priority: issue.priority, relatedEntityType: "Issue", relatedEntityId: issue.id, recipients: { create: { userId: recipientUserId } } } });
         await tx.outboxEvent.create({ data: { aggregateType: "Issue", aggregateId: issue.id, eventType: "issue.escalated", payload: { issueId: issue.id, notificationId: notification.id, level }, idempotencyKey: `issue.escalated:${deduplicationKey}` } });
       });

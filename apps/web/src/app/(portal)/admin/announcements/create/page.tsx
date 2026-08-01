@@ -15,6 +15,8 @@ const CATEGORIES = [
 ];
 
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL", "EMERGENCY"];
+const TITLE_MIN_LENGTH = 2;
+const TITLE_MAX_LENGTH = 200;
 
 type TargetType =
   | "COLLEGE"
@@ -99,6 +101,8 @@ export default function CreateAnnouncementPage() {
 
       const payload = {
         ...form,
+        title: form.title.trim(),
+        message: form.message.trim(),
         publishAt: form.publishAt ? new Date(form.publishAt).toISOString() : undefined,
         expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : undefined,
         idempotencyKey: idempotencyKey(),
@@ -173,8 +177,13 @@ export default function CreateAnnouncementPage() {
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     setError("");
-    if (!form.title.trim() || !form.message.trim()) {
+    const titleLength = form.title.trim().length;
+    if (!titleLength || !form.message.trim()) {
       setError("Title and message are required.");
+      return;
+    }
+    if (titleLength < TITLE_MIN_LENGTH || titleLength > TITLE_MAX_LENGTH) {
+      setError(`Title must be between ${TITLE_MIN_LENGTH} and ${TITLE_MAX_LENGTH} characters.`);
       return;
     }
     if (!["COLLEGE", "ROLE"].includes(targetType) && !targetId) {
@@ -205,11 +214,15 @@ export default function CreateAnnouncementPage() {
             <span>Announcement Title *</span>
             <input
               required
-              maxLength={180}
+              minLength={TITLE_MIN_LENGTH}
+              maxLength={TITLE_MAX_LENGTH}
               placeholder="E.g., Campus Closure Due to Heavy Rain"
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
             />
+            <div className="muted" style={{ fontSize: "0.8rem", textAlign: "right", marginTop: 4 }}>
+              {form.title.length} / {TITLE_MAX_LENGTH} characters
+            </div>
           </label>
 
           <label className="field">

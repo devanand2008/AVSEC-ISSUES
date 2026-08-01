@@ -13,6 +13,18 @@ export class CompleteIssueAttachmentDto extends PresignIssueAttachmentDto {
   @ApiProperty() @IsString() @Length(20, 500) storageKey!: string;
 }
 
+export class PresignProfilePhotoDto {
+  @ApiProperty() @IsString() @Length(1, 255) fileName!: string;
+  @ApiProperty({ enum: ["image/jpeg", "image/png", "image/webp"] })
+  @IsIn(["image/jpeg", "image/png", "image/webp"])
+  mimeType!: "image/jpeg" | "image/png" | "image/webp";
+  @ApiProperty() @IsInt() @Min(1) @Max(10 * 1024 * 1024) sizeBytes!: number;
+}
+
+export class CompleteProfilePhotoDto extends PresignProfilePhotoDto {
+  @ApiProperty() @IsString() @Length(20, 500) storageKey!: string;
+}
+
 export class PresignMessageAttachmentDto extends PresignIssueAttachmentDto {
   @ApiProperty() @IsUUID() conversationId!: string;
 }

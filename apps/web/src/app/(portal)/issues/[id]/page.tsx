@@ -34,6 +34,8 @@ interface IssueDetail {
   createdAt: string;
   acknowledgementDueAt: string | null;
   resolutionDueAt: string | null;
+  expectedCompletionAt: string | null;
+  occurrenceCount: number;
   affectedUserCount: number;
   room: { name: string; code: string; floor: { name: string; block: { name: string; campus: { name: string } } } };
   category: { name: string };
@@ -44,6 +46,8 @@ interface IssueDetail {
   team: { id: string; name: string } | null;
   comments: Array<{ id: string; body: string; isInternal: boolean; createdAt: string; author: { fullName: string } }>;
   statusHistory: Array<{ id: string; previousStatus: string | null; newStatus: string; comment: string | null; createdAt: string; changedBy: { fullName: string } }>;
+  timelines: Array<{ id: string; expectedCompletionAt: string; reason: string; progressNote: string; requiredParts: string | null; requiredApproval: boolean; createdAt: string; supersededAt: string | null; createdBy: { fullName: string } }>;
+  resolution: { resolutionNote: string; completionPhotoFileId: string; partsUsed: string | null; completedAt: string; completedBy: { fullName: string } } | null;
   attachments: Array<{ id: string; originalName: string; mimeType: string; sizeBytes: string; purpose: string; sha256: string | null; createdAt: string; uploadedBy: { publicId: string; fullName: string } }>;
 }
 
@@ -62,6 +66,8 @@ export default function IssueDetailPage() {
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [assignment, setAssignment] = useState({ teamId: "", userId: "", reason: "" });
+  const [timeline, setTimeline] = useState({ expectedCompletionAt: "", reason: "", progressNote: "", requiredParts: "", requiredApproval: false });
+  const [finish, setFinish] = useState({ resolutionNote: "", completionPhotoFileId: "", partsUsed: "", costNote: "" });
 
   const query = useQuery({ queryKey: ["issue", id], queryFn: () => api.get<IssueDetail>(`/issues/${id}`) });
   const assignmentOptions = useQuery({
@@ -96,13 +102,32 @@ export default function IssueDetailPage() {
     },
     onError: (caught) => setError(caught instanceof ApiError ? caught.message : "Comment could not be posted."),
   });
+  const addTimeline = useMutation({
+    mutationFn: () => api.post(`/issues/${id}/timeline`, {
+      ...timeline,
+      expectedCompletionAt: new Date(timeline.expectedCompletionAt).toISOString(),
+      requiredParts: timeline.requiredParts || undefined,
+    }),
+    onSuccess: () => { setTimeline({ expectedCompletionAt: "", reason: "", progressNote: "", requiredParts: "", requiredApproval: false }); void refresh(); },
+    onError: (caught) => setError(caught instanceof ApiError ? caught.message : "Timeline could not be saved."),
+  });
+  const finishWork = useMutation({
+    mutationFn: () => api.post(`/issues/${id}/finish`, {
+      ...finish,
+      completedAt: new Date().toISOString(),
+      partsUsed: finish.partsUsed || undefined,
+      costNote: finish.costNote || undefined,
+    }),
+    onSuccess: refresh,
+    onError: (caught) => setError(caught instanceof ApiError ? caught.message : "Completion could not be submitted."),
+  });
 
-  async function upload(file: File | undefined) {
+  async function upload(file: File | undefined, requestedPurpose?: "ISSUE_UPDATE" | "ISSUE_RESOLUTION") {
     if (!file) return;
     setUploading(true);
     setError("");
     try {
-      const purpose = query.data?.status === "RESOLVED" ? "ISSUE_RESOLUTION" : "ISSUE_UPDATE";
+      const purpose = requestedPurpose ?? "ISSUE_UPDATE";
       const signed = await api.post<{ storageKey: string; uploadUrl: string; requiredHeaders: Record<string, string> }>(`/issues/${id}/attachments/presign`, {
         fileName: file.name,
         mimeType: file.type,
@@ -110,7 +135,8 @@ export default function IssueDetailPage() {
         purpose,
       });
       await api.upload(signed.uploadUrl, file, signed.requiredHeaders);
-      await api.post(`/issues/${id}/attachments/complete`, { fileName: file.name, mimeType: file.type, sizeBytes: file.size, purpose, storageKey: signed.storageKey });
+      const completed = await api.post<{ id: string }>(`/issues/${id}/attachments/complete`, { fileName: file.name, mimeType: file.type, sizeBytes: file.size, purpose, storageKey: signed.storageKey });
+      if (purpose === "ISSUE_RESOLUTION") setFinish((current) => ({ ...current, completionPhotoFileId: completed.id }));
       await refresh();
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Attachment upload failed.");
@@ -169,12 +195,11 @@ export default function IssueDetailPage() {
           <StatusBadge value={issue.status} />
           <StatusBadge value={issue.priority} />
         </div>
-        <p className="page-subtitle">Reported {new Date(issue.createdAt).toLocaleString()} - {issue.affectedUserCount} affected {issue.affectedUserCount === 1 ? "person" : "people"}</p>
+        <p className="page-subtitle">Reported {new Date(issue.createdAt).toLocaleString()} · Reported {issue.occurrenceCount} {issue.occurrenceCount === 1 ? "time" : "times"} · {issue.affectedUserCount} reporters</p>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         {canAcknowledge && <button className="btn btn-primary" onClick={() => status.mutate({ endpoint: "acknowledge" })}><CheckCircle2 size={17} />Acknowledge</button>}
         {canStart && <button className="btn btn-primary" onClick={() => status.mutate({ endpoint: "start" })}><Play size={17} />Start work</button>}
-        {canResolve && <button className="btn btn-primary" onClick={() => status.mutate({ endpoint: "resolve", body: { body: "Work completed; resolution submitted for verification." } })}><CheckCircle2 size={17} />Mark resolved</button>}
         {canVerify && <>
           <button className="btn btn-primary" onClick={() => status.mutate({ endpoint: "verify", body: { accepted: true, comment: "Resolution confirmed." } })}>Verify resolution</button>
           <button className="btn btn-danger" onClick={() => status.mutate({ endpoint: "verify", body: { accepted: false, comment: "The problem is not resolved." } })}><RotateCcw size={17} />Reopen</button>
@@ -194,9 +219,35 @@ export default function IssueDetailPage() {
               <div><MapPin /><span><small>Location</small><strong>{issue.room.floor.block.campus.name} / {issue.room.floor.block.name} / {issue.room.floor.name} / {issue.room.name}</strong></span></div>
               <div><UserRound /><span><small>Responsible</small><strong>{issue.assignedTo?.fullName ?? issue.team?.name ?? "Awaiting assignment"}</strong></span></div>
               <div><Clock3 /><span><small>Resolution due</small><strong>{issue.resolutionDueAt ? new Date(issue.resolutionDueAt).toLocaleString() : "No active SLA"}</strong></span></div>
+              <div><Clock3 /><span><small>Expected completion</small><strong>{issue.expectedCompletionAt ? new Date(issue.expectedCompletionAt).toLocaleString() : "Timeline not added"}</strong></span></div>
             </div>
           </div>
         </section>
+
+        {canResolve && <section className="card">
+          <div className="section-head"><div><h2>Maintenance workflow</h2><p>Add an estimated timeline, then finish with photo evidence.</p></div></div>
+          <div className="detail-body" style={{ display: "grid", gap: 14 }}>
+            <form style={{ display: "grid", gap: 10 }} onSubmit={(event) => { event.preventDefault(); addTimeline.mutate(); }}>
+              <h3>Repair timeline</h3>
+              <input type="datetime-local" required value={timeline.expectedCompletionAt} onChange={(event) => setTimeline({ ...timeline, expectedCompletionAt: event.target.value })} />
+              <input required minLength={3} placeholder="Reason for this estimate" value={timeline.reason} onChange={(event) => setTimeline({ ...timeline, reason: event.target.value })} />
+              <textarea required minLength={2} placeholder="Latest progress update" value={timeline.progressNote} onChange={(event) => setTimeline({ ...timeline, progressNote: event.target.value })} />
+              <input placeholder="Required parts (optional)" value={timeline.requiredParts} onChange={(event) => setTimeline({ ...timeline, requiredParts: event.target.value })} />
+              <label><input type="checkbox" checked={timeline.requiredApproval} onChange={(event) => setTimeline({ ...timeline, requiredApproval: event.target.checked })} /> Approval required</label>
+              <button className="btn btn-secondary" disabled={addTimeline.isPending}>Save timeline</button>
+            </form>
+            <form style={{ display: "grid", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 14 }} onSubmit={(event) => { event.preventDefault(); finishWork.mutate(); }}>
+              <h3>Finish work</h3>
+              <textarea required minLength={3} placeholder="Resolution note" value={finish.resolutionNote} onChange={(event) => setFinish({ ...finish, resolutionNote: event.target.value })} />
+              <input placeholder="Parts used (optional)" value={finish.partsUsed} onChange={(event) => setFinish({ ...finish, partsUsed: event.target.value })} />
+              <input placeholder="Cost note (optional)" value={finish.costNote} onChange={(event) => setFinish({ ...finish, costNote: event.target.value })} />
+              <label className="upload-button"><Paperclip size={18} /><span>{uploading ? "Uploading..." : finish.completionPhotoFileId ? "Completion photo ready" : "Upload required completion photo"}</span><input type="file" required={!finish.completionPhotoFileId} accept="image/jpeg,image/png,image/webp" disabled={uploading} onChange={(event) => void upload(event.target.files?.[0], "ISSUE_RESOLUTION")} /></label>
+              <button className="btn btn-primary" disabled={finishWork.isPending || !finish.completionPhotoFileId || !finish.resolutionNote.trim()}><CheckCircle2 size={17} />Finish work</button>
+            </form>
+          </div>
+        </section>}
+
+        {issue.resolution && <section className="card detail-section"><div className="section-head"><div><h2>Resolution</h2><p>Completed {new Date(issue.resolution.completedAt).toLocaleString()} by {issue.resolution.completedBy.fullName}</p></div></div><div className="detail-body"><p>{issue.resolution.resolutionNote}</p>{issue.resolution.partsUsed && <p><strong>Parts used:</strong> {issue.resolution.partsUsed}</p>}</div></section>}
 
         <section className="card">
           <div className="section-head"><div><h2>Updates</h2><p>Conversation and work notes</p></div></div>
@@ -242,6 +293,7 @@ export default function IssueDetailPage() {
         <section className="card">
           <div className="section-head"><div><h2>Timeline</h2><p>Immutable status history</p></div></div>
           <ol className="timeline">
+            {issue.timelines.map((item) => <li key={item.id}><span /><div><strong>Expected {new Date(item.expectedCompletionAt).toLocaleString()}</strong><small>{new Date(item.createdAt).toLocaleString()} by {item.createdBy.fullName}{item.supersededAt ? " · revised" : " · current"}</small><p>{item.progressNote}</p><p className="muted">{item.reason}</p></div></li>)}
             {issue.statusHistory.map((item) => <li key={item.id}><span /><div><strong>{item.newStatus.replaceAll("_", " ")}</strong><small>{new Date(item.createdAt).toLocaleString()} by {item.changedBy.fullName}</small>{item.comment && <p>{item.comment}</p>}</div></li>)}
           </ol>
         </section>

@@ -730,6 +730,11 @@ export function LearnPortalClient() {
                               </button>
                             </header>
                             <h1>{activeLesson.title}</h1>
+                            {activeLesson.videoUrl && (
+                              <div className={styles.videoWrapper} style={{ marginBottom: 20, borderRadius: 12, overflow: "hidden", background: "#000" }}>
+                                <video controls src={activeLesson.videoUrl} style={{ width: "100%", display: "block", maxHeight: 500 }} />
+                              </div>
+                            )}
                             <div className={styles.lessonContent}>
                               {(activeLesson.content || "Lesson content is being prepared.")
                                 .split(/\n{2,}/)

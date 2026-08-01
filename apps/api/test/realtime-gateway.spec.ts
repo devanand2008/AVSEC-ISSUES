@@ -31,4 +31,24 @@ describe("RealtimeGateway typing authorization", () => {
     expect(to).toHaveBeenCalledWith(`conversation:${conversationId}`);
     expect(emit).toHaveBeenCalledWith("typing.changed", { conversationId, userId, typing: true });
   });
+
+  it("serializes attachment sizes before broadcasting a message", () => {
+    const emit = jest.fn();
+    const to = jest.fn(() => ({ emit }));
+    const gateway = new RealtimeGateway({} as never, {} as never, {} as never);
+    gateway.server = { to } as never;
+
+    gateway.messageCreated(conversationId, {
+      id: "00000000-0000-0000-0000-000000000003",
+      createdAt: new Date("2026-07-29T00:00:00.000Z"),
+      attachments: [{ sizeBytes: BigInt(192) }],
+    });
+
+    expect(to).toHaveBeenCalledWith(`conversation:${conversationId}`);
+    expect(emit).toHaveBeenCalledWith("message.created", {
+      id: "00000000-0000-0000-0000-000000000003",
+      createdAt: new Date("2026-07-29T00:00:00.000Z"),
+      attachments: [{ sizeBytes: "192" }],
+    });
+  });
 });

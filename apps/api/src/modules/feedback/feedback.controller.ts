@@ -4,7 +4,7 @@ import { Throttle } from "@nestjs/throttler";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { CurrentRequestId } from "../../common/decorators/request-id.decorator";
 import type { AuthPrincipal, RequestWithId } from "../../common/http/request-context";
-import { FeedbackDashboardQueryDto, FeedbackHistoryQueryDto, FeedbackSubmissionQueryDto, FeedbackTargetQueryDto, SubmitFeedbackDto } from "./dto/feedback.dto";
+import { FeedbackDashboardQueryDto, FeedbackHistoryQueryDto, FeedbackSubmissionQueryDto, FeedbackTargetQueryDto, SubmitFeedbackByTokenDto, SubmitFeedbackDto } from "./dto/feedback.dto";
 import { FeedbackService } from "./feedback.service";
 
 @ApiTags("feedback")
@@ -16,6 +16,25 @@ export class FeedbackController {
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   scan(@CurrentUser() user: AuthPrincipal, @Param("token") token: string, @Req() request: RequestWithId) {
     return this.feedback.scan(user, token, { ip: request.ip, userAgent: request.headers["user-agent"] });
+  }
+
+  @Get("qr/:token/resolve")
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  resolveQr(@CurrentUser() user: AuthPrincipal, @Param("token") token: string, @Req() request: RequestWithId) {
+    return this.feedback.scan(user, token, { ip: request.ip, userAgent: request.headers["user-agent"] });
+  }
+
+  @Post("qr/:token/scan")
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  scanQr(@CurrentUser() user: AuthPrincipal, @Param("token") token: string, @Req() request: RequestWithId) {
+    return this.feedback.scan(user, token, { ip: request.ip, userAgent: request.headers["user-agent"] });
+  }
+
+  @Post("qr/:token/submit")
+  @Throttle({ default: { limit: 8, ttl: 60_000 } })
+  async submitQr(@CurrentUser() user: AuthPrincipal, @Param("token") token: string, @Body() input: SubmitFeedbackByTokenDto, @CurrentRequestId() requestId: string, @Req() request: RequestWithId) {
+    const resolved = await this.feedback.scan(user, token, { ip: request.ip, userAgent: request.headers["user-agent"] });
+    return this.feedback.submit(user, { ...input, targetId: resolved.target.id, submissionTicket: resolved.submissionTicket }, requestId, { ip: request.ip, userAgent: request.headers["user-agent"] });
   }
 
   @Post("submit")

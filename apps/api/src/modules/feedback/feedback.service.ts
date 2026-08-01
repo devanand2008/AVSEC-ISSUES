@@ -1748,7 +1748,7 @@ export class FeedbackService {
   }
 
   private webFeedbackUrl(token: string): string {
-    return `${this.config.get<string>("WEB_URL", "http://localhost:3000").replace(/\/$/, "")}/student/feedback/target/${token}`;
+    return `${this.config.get<string>("WEB_URL", "http://localhost:3000").replace(/\/$/, "")}/feedback/scan/${token}`;
   }
 
   private hashIp(ip?: string): string | undefined {

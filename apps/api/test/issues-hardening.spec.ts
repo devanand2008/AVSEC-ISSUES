@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import type { AuthPrincipal } from "../src/common/http/request-context";
 import { IssuesService } from "../src/modules/issues/issues.service";
@@ -21,11 +21,13 @@ function setup() {
   const tx = {
     issue: { update: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
     issueAffectedUser: { findUnique: jest.fn(), create: jest.fn() },
+    issueOccurrence: { create: jest.fn() },
     issueAssignmentHistory: { create: jest.fn() },
     issueStatusHistory: { create: jest.fn() },
     responsibleTeamMember: { findMany: jest.fn() },
     notification: { create: jest.fn() },
     outboxEvent: { create: jest.fn() },
+    idempotencyKey: { create: jest.fn() },
   };
   const prisma = {
     issue: { findFirst: jest.fn() },
@@ -45,12 +47,31 @@ function setup() {
 }
 
 describe("IssuesService authorization and assignment hardening", () => {
-  it("returns a user-bound subscription proof with probable-duplicate details", async () => {
-    const { service, prisma, duplicateProofs } = setup();
+  it("blocks direct resolution without the finish-work evidence flow", async () => {
+    const { service, prisma } = setup();
+    const issueId = "00000000-0000-4000-8000-000000000010";
+    prisma.issue.findFirst.mockResolvedValue({
+      id: issueId,
+      collegeId: user.collegeId,
+      status: "IN_PROGRESS",
+    });
+
+    await expect(
+      service.status(
+        user,
+        issueId,
+        { status: "RESOLVED", comment: "Work completed." },
+        { requestId: "request-1" },
+      ),
+    ).rejects.toThrow("Use the finish-work action with verified completion photo evidence.");
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("links a probable duplicate and increments its occurrence count", async () => {
+    const { service, prisma, tx } = setup();
     const roomId = "00000000-0000-0000-0000-000000000020";
     const categoryId = "00000000-0000-0000-0000-000000000021";
     const duplicate = { id: "00000000-0000-0000-0000-000000000022", issueNumber: "ISS-2026-000022", title: "Fan stopped", status: "ASSIGNED", affectedUserCount: 1 };
-    const proof = { duplicateSubscriptionProof: "proof", duplicateSubscriptionProofExpiresAt: "2026-07-15T10:10:00.000Z" };
     prisma.room.findFirst.mockResolvedValue({
       id: roomId,
       departmentId: null,
@@ -63,26 +84,24 @@ describe("IssuesService authorization and assignment hardening", () => {
     });
     prisma.issueCategory.findFirst.mockResolvedValue({ id: categoryId });
     prisma.issue.findFirst.mockResolvedValue(duplicate);
-    duplicateProofs.issue.mockReturnValue(proof);
+    tx.issueAffectedUser.findUnique.mockResolvedValue(null);
+    tx.issue.update.mockResolvedValue({ ...duplicate, occurrenceCount: 2 });
+    tx.notification.create.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000026" });
 
-    let caught: unknown;
-    try {
-      await service.create(user, { roomId, categoryId, title: "Fan stopped", description: "The ceiling fan has stopped." }, "idempotency-key", { requestId: "request-1" });
-    } catch (error) {
-      caught = error;
-    }
-
-    expect(caught).toBeInstanceOf(ConflictException);
-    expect((caught as ConflictException).getResponse()).toEqual({
-      code: "PROBABLE_DUPLICATE",
-      message: "A probable active duplicate exists.",
-      duplicate: { ...duplicate, ...proof },
+    await expect(
+      service.create(user, { roomId, categoryId, title: "Fan stopped", description: "The ceiling fan has stopped." }, "idempotency-key", { requestId: "request-1" }),
+    ).resolves.toEqual(expect.objectContaining({
+      id: duplicate.id,
+      linkedToExisting: true,
+      occurrenceCount: 2,
+    }));
+    expect(tx.issueOccurrence.create).toHaveBeenCalledWith({
+      data: { issueId: duplicate.id, reporterUserId: user.id, description: "The ceiling fan has stopped." },
     });
-    expect(duplicateProofs.issue).toHaveBeenCalledWith(user.id, duplicate.id);
   });
 
   it("accepts a secure block QR token for issue submission inside that block", async () => {
-    const { service, prisma, duplicateProofs } = setup();
+    const { service, prisma, tx } = setup();
     const roomId = "00000000-0000-0000-0000-000000000020";
     const categoryId = "00000000-0000-0000-0000-000000000021";
     const blockId = "00000000-0000-0000-0000-000000000024";
@@ -109,7 +128,9 @@ describe("IssuesService authorization and assignment hardening", () => {
       expiryDate: null,
     });
     prisma.issue.findFirst.mockResolvedValue(duplicate);
-    duplicateProofs.issue.mockReturnValue({ duplicateSubscriptionProof: "proof", duplicateSubscriptionProofExpiresAt: "2026-07-15T10:10:00.000Z" });
+    tx.issueAffectedUser.findUnique.mockResolvedValue(null);
+    tx.issue.update.mockResolvedValue({ ...duplicate, occurrenceCount: 2 });
+    tx.notification.create.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000026" });
 
     await expect(
       service.create(
@@ -118,7 +139,7 @@ describe("IssuesService authorization and assignment hardening", () => {
         "idempotency-key",
         { requestId: "request-1" },
       ),
-    ).rejects.toBeInstanceOf(ConflictException);
+    ).resolves.toEqual(expect.objectContaining({ linkedToExisting: true, occurrenceCount: 2 }));
     expect(prisma.qrCode.findUnique).toHaveBeenCalledWith({
       where: { secureTokenHash: createHash("sha256").update(qrToken).digest("hex") },
       select: { collegeId: true, qrType: true, entityId: true, status: true, expiryDate: true },
@@ -164,7 +185,7 @@ describe("IssuesService authorization and assignment hardening", () => {
 
   it("requires a valid duplicate proof when the issue is not already visible", async () => {
     const { service, prisma, duplicateProofs } = setup();
-    const issueId = "00000000-0000-0000-0000-000000000010";
+    const issueId = "00000000-0000-4000-8000-000000000010";
     prisma.issue.findFirst.mockResolvedValueOnce({ id: issueId }).mockResolvedValueOnce(null);
     duplicateProofs.verify.mockReturnValue(false);
 
@@ -175,19 +196,26 @@ describe("IssuesService authorization and assignment hardening", () => {
 
   it("accepts a bound proof and subscribes idempotently", async () => {
     const { service, prisma, tx, duplicateProofs } = setup();
-    const issueId = "00000000-0000-0000-0000-000000000010";
+    const issueId = "00000000-0000-4000-8000-000000000010";
     prisma.issue.findFirst.mockResolvedValueOnce({ id: issueId }).mockResolvedValueOnce(null);
     duplicateProofs.verify.mockReturnValue(true);
     tx.issueAffectedUser.findUnique.mockResolvedValue(null);
 
     await expect(service.subscribe(user, issueId, "proof")).resolves.toEqual({ subscribed: true, alreadySubscribed: false });
     expect(tx.issueAffectedUser.create).toHaveBeenCalledWith({ data: { issueId, userId: user.id } });
-    expect(tx.issue.update).toHaveBeenCalledWith({ where: { id: issueId }, data: { affectedUserCount: { increment: 1 } } });
+    expect(tx.issue.update).toHaveBeenCalledWith({
+      where: { id: issueId },
+      data: expect.objectContaining({
+        affectedUserCount: { increment: 1 },
+        occurrenceCount: { increment: 1 },
+        lastReportedAt: expect.any(Date),
+      }),
+    });
   });
 
   it("does not require a proof when the issue is already visible", async () => {
     const { service, prisma, tx, duplicateProofs } = setup();
-    const issueId = "00000000-0000-0000-0000-000000000010";
+    const issueId = "00000000-0000-4000-8000-000000000010";
     prisma.issue.findFirst.mockResolvedValueOnce({ id: issueId }).mockResolvedValueOnce({ id: issueId });
     tx.issueAffectedUser.findUnique.mockResolvedValue({ issueId, userId: user.id });
 
@@ -198,15 +226,15 @@ describe("IssuesService authorization and assignment hardening", () => {
 
   it("uses an optimistic assignment update and creates delivery records", async () => {
     const { service, prisma, tx } = setup();
-    const issueId = "00000000-0000-0000-0000-000000000010";
-    const reporterId = "00000000-0000-0000-0000-000000000011";
-    const assigneeId = "00000000-0000-0000-0000-000000000012";
+    const issueId = "00000000-0000-4000-8000-000000000010";
+    const reporterId = "00000000-0000-4000-8000-000000000011";
+    const assigneeId = "00000000-0000-4000-8000-000000000012";
     const issue = { id: issueId, collegeId: user.collegeId, version: 4, status: "NEEDS_MANUAL_ASSIGNMENT", assignedToId: null, reporterId, issueNumber: "ISS-2026-000010", priority: "MEDIUM" };
     prisma.issue.findFirst.mockResolvedValue(issue);
     prisma.user.findFirst.mockResolvedValue({ id: assigneeId });
     tx.issue.updateMany.mockResolvedValue({ count: 1 });
     tx.issue.findUniqueOrThrow.mockResolvedValue({ ...issue, version: 5, status: "ASSIGNED", assignedToId: assigneeId });
-    tx.notification.create.mockResolvedValue({ id: "00000000-0000-0000-0000-000000000013" });
+    tx.notification.create.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000013" });
 
     await service.assign(user, issueId, { userId: assigneeId, reason: "Manual dispatch" }, { requestId: "request-1" });
 

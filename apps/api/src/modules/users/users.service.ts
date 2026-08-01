@@ -7,7 +7,7 @@ import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
 import { AccountStatus, ProfileCompletionStatus, ScopeType } from "../../generated/prisma/enums";
 import type { Prisma } from "../../generated/prisma/client";
-import type { AssignUserRoleDto, CreateMaintenanceStaffDto, CreateRoleDto, CreateUserDto, DeleteUserDto, RemoveUserRoleDto, ResetUserPasswordDto, UpdateRoleDto, UpdateUserAccessDto, UpdateUserStatusDto, UserScopeDto } from "./dto/user.dto";
+import type { AssignUserRoleDto, CreateMaintenanceStaffDto, CreateRoleDto, CreateUserDto, DeleteUserDto, NotificationPreferencesDto, RemoveUserRoleDto, ResetUserPasswordDto, UpdateRoleDto, UpdateUserAccessDto, UpdateUserStatusDto, UserScopeDto } from "./dto/user.dto";
 import { OfficialGroupsService } from "../conversations/official-groups.service";
 
 const ROLE_RANK: Record<string, number> = {
@@ -89,6 +89,13 @@ export class UsersService {
         mobile: true,
         whatsappNumber: true,
         onboardingStudyYear: true,
+        profileCompletionStatus: true,
+        profileCompletionPercentage: true,
+        profileSubmittedAt: true,
+        profileVerifiedAt: true,
+        profileRejectionReason: true,
+        profilePhotoKey: true,
+        notificationPreferences: true,
         roles: { select: { role: { select: { code: true, name: true } } } },
         scopes: { select: { scopeType: true, scopeId: true } },
         studentProfile: { include: { department: true, programme: true, section: true } },
@@ -97,9 +104,50 @@ export class UsersService {
     });
     return {
       ...account,
-      profileCompletionStatus: account.studentProfile || account.staffProfile ? "SUBMITTED" : "NOT_STARTED",
       lockedDepartment: await this.lockedDepartment(user.id),
     };
+  }
+
+  myProfileStatus(user: AuthPrincipal) {
+    return this.prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: {
+        profileCompletionStatus: true,
+        profileCompletionPercentage: true,
+        profileSubmittedAt: true,
+        profileVerifiedAt: true,
+        profileRejectionReason: true,
+      },
+    });
+  }
+
+  async updateNotificationPreferences(user: AuthPrincipal, input: NotificationPreferencesDto, requestId: string) {
+    const preferences: Prisma.InputJsonObject = {
+      in_app: input.in_app,
+      push: input.push,
+      email: input.email,
+      whatsapp: input.whatsapp,
+    };
+    const saved = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: user.id },
+        data: {
+          notificationPreferences: preferences,
+          version: { increment: 1 },
+        },
+        select: { notificationPreferences: true },
+      });
+      await this.audit.record({
+        actorId: user.id,
+        action: "profile.notification_preferences_updated",
+        entityType: "User",
+        entityId: user.id,
+        afterValue: preferences,
+        requestId,
+      }, tx);
+      return updated;
+    });
+    return saved.notificationPreferences;
   }
 
   async saveMyProfileDraft(user: AuthPrincipal, input: Record<string, unknown>, requestId: string) {
@@ -418,85 +466,6 @@ export class UsersService {
     });
   }
 
-  async dependencyReport(actor: AuthPrincipal, publicId: string) {
-    const target = await this.prisma.user.findFirst({ where: { publicId, collegeId: actor.collegeId }, select: { id: true, publicId: true, fullName: true, status: true, archivedAt: true } });
-    if (!target) throw new NotFoundException("User not found.");
-    const values = await Promise.all([
-      this.prisma.attendanceRecord.count({ where: { studentUserId: target.id } }),
-      this.prisma.attendanceSession.count({ where: { facultyId: target.id } }),
-      this.prisma.attendanceSummary.count({ where: { studentUserId: target.id } }),
-      this.prisma.message.count({ where: { senderId: target.id } }),
-      this.prisma.issue.count({ where: { OR: [{ reporterId: target.id }, { assignedToId: target.id }] } }),
-      this.prisma.issueAffectedUser.count({ where: { userId: target.id } }),
-      this.prisma.feedbackSubmission.count({ where: { studentUserId: target.id } }),
-      this.prisma.learningCertificate.count({ where: { studentId: target.id } }),
-      this.prisma.studentProgress.count({ where: { studentId: target.id } }),
-      this.prisma.facultySubjectAssignment.count({ where: { facultyId: target.id } }),
-      this.prisma.classCoordinatorAssignment.count({ where: { coordinatorId: target.id } }),
-      this.prisma.classRepresentativeAssignment.count({ where: { representativeId: target.id } }),
-      this.prisma.classStaffAssignment.count({ where: { staffId: target.id } }),
-      this.prisma.sectionMembership.count({ where: { studentUserId: target.id } }),
-      this.prisma.importJob.count({ where: { requestedById: target.id } }),
-      this.prisma.auditLog.count({ where: { actorId: target.id } }),
-    ]);
-    const counts = {
-      attendanceRecords: values[0],
-      attendanceSessions: values[1],
-      attendanceSummaries: values[2],
-      messages: values[3],
-      issues: values[4],
-      affectedIssues: values[5],
-      feedback: values[6],
-      certificates: values[7],
-      learningProgress: values[8],
-      subjectAssignments: values[9],
-      coordinatorAssignments: values[10],
-      representativeAssignments: values[11],
-      classStaffAssignments: values[12],
-      sectionMemberships: values[13],
-      requestedImports: values[14],
-      auditActions: values[15],
-    };
-    const totalDependencies = Object.values(counts).reduce((sum, count) => sum + count, 0);
-    return {
-      user: target,
-      canDelete: totalDependencies === 0,
-      totalDependencies,
-      counts,
-      message: totalDependencies
-        ? "This user cannot be permanently deleted because retained college records depend on the account. Archive the user instead."
-        : "No retained records depend on this account.",
-    };
-  }
-
-  async deletePermanently(actor: AuthPrincipal, publicId: string, input: DeleteUserDto, requestId: string) {
-    if (!actor.permissions.includes("users.delete_permanent") || !actor.roles.some((role) => ["SUPER_ADMIN", "MAIN_ADMIN"].includes(role))) {
-      throw new ForbiddenException("Only Main Admin with permanent-delete permission can perform this action.");
-    }
-    if (input.confirmationPhrase !== "PERMANENTLY DELETE USER") throw new BadRequestException("The confirmation phrase is incorrect.");
-    const target = await this.prisma.user.findFirst({ where: { publicId, collegeId: actor.collegeId }, select: { id: true, publicId: true, fullName: true, collegeIdentityId: true } });
-    if (!target) throw new NotFoundException("User not found.");
-    if (target.id === actor.id) throw new BadRequestException("You cannot permanently delete your own account.");
-    const report = await this.dependencyReport(actor, publicId);
-    if (!report.canDelete) throw new BadRequestException({ message: report.message, dependencyReport: report });
-    await this.prisma.$transaction(async (tx) => {
-      await this.audit.record({
-        actorId: actor.id,
-        action: "user.deleted_permanently",
-        entityType: "User",
-        entityId: target.id,
-        beforeValue: { publicId: target.publicId, fullName: target.fullName, collegeIdentityId: target.collegeIdentityId },
-        afterValue: { deleted: true, backupReference: input.backupReference, dependencyReport: report },
-        reason: input.reason,
-        requestId,
-      }, tx);
-      await tx.studentProfile.deleteMany({ where: { userId: target.id } });
-      await tx.staffProfile.deleteMany({ where: { userId: target.id } });
-      await tx.user.delete({ where: { id: target.id } });
-    });
-    return { id: publicId, deleted: true, dependencyReport: report };
-  }
-
   async updateBasic(actor: AuthPrincipal, publicId: string, input: Record<string, unknown>, requestId: string) {
     const target = await this.prisma.user.findFirst({ where: { publicId, collegeId: actor.collegeId, archivedAt: null }, select: { id: true, fullName: true, email: true, normalizedEmail: true, status: true } });
     if (!target) throw new NotFoundException("User not found.");
@@ -592,6 +561,14 @@ export class UsersService {
     });
     await this.officialGroups.synchronizeCollege(actor.collegeId);
     return result;
+  }
+
+  async bulkStatus(actor: AuthPrincipal, publicIds: string[], status: AccountStatus, reason: string, requestId: string) {
+    const results = [];
+    for (const publicId of [...new Set(publicIds)]) {
+      results.push(await this.status(actor, publicId, { status, reason }, requestId));
+    }
+    return { status, updated: results.length, results };
   }
 
   async resetPassword(actor: AuthPrincipal, publicId: string, input: ResetUserPasswordDto, requestId: string) {
@@ -1103,5 +1080,253 @@ export class UsersService {
       default:
         return false;
     }
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     DEPENDENCY REPORT
+     ════════════════════════════════════════════════════════════ */
+
+  async dependencyReport(admin: AuthPrincipal, publicId: string) {
+    const target = await this.prisma.user.findFirst({
+      where: { publicId, collegeId: admin.collegeId },
+      select: { id: true, publicId: true, collegeIdentityId: true, fullName: true, status: true },
+    });
+    if (!target) throw new NotFoundException("User not found in this college.");
+
+    const id = target.id;
+
+    const [
+      sessions, refreshTokens, passwordResetTokens, deviceRegistrations,
+      studentProfile, sectionMemberships, attendanceRecords, attendanceSummaries,
+      attendanceInterventions, issuesReported, issuesAssigned, issueOccurrences,
+      issueComments, issueAttachments, issueAffectedUsers, issueStatusHistories,
+      messages, conversationParticipants, feedbackSubmissions, notifications,
+      announcementReadReceipts, fileRecords, aiConversations, auditLogs, broadcastRecipients,
+    ] = await Promise.all([
+      this.prisma.session.count({ where: { userId: id } }),
+      this.prisma.refreshToken.count({ where: { session: { userId: id } } }),
+      this.prisma.passwordResetToken.count({ where: { userId: id } }),
+      this.prisma.deviceRegistration.count({ where: { userId: id } }),
+      this.prisma.studentProfile.count({ where: { userId: id } }),
+      this.prisma.sectionMembership.count({ where: { studentUserId: id } }),
+      this.prisma.attendanceRecord.count({ where: { studentUserId: id } }),
+      this.prisma.attendanceSummary.count({ where: { studentUserId: id } }),
+      this.prisma.attendanceIntervention.count({ where: { studentUserId: id } }),
+      this.prisma.issue.count({ where: { reporterId: id } }),
+      this.prisma.issue.count({ where: { assignedToId: id } }),
+      this.prisma.issueOccurrence.count({ where: { reporterUserId: id } }),
+      this.prisma.issueComment.count({ where: { authorId: id } }),
+      this.prisma.issueAttachment.count({ where: { uploadedById: id } }),
+      this.prisma.issueAffectedUser.count({ where: { userId: id } }),
+      this.prisma.issueStatusHistory.count({ where: { changedById: id } }),
+      this.prisma.message.count({ where: { senderId: id } }),
+      this.prisma.conversationParticipant.count({ where: { userId: id } }),
+      this.prisma.feedbackSubmission.count({ where: { studentUserId: id } }),
+      this.prisma.notificationRecipient.count({ where: { userId: id } }),
+      this.prisma.announcementReadReceipt.count({ where: { userId: id } }),
+      this.prisma.fileRecord.count({ where: { uploadedById: id } }),
+      this.prisma.aiConversation.count({ where: { userId: id } }),
+      this.prisma.auditLog.count({ where: { actorId: id } }),
+      this.prisma.broadcastRecipient.count({ where: { userId: id } }),
+    ]);
+
+    const blockingDependencies = [
+      ...(attendanceRecords > 0 ? [{ type: "ATTENDANCE_RECORDS", count: attendanceRecords, reason: "Academic attendance history must be preserved" }] : []),
+      ...(attendanceSummaries > 0 ? [{ type: "ATTENDANCE_SUMMARIES", count: attendanceSummaries, reason: "Attendance aggregate data must be preserved" }] : []),
+      ...(attendanceInterventions > 0 ? [{ type: "ATTENDANCE_INTERVENTIONS", count: attendanceInterventions, reason: "Attendance intervention history must be preserved" }] : []),
+      ...(issuesReported > 0 ? [{ type: "ISSUES_REPORTED", count: issuesReported, reason: "Issue reports are shared records that must be preserved" }] : []),
+      ...(issueComments > 0 ? [{ type: "ISSUE_COMMENTS", count: issueComments, reason: "Issue comment history must be preserved" }] : []),
+      ...(issueStatusHistories > 0 ? [{ type: "ISSUE_STATUS_HISTORIES", count: issueStatusHistories, reason: "Issue audit trail must be preserved" }] : []),
+      ...(messages > 0 ? [{ type: "MESSAGES_SENT", count: messages, reason: "Shared conversation messages must be preserved" }] : []),
+      ...(feedbackSubmissions > 0 ? [{ type: "FEEDBACK_SUBMISSIONS", count: feedbackSubmissions, reason: "Feedback aggregate data must be preserved" }] : []),
+      ...(auditLogs > 0 ? [{ type: "AUDIT_LOGS", count: auditLogs, reason: "Audit trail must be preserved" }] : []),
+    ];
+
+    const deletableData = [
+      ...(sessions > 0 ? [{ type: "ACTIVE_SESSIONS", count: sessions }] : []),
+      ...(refreshTokens > 0 ? [{ type: "REFRESH_TOKENS", count: refreshTokens }] : []),
+      ...(passwordResetTokens > 0 ? [{ type: "PASSWORD_RESET_TOKENS", count: passwordResetTokens }] : []),
+      ...(deviceRegistrations > 0 ? [{ type: "DEVICE_REGISTRATIONS", count: deviceRegistrations }] : []),
+      ...(notifications > 0 ? [{ type: "NOTIFICATION_RECEIPTS", count: notifications }] : []),
+      ...(announcementReadReceipts > 0 ? [{ type: "ANNOUNCEMENT_RECEIPTS", count: announcementReadReceipts }] : []),
+      ...(conversationParticipants > 0 ? [{ type: "CONVERSATION_MEMBERSHIPS", count: conversationParticipants }] : []),
+      ...(issueAffectedUsers > 0 ? [{ type: "ISSUE_AFFECTED_USERS", count: issueAffectedUsers }] : []),
+      ...(broadcastRecipients > 0 ? [{ type: "BROADCAST_RECEIPTS", count: broadcastRecipients }] : []),
+      ...(aiConversations > 0 ? [{ type: "AI_CONVERSATIONS", count: aiConversations }] : []),
+    ];
+
+    const anonymisableData = [
+      ...(studentProfile > 0 ? [{ type: "STUDENT_PROFILE", count: studentProfile }] : []),
+      ...(sectionMemberships > 0 ? [{ type: "SECTION_MEMBERSHIPS", count: sectionMemberships }] : []),
+      ...(issueOccurrences > 0 ? [{ type: "ISSUE_OCCURRENCES", count: issueOccurrences }] : []),
+      ...(issueAttachments > 0 ? [{ type: "ISSUE_ATTACHMENTS", count: issueAttachments }] : []),
+      ...(issuesAssigned > 0 ? [{ type: "ISSUES_ASSIGNED", count: issuesAssigned }] : []),
+      ...(fileRecords > 0 ? [{ type: "FILE_RECORDS", count: fileRecords }] : []),
+    ];
+
+    const totalRecords =
+      blockingDependencies.reduce((s, d) => s + d.count, 0) +
+      deletableData.reduce((s, d) => s + d.count, 0) +
+      anonymisableData.reduce((s, d) => s + d.count, 0);
+
+    return {
+      userId: target.publicId,
+      userName: target.fullName,
+      collegeIdentityId: target.collegeIdentityId,
+      canPermanentlyDelete: target.status === "ARCHIVED",
+      totalRecords,
+      blockingDependencies,
+      deletableData,
+      anonymisableData,
+    };
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     PERMANENT DELETION
+     ════════════════════════════════════════════════════════════ */
+
+  async deletePermanently(admin: AuthPrincipal, publicId: string, input: DeleteUserDto, requestId: string) {
+    if (
+      !admin.permissions.includes("users.delete_permanent") ||
+      !admin.roles.some((role) => ["SUPER_ADMIN", "MAIN_ADMIN"].includes(role))
+    ) {
+      throw new ForbiddenException(
+        "Only Main Admin with permanent-delete permission can perform this action.",
+      );
+    }
+
+    // 1. Find target – MUST be in the same college
+    const target = await this.prisma.user.findFirst({
+      where: { publicId, collegeId: admin.collegeId },
+      select: {
+        id: true, publicId: true, collegeIdentityId: true, fullName: true,
+        email: true, status: true, collegeId: true,
+        roles: { select: { role: { select: { code: true } } } },
+      },
+    });
+    if (!target) throw new NotFoundException("User not found in this college.");
+    if (target.id === admin.id) {
+      throw new BadRequestException("You cannot permanently delete your own account.");
+    }
+
+    // 2. Must be ARCHIVED
+    if (target.status !== "ARCHIVED") {
+      throw new BadRequestException("Student must be archived before permanent deletion. Archive the account first.");
+    }
+
+    // 3. Verify confirmation phrase
+    const expectedPhrase = `DELETE STUDENT ${target.collegeIdentityId}`;
+    const altPhrase = `PERMANENTLY DELETE USER`;
+    if (input.confirmationPhrase !== expectedPhrase && input.confirmationPhrase !== altPhrase) {
+      throw new BadRequestException(`Incorrect confirmation phrase. Expected: "${expectedPhrase}"`);
+    }
+
+    // 4. Verify backup reference
+    if (!input.backupReference) {
+      throw new BadRequestException("A backup reference is required for permanent deletion.");
+    }
+    const verifiedBackup = await this.prisma.databaseBackup.findFirst({
+      where: {
+        id: input.backupReference,
+        collegeId: admin.collegeId,
+        status: { in: ["COMPLETED", "RESTORE_TESTED"] },
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!verifiedBackup) {
+      throw new BadRequestException(
+        "The selected backup is not a completed, verified backup for this college.",
+      );
+    }
+
+    const anonymousRef = `Deleted User ${target.publicId.slice(0, 8).toUpperCase()}`;
+    const userId = target.id;
+
+    // 5. Execute in a single transaction
+    await this.prisma.$transaction(async (tx) => {
+      // Lock the user row to prevent concurrent deletion
+      await tx.$executeRawUnsafe(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, userId);
+
+      // ── Delete ephemeral data ──
+      await tx.session.deleteMany({ where: { userId } });
+      await tx.passwordResetToken.deleteMany({ where: { userId } });
+      await tx.deviceRegistration.deleteMany({ where: { userId } });
+
+      // ── Delete notification/announcement receipts ──
+      await tx.notificationRecipient.deleteMany({ where: { userId } });
+      await tx.announcementReadReceipt.deleteMany({ where: { userId } });
+
+      // ── Delete conversation memberships (preserves conversations + messages) ──
+      await tx.conversationParticipant.deleteMany({ where: { userId } });
+
+      // ── Delete issue affected-user entries ──
+      await tx.issueAffectedUser.deleteMany({ where: { userId } });
+
+      // ── Delete AI data ──
+      await tx.aiConversation.deleteMany({ where: { userId } });
+
+      // ── Anonymise student profile (preserve structure, remove personal fields) ──
+      const studentProfile = await tx.studentProfile.findFirst({ where: { userId }, select: { id: true } });
+      if (studentProfile) {
+        await tx.studentProfile.update({
+          where: { id: studentProfile.id },
+          data: {
+            parentName: null,
+            parentMobileNumber: null,
+            personalEmail: null,
+            address: null,
+            city: null,
+            district: null,
+            state: null,
+            pinCode: null,
+            emergencyContact: null,
+          },
+        });
+      }
+
+      // ── Deactivate section memberships (preserve historical) ──
+      await tx.sectionMembership.updateMany({
+        where: { studentUserId: userId, isActive: true },
+        data: { isActive: false },
+      });
+
+      // ── Anonymise User record ──
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          fullName: anonymousRef,
+          email: null,
+          normalizedEmail: null,
+          mobile: null,
+          whatsappNumber: null,
+          profilePhotoKey: null,
+        },
+      });
+
+      // ── Audit log ──
+      await this.audit.record({
+        collegeId: admin.collegeId,
+        actorId: admin.id,
+        action: "USER_PERMANENTLY_DELETED",
+        entityType: "User",
+        entityId: target.publicId,
+        beforeValue: {
+          fullName: target.fullName,
+          email: target.email,
+          collegeIdentityId: target.collegeIdentityId,
+          roles: target.roles.map((r) => r.role.code),
+        },
+        afterValue: { anonymousReference: anonymousRef, backupReference: input.backupReference },
+        reason: input.reason,
+        requestId,
+      }, tx);
+    }, { timeout: 30_000 });
+
+    return {
+      success: true,
+      message: `Student data has been permanently deleted and anonymised. Reference: ${anonymousRef}`,
+      anonymousReference: anonymousRef,
+    };
   }
 }

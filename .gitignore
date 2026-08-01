@@ -116,6 +116,9 @@ backups/*
 # Private uploads
 uploads/
 private_uploads/
+openai-files/
+openai-temp/
+ai-debug-logs/
 
 # Python/bundled tooling in unrelated prototype
 worker management system2/.venv/

@@ -93,6 +93,18 @@ export class AdminFeedbackController {
     return this.feedback.regenerateQr(user, id, requestId);
   }
 
+  @Permissions("feedback.qr.manage")
+  @Post("qr/:id/revoke")
+  revokeQr(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
+    return this.feedback.setQrStatus(user, id, "DISABLED", requestId);
+  }
+
+  @Permissions("feedback.qr.manage")
+  @Post("qr/:id/activate")
+  activateQr(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
+    return this.feedback.setQrStatus(user, id, "ACTIVE", requestId);
+  }
+
   @Get("submissions")
   submissions(
     @CurrentUser() user: AuthPrincipal,

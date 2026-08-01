@@ -3,7 +3,7 @@ import { createQrPosterPdf } from "../src/modules/feedback/qr-poster";
 describe("official feedback QR poster", () => {
   it("creates a genuine A4 PDF containing a high-correction QR image", async () => {
     const poster = await createQrPosterPdf(
-      "https://college.example.edu/student/feedback/target/FB_abcdefghijklmnopqrstuvwxyz123456",
+      "https://college.example.edu/feedback/scan/FB_abcdefghijklmnopqrstuvwxyz123456",
       {
         targetName: "CSE Laboratory 201",
         targetType: "LABORATORY",

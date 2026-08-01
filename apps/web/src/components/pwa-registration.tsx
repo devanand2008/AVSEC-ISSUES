@@ -1,7 +1,7 @@
 "use client";
 
 import { Download, Share2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -15,6 +15,7 @@ export function PwaRegistration() {
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [secureContext, setSecureContext] = useState(true);
   const [ios, setIos] = useState(false);
+  const dialogRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const standalone =
@@ -99,6 +100,51 @@ export function PwaRegistration() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!instructionsOpen) return;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const focusableSelector =
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusable = () =>
+      Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ??
+          [],
+      );
+    focusable()[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setInstructionsOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) {
+        event.preventDefault();
+        dialogRef.current?.focus();
+        return;
+      }
+      const first = items[0]!;
+      const last = items.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [instructionsOpen]);
+
   async function install() {
     if (!installPrompt) {
       setInstructionsOpen(true);
@@ -138,10 +184,12 @@ export function PwaRegistration() {
           }}
         >
           <section
+            ref={dialogRef}
             className="pwa-install-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="pwa-install-title"
+            tabIndex={-1}
           >
             <header>
               <div>

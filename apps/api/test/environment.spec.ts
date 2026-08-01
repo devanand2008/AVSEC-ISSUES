@@ -61,6 +61,57 @@ describe("environment policy", () => {
         SMTP_USERNAME: "college-alerts",
       }),
     ).toThrow(/SMTP_PASSWORD/);
+    expect(() =>
+      validateEnvironment({ ...base, AVS_BOT_ENABLED: "true" }),
+    ).toThrow(/OPENAI_API_KEY/);
+    expect(() =>
+      validateEnvironment({
+        ...base,
+        AI_KNOWLEDGE_PROVIDER: "openai_file_search",
+      }),
+    ).toThrow(/OPENAI_VECTOR_STORE_ID/);
+    expect(() =>
+      validateEnvironment({ ...base, GOOGLE_DRIVE_ENABLED: "true" }),
+    ).toThrow(/GOOGLE_DRIVE_OWNER_EMAIL/);
+    expect(() =>
+      validateEnvironment({ ...base, BACKUP_SCHEDULE_ENABLED: "true" }),
+    ).toThrow(/BACKUP_ENCRYPTION_KEY/);
+  });
+
+  it("accepts complete backend-only Google Drive and encrypted backup settings", () => {
+    const environment = validateEnvironment({
+      ...base,
+      GOOGLE_DRIVE_ENABLED: "true",
+      GOOGLE_DRIVE_OWNER_EMAIL: "storage-owner@example.edu",
+      GOOGLE_OAUTH_CLIENT_ID: "oauth-client-id",
+      GOOGLE_OAUTH_CLIENT_SECRET:
+        "ci-oauth-client-secret-with-at-least-32-characters",
+      GOOGLE_OAUTH_REDIRECT_URI:
+        "https://college.example/api/v1/admin/storage/google-drive/callback",
+      GOOGLE_DRIVE_ENCRYPTION_KEY:
+        "ci-drive-token-key-with-at-least-32-random-characters",
+      BACKUP_ENCRYPTION_KEY:
+        "ci-backup-key-with-at-least-32-random-characters",
+      BACKUP_SCHEDULE_ENABLED: "true",
+    });
+    expect(environment.GOOGLE_DRIVE_ENABLED).toBe(true);
+    expect(environment.GOOGLE_DRIVE_MAX_FILE_SIZE_MB).toBe(500);
+    expect(environment.GOOGLE_DRIVE_UPLOAD_CHUNK_SIZE_MB).toBe(8);
+    expect(environment.BACKUP_SCHEDULE_HOUR).toBe(2);
+    expect(environment.BACKUP_DAILY_RETENTION).toBe(14);
+    expect(environment.BACKUP_WEEKLY_RETENTION).toBe(12);
+    expect(environment.BACKUP_MONTHLY_RETENTION).toBe(24);
+  });
+
+  it("accepts AVS Bot only with server key and explicitly configured model", () => {
+    const environment = validateEnvironment({
+      ...base,
+      AVS_BOT_ENABLED: "true",
+      OPENAI_API_KEY: "test-server-key-with-more-than-20-characters",
+      OPENAI_MODEL: "project-available-model",
+    });
+    expect(environment.AVS_BOT_ENABLED).toBe(true);
+    expect(environment.OPENAI_MODEL).toBe("project-available-model");
   });
 
   it("accepts complete SMTP configuration", () => {
