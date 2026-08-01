@@ -70,8 +70,17 @@ jobs:
         run: npm run prisma:generate
       - name: Validate production environment policy
         run: npm run env:validate:production
-      - name: Typecheck, lint, test, and build
-        run: npm run check
+      - name: Validate Prisma schema, typecheck, and lint
+        run: |
+          npm run prisma:validate
+          npm run typecheck
+          npm run lint
+      - name: Run tests
+        env:
+          NODE_ENV: test
+        run: npm run test
+      - name: Build production applications
+        run: npm run build
       - name: Audit production dependencies
         run: npm run audit:production
       - name: Validate development and production Compose models
