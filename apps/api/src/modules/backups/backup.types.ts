@@ -11,17 +11,45 @@ export interface BackupManifest {
     sha256: string;
   };
   dump: {
-    format: "postgresql-custom";
+    format: "postgresql-custom" | "postgresql-plain-sql";
     bytes: number;
     sha256: string;
   };
+  compression?: {
+    format: "gzip";
+    bytes: number;
+    sha256: string;
+  };
+  schema?: {
+    fileName: string;
+    format: "postgresql-plain-sql";
+    bytes: number;
+    sha256: string;
+  };
+  checksumFile?: {
+    fileName: string;
+    sha256: string;
+  };
+  database?: {
+    mode: "EXTERNAL_PERSISTENT" | "RENDER_FREE_PILOT";
+    hostHash: string;
+    name: string;
+  };
+  application?: {
+    commit: string | null;
+    prismaMigration: string | null;
+  };
+  tableCounts?: Record<string, number>;
   encryption: {
     algorithm: "aes-256-gcm";
     keyId: string;
   };
   verification: {
     verifiedAt: string;
-    pgRestoreList: true;
+    pgRestoreList?: true;
+    sqlReadable?: true;
+    uploadStatus?: "pending" | "completed";
+    restoreTestStatus?: "not_tested" | "passed" | "failed";
   };
   manifestHmacSha256: string;
 }

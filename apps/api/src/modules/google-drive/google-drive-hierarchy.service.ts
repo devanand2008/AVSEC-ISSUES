@@ -12,7 +12,14 @@ const BACKUP_FOLDER_NAME = "database-backups";
 const FILES_FOLDER_NAME = "application-files";
 
 const FOLDER_TREE = {
-  [BACKUP_FOLDER_NAME]: ["daily", "weekly", "monthly", "manual"],
+  [BACKUP_FOLDER_NAME]: [
+    "daily",
+    "weekly",
+    "monthly",
+    "manual",
+    "schema",
+    "manifests",
+  ],
   [FILES_FOLDER_NAME]: [
     "profiles",
     "announcements",

@@ -79,6 +79,7 @@
   "dependencies": {
     "exceljs": "^4.4.0",
     "firebase-admin": "^14.2.0",
+    "http-proxy": "1.18.1",
     "next": "16.2.12"
   },
   "optionalDependencies": {

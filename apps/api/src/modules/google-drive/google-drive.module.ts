@@ -5,6 +5,7 @@ import { GoogleDriveController } from "./google-drive.controller";
 import { GoogleDriveOAuthService } from "./google-drive-oauth.service";
 import { GoogleDriveStorageService } from "./google-drive-storage.service";
 import { GoogleDriveHierarchyService } from "./google-drive-hierarchy.service";
+import { FileAccessController } from "./file-access.controller";
 import {
   GOOGLE_DRIVE_CLOCK,
   GOOGLE_DRIVE_CONFIG,
@@ -46,7 +47,7 @@ export class GoogleDriveModule {
       module: GoogleDriveModule,
       global: true,
       imports: options.imports ?? [],
-      controllers: [GoogleDriveController],
+      controllers: [GoogleDriveController, FileAccessController],
       providers,
       exports: [
         GoogleDriveOAuthService,

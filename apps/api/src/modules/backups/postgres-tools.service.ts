@@ -108,6 +108,77 @@ export class PostgresToolsService {
     ], connection, 30 * 60 * 1000));
   }
 
+  async dumpPlain(databaseUrl: string, outputPath: string): Promise<void> {
+    const connection = parsePostgreSqlConnection(databaseUrl);
+    await this.expectSuccess(
+      command(
+        "pg_dump",
+        [
+          "--format=plain",
+          "--no-owner",
+          "--no-privileges",
+          "--clean",
+          "--if-exists",
+          "--encoding=UTF8",
+          "--file",
+          outputPath,
+          ...connectionArgs(connection),
+          "--dbname",
+          connection.database,
+        ],
+        connection,
+        30 * 60 * 1000,
+      ),
+    );
+  }
+
+  async dumpSchema(databaseUrl: string, outputPath: string): Promise<void> {
+    const connection = parsePostgreSqlConnection(databaseUrl);
+    await this.expectSuccess(
+      command(
+        "pg_dump",
+        [
+          "--schema-only",
+          "--format=plain",
+          "--no-owner",
+          "--no-privileges",
+          "--encoding=UTF8",
+          "--file",
+          outputPath,
+          ...connectionArgs(connection),
+          "--dbname",
+          connection.database,
+        ],
+        connection,
+        15 * 60 * 1000,
+      ),
+    );
+  }
+
+  async inspectSql(sqlPath: string): Promise<void> {
+    const { open, stat } = await import("node:fs/promises");
+    const details = await stat(sqlPath);
+    if (!details.isFile() || details.size === 0) {
+      throw new Error("PostgreSQL SQL backup is empty.");
+    }
+    const handle = await open(sqlPath, "r");
+    try {
+      const sample = Buffer.alloc(Math.min(details.size, 2 * 1024 * 1024));
+      const { bytesRead } = await handle.read(sample, 0, sample.length, 0);
+      const sql = sample.subarray(0, bytesRead).toString("utf8");
+      if (
+        !sql.includes("PostgreSQL database dump") ||
+        !/(?:CREATE TABLE|CREATE SCHEMA)/u.test(sql)
+      ) {
+        throw new Error(
+          "PostgreSQL SQL backup does not contain an expected readable schema.",
+        );
+      }
+    } finally {
+      await handle.close();
+    }
+  }
+
   async inspectDump(dumpPath: string): Promise<void> {
     const result = await this.executor.run({
       executable: "pg_restore",
@@ -211,6 +282,132 @@ export class PostgresToolsService {
           "--force",
           temporaryDatabase,
         ], connection, 60 * 1000));
+      } catch (cleanupError) {
+        failure ??= cleanupError;
+      }
+    }
+    if (failure) throw failure;
+    if (!verification) {
+      throw new Error("Temporary restore verification did not complete.");
+    }
+    return verification;
+  }
+
+  async restorePlainAndVerifyInTemporaryDatabase(
+    databaseUrl: string,
+    sqlPath: string,
+  ): Promise<RestoreVerificationResult> {
+    const connection = parsePostgreSqlConnection(databaseUrl);
+    const temporaryDatabase = `avs_backup_verify_${Date.now().toString(36)}_${randomBytes(6).toString("hex")}`;
+    assertTemporaryDatabaseName(temporaryDatabase);
+    if (temporaryDatabase === connection.database) {
+      throw new Error(
+        "Temporary restore database cannot be the configured application database.",
+      );
+    }
+
+    let created = false;
+    let failure: unknown;
+    let verification: RestoreVerificationResult | undefined;
+    try {
+      const sourceTables = await this.queryLines(
+        connection,
+        connection.database,
+        TABLE_INVENTORY_SQL,
+      );
+      const sourceCounts = await this.queryCounts(
+        connection,
+        connection.database,
+      );
+      await this.expectSuccess(
+        command(
+          "createdb",
+          [
+            ...connectionArgs(connection),
+            "--maintenance-db",
+            "postgres",
+            temporaryDatabase,
+          ],
+          connection,
+          60 * 1000,
+        ),
+      );
+      created = true;
+      await this.expectSuccess(
+        command(
+          "psql",
+          [
+            "--no-psqlrc",
+            "--set",
+            "ON_ERROR_STOP=on",
+            "--single-transaction",
+            ...connectionArgs(connection),
+            "--dbname",
+            temporaryDatabase,
+            "--file",
+            sqlPath,
+          ],
+          connection,
+          30 * 60 * 1000,
+        ),
+      );
+      const restoredTables = await this.queryLines(
+        connection,
+        temporaryDatabase,
+        TABLE_INVENTORY_SQL,
+      );
+      const restoredCounts = await this.queryCounts(
+        connection,
+        temporaryDatabase,
+      );
+      const schemaMatches =
+        sourceTables.length === restoredTables.length &&
+        sourceTables.every((table, index) => table === restoredTables[index]);
+      const recordCountsMatch =
+        sourceCounts.users === restoredCounts.users &&
+        sourceCounts.migrations === restoredCounts.migrations;
+      if (!schemaMatches || !recordCountsMatch) {
+        throw new Error(
+          "Temporary restore database did not match the source schema and record counts.",
+        );
+      }
+      verification = {
+        temporaryDatabaseHash: createHash("sha256")
+          .update(temporaryDatabase, "utf8")
+          .digest("hex"),
+        recordCountComparison: {
+          source: sourceCounts,
+          restored: restoredCounts,
+          matches: true,
+        },
+        schemaComparison: {
+          sourceTableCount: sourceTables.length,
+          restoredTableCount: restoredTables.length,
+          matches: true,
+        },
+      };
+    } catch (error) {
+      failure = error;
+    }
+
+    if (created) {
+      try {
+        assertTemporaryDatabaseName(temporaryDatabase);
+        await this.expectSuccess(
+          command(
+            "dropdb",
+            [
+              ...connectionArgs(connection),
+              "--maintenance-db",
+              "postgres",
+              "--if-exists",
+              "--force",
+              temporaryDatabase,
+            ],
+            connection,
+            60 * 1000,
+          ),
+        );
       } catch (cleanupError) {
         failure ??= cleanupError;
       }

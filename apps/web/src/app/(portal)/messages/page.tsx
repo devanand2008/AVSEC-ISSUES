@@ -282,7 +282,7 @@ function MessagesPageInner() {
   useEffect(() => {
     if (!activeId) return;
     const connectingTimer = window.setTimeout(() => setConnectionState("connecting"), 0);
-    const socket = io(resolveRuntimeUrl(process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:4000/realtime"), {
+    const socket = io(resolveRuntimeUrl(process.env.NEXT_PUBLIC_SOCKET_URL ?? "/realtime"), {
       withCredentials: true,
       transports: ["websocket", "polling"],
       reconnection: true,

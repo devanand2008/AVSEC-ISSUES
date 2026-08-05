@@ -78,6 +78,57 @@ describe("PostgresToolsService command boundaries", () => {
     expect(executor.commands.flatMap(({ args }) => args)).not.toContain("--clean");
   });
 
+  it("creates readable full and schema SQL with the required safe pg_dump flags", async () => {
+    const executor = new MockExecutor();
+    const service = new PostgresToolsService(executor as unknown as SafeProcessRunner);
+    await service.dumpPlain(databaseUrl, "C:\\safe\\avs_portal_full.sql");
+    await service.dumpSchema(databaseUrl, "C:\\safe\\avs_portal_schema.sql");
+
+    const [full, schema] = executor.commands;
+    expect(full?.args).toEqual(expect.arrayContaining([
+      "--format=plain",
+      "--no-owner",
+      "--no-privileges",
+      "--clean",
+      "--if-exists",
+      "--encoding=UTF8",
+    ]));
+    expect(schema?.args).toEqual(expect.arrayContaining([
+      "--schema-only",
+      "--format=plain",
+      "--no-owner",
+      "--no-privileges",
+    ]));
+    expect(executor.commands.flatMap(({ args }) => args).join(" ")).not.toContain("s@fe-secret");
+  });
+
+  it("restores plain SQL with stop-on-error and a single transaction", async () => {
+    const executor = new MockExecutor();
+    const service = new PostgresToolsService(executor as unknown as SafeProcessRunner);
+    await expect(
+      service.restorePlainAndVerifyInTemporaryDatabase(
+        databaseUrl,
+        "C:\\safe\\avs_portal_full.sql",
+      ),
+    ).resolves.toMatchObject({
+      recordCountComparison: { matches: true },
+      schemaComparison: { matches: true },
+    });
+    const restore = executor.commands.find(
+      (item) => item.executable === "psql" && item.args.includes("--file"),
+    );
+    expect(restore?.args).toEqual(expect.arrayContaining([
+      "--set",
+      "ON_ERROR_STOP=on",
+      "--single-transaction",
+      "--file",
+      "C:\\safe\\avs_portal_full.sql",
+    ]));
+    const temporaryDatabase = restore?.args[restore.args.indexOf("--dbname") + 1];
+    expect(temporaryDatabase).toMatch(/^avs_backup_verify_/);
+    expect(executor.commands.at(-1)).toMatchObject({ executable: "dropdb" });
+  });
+
   it("drops the temporary database after a mocked restore failure", async () => {
     const executor = new MockExecutor();
     executor.failExecutable = "pg_restore";

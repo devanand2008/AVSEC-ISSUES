@@ -11,11 +11,14 @@ import {
   Clock3,
   Cloud,
   Database,
+  Download,
+  Eye,
   FileUp,
   FlaskConical,
   Link2,
   RefreshCw,
   ShieldCheck,
+  Trash2,
   Unlink,
 } from "lucide-react";
 import { useCallback, useState } from "react";
@@ -27,7 +30,7 @@ import styles from "./storage-dashboard.module.css";
 const DRIVE_STATUS_ENDPOINT = "/admin/storage/google-drive/status";
 const DRIVE_AUTHORIZE_ENDPOINT = "/admin/storage/google-drive/authorize";
 const DRIVE_CONNECTION_ENDPOINT = "/admin/storage/google-drive";
-const BACKUPS_ENDPOINT = "/admin/storage/backups";
+const BACKUPS_ENDPOINT = "/admin/backups";
 
 const readablePermissions = [
   "settings.read",
@@ -61,15 +64,38 @@ export interface BackupRecord {
   sizeBytes?: number | string | null;
   restoreTest?: RestoreTestRecord | null;
   lastRestoreTest?: RestoreTestRecord | null;
+  fileName?: string;
+  sqlFormat?: string;
+  encrypted?: boolean;
+  checksumStatus?: string;
+  googleDriveStatus?: string;
+  artifactSha256?: string;
 }
 
-export type BackupListResponse =
-  | BackupRecord[]
-  | {
+export interface BackupListEnvelope {
       data?: BackupRecord[];
       items?: BackupRecord[];
       backups?: BackupRecord[];
-    };
+      database?: {
+        status: string;
+        mode: string;
+        warning?: string | null;
+      };
+      schedule?: {
+        timezone: string;
+        dailyTime: string;
+        githubActionsCron: string;
+      };
+      retention?: { daily: number; weekly: number; monthly: number };
+}
+
+export type BackupListResponse = BackupRecord[] | BackupListEnvelope;
+
+function backupEnvelope(
+  response: BackupListResponse | undefined,
+): BackupListEnvelope | undefined {
+  return response && !Array.isArray(response) ? response : undefined;
+}
 
 interface AuthorizationResponse {
   authorizationUrl: string;
@@ -335,6 +361,9 @@ export function BackupPanel({
   testingRestore,
   onBackup,
   onRestoreTest,
+  onVerify,
+  onDownloadSchema,
+  onDelete,
 }: {
   backups: BackupRecord[];
   connected: boolean;
@@ -343,6 +372,9 @@ export function BackupPanel({
   testingRestore: boolean;
   onBackup: () => void;
   onRestoreTest: (backupId: string) => void;
+  onVerify?: (backupId: string) => void;
+  onDownloadSchema?: (backup: BackupRecord) => void;
+  onDelete?: (backupId: string) => void;
 }) {
   const restorable = backups.find((backup) =>
     isSuccessfulStatus(backup.status),
@@ -434,6 +466,13 @@ export function BackupPanel({
                     Requested {formatStorageDate(backup.createdAt)} ·{" "}
                     {formatStorageBytes(backup.sizeBytes)}
                   </span>
+                  <small>
+                    {backup.fileName ?? "Filename pending"} ·{" "}
+                    {backup.sqlFormat ?? "SQL format pending"} ·{" "}
+                    {backup.encrypted ? "Encrypted" : "Encryption pending"} ·{" "}
+                    Drive {statusLabel(backup.googleDriveStatus)} · checksum{" "}
+                    {statusLabel(backup.checksumStatus)}
+                  </small>
                   {restore && (
                     <small>
                       Restore test: {statusLabel(restore.status)} ·{" "}
@@ -441,6 +480,14 @@ export function BackupPanel({
                         restore.completedAt ?? restore.requestedAt,
                       )}
                     </small>
+                  )}
+                  {canManage && isSuccessfulStatus(backup.status) && (
+                    <div className={styles.actions} style={{ marginTop: 8 }}>
+                      {onVerify && <button type="button" className="btn" onClick={() => onVerify(backup.id)}><ShieldCheck size={15} />Verify</button>}
+                      {onDownloadSchema && <button type="button" className="btn" onClick={() => onDownloadSchema(backup)}><Download size={15} />Schema SQL</button>}
+                      <button type="button" className="btn" onClick={() => window.open(`/api/v1/admin/backups/${encodeURIComponent(backup.id)}/manifest`, "_blank", "noopener,noreferrer")}><Eye size={15} />Manifest</button>
+                      {onDelete && <button type="button" className="btn" onClick={() => onDelete(backup.id)}><Trash2 size={15} />Delete eligible</button>}
+                    </div>
                   )}
                 </div>
               </li>
@@ -498,9 +545,10 @@ export function StorageDashboard() {
     },
   });
   const manualBackup = useMutation({
-    mutationFn: () => api.post<BackupRecord>(BACKUPS_ENDPOINT),
+    mutationFn: (reason: string) =>
+      api.post<BackupRecord>(BACKUPS_ENDPOINT, { type: "MANUAL", reason }),
     onSuccess: async () => {
-      setNotice("The manual backup request was queued.");
+      setNotice("The manual SQL backup completed successfully.");
       await refresh();
     },
   });
@@ -514,6 +562,22 @@ export function StorageDashboard() {
       await refresh();
     },
   });
+  const verifyBackup = useMutation({
+    mutationFn: (backupId: string) =>
+      api.post(`${BACKUPS_ENDPOINT}/${encodeURIComponent(backupId)}/verify`),
+    onSuccess: async () => {
+      setNotice("All private backup files passed checksum verification.");
+      await refresh();
+    },
+  });
+  const deleteBackup = useMutation({
+    mutationFn: ({ backupId, reason }: { backupId: string; reason: string }) =>
+      api.delete(`${BACKUPS_ENDPOINT}/${encodeURIComponent(backupId)}`, { reason }),
+    onSuccess: async () => {
+      setNotice("The eligible old backup was deleted and audit logged.");
+      await refresh();
+    },
+  });
 
   if (!user) return <LoadingState />;
   if (!canRead)
@@ -522,11 +586,14 @@ export function StorageDashboard() {
     );
 
   const records = backupRecords(backups.data);
+  const backupStatus = backupEnvelope(backups.data);
   const actionError =
     authorize.error ??
     revoke.error ??
     manualBackup.error ??
     restoreTest.error ??
+    verifyBackup.error ??
+    deleteBackup.error ??
     null;
 
   return (
@@ -564,6 +631,24 @@ export function StorageDashboard() {
           client secrets are never displayed in this interface.
         </p>
       </div>
+
+      {backupStatus?.database?.warning && (
+        <div className="error-box" role="alert" style={{ marginBottom: 18 }}>
+          <strong>Pilot Database</strong>
+          <p style={{ marginBottom: 0 }}>{backupStatus.database.warning}</p>
+        </div>
+      )}
+      {backupStatus?.database && (
+        <section className="card" style={{ marginBottom: 18, padding: 18 }}>
+          <dl className="detail-list">
+            <div><dt>Database connection</dt><dd>{backupStatus.database.status}</dd></div>
+            <div><dt>Database mode</dt><dd>{backupStatus.database.mode}</dd></div>
+            <div><dt>Daily backup</dt><dd>{backupStatus.schedule?.dailyTime ?? "02:00"} {backupStatus.schedule?.timezone ?? "Asia/Kolkata"}</dd></div>
+            <div><dt>GitHub Actions cron</dt><dd><code>{backupStatus.schedule?.githubActionsCron ?? "30 20 * * *"}</code></dd></div>
+            <div><dt>Retention</dt><dd>{backupStatus.retention ? `${backupStatus.retention.daily} daily / ${backupStatus.retention.weekly} weekly / ${backupStatus.retention.monthly} monthly` : "30 daily / 12 weekly / 12 monthly"}</dd></div>
+          </dl>
+        </section>
+      )}
 
       {notice && (
         <div className="success-box" role="status" aria-live="polite">
@@ -634,8 +719,25 @@ export function StorageDashboard() {
             canManage={canManageBackups}
             backingUp={manualBackup.isPending}
             testingRestore={restoreTest.isPending}
-            onBackup={() => manualBackup.mutate()}
+            onBackup={() => {
+              const reason = window.prompt(
+                "Reason for this manual database backup",
+                "Before an administrative data change",
+              )?.trim();
+              if (reason && reason.length >= 5) manualBackup.mutate(reason);
+            }}
             onRestoreTest={(backupId) => restoreTest.mutate(backupId)}
+            onVerify={(backupId) => verifyBackup.mutate(backupId)}
+            onDownloadSchema={(backup) => void api.download(
+              `${BACKUPS_ENDPOINT}/${encodeURIComponent(backup.id)}/schema`,
+              backup.fileName?.replace(/full.*\.sql\.gz\.enc$/u, "schema.sql") ?? "avs_portal_schema.sql",
+            )}
+            onDelete={(backupId) => {
+              const reason = window.prompt("Reason for deleting this eligible old backup")?.trim();
+              if (reason && reason.length >= 10 && window.confirm("Delete this eligible old backup from private storage?")) {
+                deleteBackup.mutate({ backupId, reason });
+              }
+            }}
           />
         )}
       </div>

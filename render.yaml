@@ -1,80 +1,110 @@
 services:
-  - type: keyvalue
-    name: avs-college-redis
-    plan: starter
-    region: singapore
-    ipAllowList: []
-    maxmemoryPolicy: noeviction
-    persistenceMode: journal-snapshot
-
   - type: web
-    name: avs-college-api
+    name: avs-college-portal
     runtime: docker
-    plan: starter
+    plan: free
     region: singapore
+    dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerfilePath: ./apps/api/Dockerfile
-    autoDeployTrigger: checksPass
-    healthCheckPath: /api/v1/health/ready/dependencies
-    maxShutdownDelaySeconds: 60
+    healthCheckPath: /health
+    autoDeploy: true
     envVars:
+      # ── Application identity ──────────────────────────────────────────────────
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 4000
-      - key: API_PREFIX
-        value: api/v1
+      - key: APP_NAME
+        value: AVS College Management System
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
+      - key: DEFAULT_TIMEZONE
+        value: Asia/Kolkata
+      - key: LOG_LEVEL
+        value: info
+
+      # ── Network and routing ───────────────────────────────────────────────────
+      # Set PUBLIC_APP_URL, WEB_URL, and CORS_ALLOWED_ORIGINS to the actual
+      # Render HTTPS service URL after the service is first created.
+      # Example: https://avs-college-portal.onrender.com
+      - key: PUBLIC_APP_URL
+        sync: false
       - key: WEB_URL
-        value: https://avs-college-web.onrender.com
+        sync: false
       - key: CORS_ALLOWED_ORIGINS
-        value: https://avs-college-web.onrender.com
+        sync: false
+      - key: API_PREFIX
+        value: /api/v1
       - key: TRUST_PROXY
         value: "1"
-      - key: SWAGGER_ENABLED
-        value: "false"
-      - key: SEED_DEVELOPMENT_DATA
-        value: "false"
+
+      # ── Rate limiting (safe production defaults) ──────────────────────────────
+      - key: GLOBAL_RATE_LIMIT_TTL_MS
+        value: "60000"
+      - key: GLOBAL_RATE_LIMIT_MAX
+        value: "120"
+      - key: LOGIN_RATE_LIMIT_TTL_MS
+        value: "60000"
+      - key: LOGIN_RATE_LIMIT_MAX
+        value: "10"
+
+      # ── Security ──────────────────────────────────────────────────────────────
       - key: COOKIE_SECURE
         value: "true"
       - key: COOKIE_SAME_SITE
         value: lax
+      - key: SWAGGER_ENABLED
+        value: "false"
+      - key: SEED_DEVELOPMENT_DATA
+        value: "false"
+
+      # ── Database ──────────────────────────────────────────────────────────────
+      # DATABASE_MODE: use EXTERNAL_PERSISTENT (recommended) for a persistent
+      # PostgreSQL provider such as Supabase, Neon, or Railway.
+      # Use RENDER_FREE_PILOT only for temporary 30-day pilot testing.
+      - key: DATABASE_MODE
+        value: EXTERNAL_PERSISTENT
       - key: DATABASE_URL
-        fromDatabase:
-          name: avs-college-postgres
-          property: connectionString
+        sync: false
+      - key: DIRECT_DATABASE_URL
+        sync: false
       - key: DATABASE_POOL_MAX
-        value: 10
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: avs-college-redis
-          property: connectionString
+        value: "5"
+      - key: MIGRATION_BACKUP_REQUIRED
+        value: "true"
+
+      # ── JWT and auth secrets (set in Render dashboard) ────────────────────────
       - key: JWT_ACCESS_SECRET
-        generateValue: true
+        sync: false
       - key: JWT_REFRESH_SECRET
-        generateValue: true
+        sync: false
+      - key: JWT_ACCESS_EXPIRY
+        value: 15m
+      - key: JWT_REFRESH_EXPIRY
+        value: 7d
       - key: CSRF_SECRET
-        generateValue: true
+        sync: false
+      - key: QR_TOKEN_SECRET
+        sync: false
       - key: FEEDBACK_SUBMISSION_SECRET
-        generateValue: true
+        sync: false
+      - key: BACKUP_TRIGGER_SECRET
+        sync: false
       - key: PASSWORD_PEPPER
-        generateValue: true
-      - key: DEVELOPMENT_COLLEGE_CODE
-        value: "6201"
-      - key: PRODUCTION_COLLEGE_NAME
-        value: AVS Engineering College
-      - key: PRODUCTION_ADMIN_IDENTITY_ID
-        value: ADM001
-      - key: DEVELOPMENT_ADMIN_NAME
-        value: Main Administrator
-      - key: DEVELOPMENT_ADMIN_EMAIL
         sync: false
-      - key: DEVELOPMENT_ADMIN_PASSWORD
+
+      # ── Redis (optional — falls back to single-instance Socket.IO) ───────────
+      # Set REDIS_URL for durable BullMQ queues and multi-process messaging.
+      # Without Redis, queued imports and delivery tasks may not persist
+      # across sleep/wake cycles on the free tier.
+      - key: REDIS_URL
         sync: false
+
+      # ── S3-compatible object storage ─────────────────────────────────────────
+      # Required for profile photos, announcements, issue attachments, etc.
+      # Compatible providers: Cloudflare R2, Backblaze B2, Supabase Storage.
       - key: S3_ENDPOINT
         sync: false
       - key: S3_REGION
-        sync: false
+        value: us-east-1
       - key: S3_BUCKET
         sync: false
       - key: S3_ACCESS_KEY
@@ -83,60 +113,48 @@ services:
         sync: false
       - key: S3_FORCE_PATH_STYLE
         value: "true"
+
+      # ── Google Drive (private backup and file storage) ────────────────────────
       - key: GOOGLE_DRIVE_ENABLED
-        value: "false"
+        value: "true"
       - key: GOOGLE_DRIVE_OWNER_EMAIL
         value: devanand.s2008@gmail.com
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_OAUTH_REFRESH_TOKEN
+        sync: false
       - key: GOOGLE_OAUTH_REDIRECT_URI
-        value: https://avs-college-api.onrender.com/api/v1/admin/storage/google-drive/callback
+        sync: false
+      - key: GOOGLE_DRIVE_ROOT_FOLDER_ID
+        sync: false
+      - key: GOOGLE_DRIVE_BACKUP_FOLDER_ID
+        sync: false
+      - key: GOOGLE_DRIVE_FILES_FOLDER_ID
+        sync: false
       - key: GOOGLE_DRIVE_ENCRYPTION_KEY
-        generateValue: true
+        sync: false
+
+      # ── Backup encryption ─────────────────────────────────────────────────────
+      # Generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
       - key: BACKUP_ENCRYPTION_KEY
-        generateValue: true
+        sync: false
+      - key: BACKUP_ENCRYPTION_KEY_VERSION
+        value: "1"
       - key: BACKUP_SCHEDULE_ENABLED
         value: "false"
-      - key: EMAIL_ENABLED
-        value: "false"
-      - key: WHATSAPP_ENABLED
-        value: "false"
+      - key: BACKUP_DAILY_RETENTION
+        value: "30"
+      - key: BACKUP_WEEKLY_RETENTION
+        value: "12"
+      - key: BACKUP_MONTHLY_RETENTION
+        value: "12"
+
+      # ── AVS Bot (optional) ────────────────────────────────────────────────────
       - key: AVS_BOT_ENABLED
         value: "false"
-      - key: MALWARE_SCAN_ENABLED
-        value: "false"
-      - key: STUDENT_IMPORT_ENABLED
-        value: "true"
-      - key: FORCE_PASSWORD_CHANGE
-        value: "true"
-      - key: MAX_EXCEL_FILE_SIZE_MB
-        value: 10
-      - key: MAX_EXCEL_ROWS
-        value: 5000
-
-  - type: web
-    name: avs-college-web
-    runtime: docker
-    plan: starter
-    region: singapore
-    dockerContext: .
-    dockerfilePath: ./apps/web/Dockerfile
-    autoDeployTrigger: checksPass
-    healthCheckPath: /login
-    maxShutdownDelaySeconds: 60
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: 3000
-      - key: NEXT_PUBLIC_API_URL
-        value: https://avs-college-api.onrender.com/api/v1
-      - key: NEXT_PUBLIC_SOCKET_URL
-        value: wss://avs-college-api.onrender.com/realtime
-
-databases:
-  - name: avs-college-postgres
-    plan: basic-256mb
-    region: singapore
-    postgresMajorVersion: "17"
-    databaseName: college_management
-    user: college_app
-    ipAllowList: []
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false

@@ -548,7 +548,10 @@ export class LocationsService {
   }
 
   private async qrPayload(room: { id: string; code: string; name: string; roomNumber: string | null; roomType: string; qrToken: string; floor: { name: string; block: { name: string; campus: { name: string } } } }) {
-    const webUrl = this.config.get<string>("WEB_URL", "http://localhost:3000").replace(/\/$/, "");
+    const webUrl = (
+      this.config.get<string>("PUBLIC_APP_URL") ??
+      this.config.get<string>("WEB_URL", "http://localhost:3000")
+    ).replace(/\/$/, "");
     const reportUrl = `${webUrl}/report-issue?roomToken=${room.qrToken}`;
     const dataUrl = await QRCode.toDataURL(reportUrl, { errorCorrectionLevel: "M", margin: 1, width: 512 });
     return { ...room, reportUrl, dataUrl };

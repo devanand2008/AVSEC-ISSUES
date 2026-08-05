@@ -4,7 +4,7 @@ const CONFIGURED_API_URL =
   process.env.NEXT_PUBLIC_API_URL ??
   process.env.VITE_API_BASE_URL ??
   process.env.API_URL ??
-  "http://localhost:4000/api/v1";
+  "/api/v1";
 const REQUEST_TIMEOUT_MS = 30_000;
 const BLOB_REQUEST_TIMEOUT_MS = 60_000;
 let refreshPromise: Promise<void> | null = null;

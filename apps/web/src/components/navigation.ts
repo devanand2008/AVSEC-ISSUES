@@ -409,8 +409,8 @@ export const navigation: NavigationItem[] = [
     any: ["settings.read", "settings.manage", "integrations.manage"],
   },
   {
-    href: "/settings/storage",
-    label: "Storage & backups",
+    href: "/admin/settings/database-backups",
+    label: "Database & backups",
     icon: HardDrive,
     any: ["settings.read", "integrations.manage", "backups.manage"],
   },

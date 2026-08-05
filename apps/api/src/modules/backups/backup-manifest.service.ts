@@ -39,18 +39,19 @@ function parseManifest(value: unknown): BackupManifest {
     || !BACKUP_ID_PATTERN.test(item.id)
     || typeof item.createdAt !== "string"
     || Number.isNaN(Date.parse(item.createdAt))
-    || item.artifact?.fileName !== `${item.id}.avsbak`
+    || typeof item.artifact?.fileName !== "string"
+    || !/^[A-Za-z0-9._-]+$/u.test(item.artifact.fileName)
     || item.artifact.format !== "avs-aes-256-gcm-v1"
     || !isFiniteNonNegative(item.artifact.bytes)
     || !HASH_PATTERN.test(item.artifact.sha256 ?? "")
-    || item.dump?.format !== "postgresql-custom"
-    || !isFiniteNonNegative(item.dump.bytes)
-    || !HASH_PATTERN.test(item.dump.sha256 ?? "")
+    || !["postgresql-custom", "postgresql-plain-sql"].includes(item.dump?.format ?? "")
+    || !isFiniteNonNegative(item.dump?.bytes)
+    || !HASH_PATTERN.test(item.dump?.sha256 ?? "")
     || item.encryption?.algorithm !== "aes-256-gcm"
     || !KEY_ID_PATTERN.test(item.encryption.keyId ?? "")
     || typeof item.verification?.verifiedAt !== "string"
     || Number.isNaN(Date.parse(item.verification.verifiedAt))
-    || item.verification.pgRestoreList !== true
+    || (item.verification.pgRestoreList !== true && item.verification.sqlReadable !== true)
     || !HASH_PATTERN.test(item.manifestHmacSha256 ?? "")
   ) {
     throw new Error("Manifest structure is invalid.");

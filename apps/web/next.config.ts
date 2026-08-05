@@ -39,9 +39,9 @@ function websocketOrigin(value: string | undefined): string | undefined {
 const configuredApiUrl =
   process.env.NEXT_PUBLIC_API_URL ??
   process.env.VITE_API_BASE_URL ??
-  "http://localhost:4000/api/v1";
+  "/api/v1";
 const configuredSocketUrl =
-  process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:4000/realtime";
+  process.env.NEXT_PUBLIC_SOCKET_URL ?? "/realtime";
 
 const apiOrigin = origin(configuredApiUrl);
 const socketOrigin = origin(configuredSocketUrl);

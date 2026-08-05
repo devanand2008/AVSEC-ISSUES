@@ -1,0 +1,131 @@
+name: Daily PostgreSQL SQL backup
+
+on:
+  schedule:
+    - cron: "30 20 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avs-daily-postgres-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+      BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GOOGLE_DRIVE_BACKUP_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_BACKUP_FOLDER_ID }}
+      GOOGLE_DRIVE_OWNER_EMAIL: devanand.s2008@gmail.com
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Mask and validate protected configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in "$BACKUP_DATABASE_URL" "$BACKUP_ENCRYPTION_KEY" "$GOOGLE_OAUTH_CLIENT_ID" "$GOOGLE_OAUTH_CLIENT_SECRET" "$GOOGLE_OAUTH_REFRESH_TOKEN" "$GOOGLE_DRIVE_BACKUP_FOLDER_ID"; do
+            test -n "$value"
+            echo "::add-mask::$value"
+          done
+
+      - name: Install PostgreSQL client tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+          pg_dump --version
+          psql --version
+
+      - name: Create IST artifact names
+        id: names
+        shell: bash
+        run: |
+          set -euo pipefail
+          work_dir="$RUNNER_TEMP/avs-backup-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          install -d -m 700 "$work_dir"
+          timestamp="$(TZ=Asia/Kolkata date +'%Y-%m-%d_%H-%M-%S')"
+          backup_id="avs-${timestamp}-IST"
+          echo "BACKUP_WORK_DIR=$work_dir" >> "$GITHUB_ENV"
+          echo "BACKUP_ID=$backup_id" >> "$GITHUB_ENV"
+          echo "FULL_SQL=$work_dir/avs_portal_full_${timestamp}_IST.sql" >> "$GITHUB_ENV"
+          echo "FULL_GZIP=$work_dir/avs_portal_full_${timestamp}_IST.sql.gz" >> "$GITHUB_ENV"
+          echo "FULL_ENCRYPTED=$work_dir/avs_portal_full_${timestamp}_IST.sql.gz.enc" >> "$GITHUB_ENV"
+          echo "SCHEMA_SQL=$work_dir/avs_portal_schema_${timestamp}_IST.sql" >> "$GITHUB_ENV"
+          echo "MANIFEST=$work_dir/avs_portal_manifest_${timestamp}_IST.json" >> "$GITHUB_ENV"
+          echo "CHECKSUM=$work_dir/avs_portal_checksum_${timestamp}_IST.sha256" >> "$GITHUB_ENV"
+          echo "BACKUP_LOG=$work_dir/avs_portal_backup_log_${timestamp}_IST.json" >> "$GITHUB_ENV"
+
+      - name: Generate readable full and schema SQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          pg_dump --format=plain --no-owner --no-privileges --clean --if-exists --encoding=UTF8 --file="$FULL_SQL" "$BACKUP_DATABASE_URL"
+          pg_dump --schema-only --format=plain --no-owner --no-privileges --encoding=UTF8 --file="$SCHEMA_SQL" "$BACKUP_DATABASE_URL"
+          test -s "$FULL_SQL"
+          test -s "$SCHEMA_SQL"
+          grep -Eq 'CREATE (TABLE|SCHEMA)' "$FULL_SQL"
+          grep -Eq 'CREATE (TABLE|SCHEMA)' "$SCHEMA_SQL"
+          grep -Eq '^(COPY|INSERT INTO) ' "$FULL_SQL"
+
+      - name: Capture migration and table-count metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          migration="$(psql "$BACKUP_DATABASE_URL" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=on --command='SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1')"
+          counts="$(psql "$BACKUP_DATABASE_URL" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=on --command="SELECT json_build_object('users',(SELECT count(*) FROM users),'campuses',(SELECT count(*) FROM campuses),'attendanceRecords',(SELECT count(*) FROM attendance_records),'issues',(SELECT count(*) FROM issues),'auditLogs',(SELECT count(*) FROM audit_logs))::text")"
+          echo "PRISMA_MIGRATION_VERSION=$migration" >> "$GITHUB_ENV"
+          echo "BACKUP_TABLE_COUNTS_JSON=$counts" >> "$GITHUB_ENV"
+
+      - name: Compress, encrypt, checksum, and build manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          gzip -9 -c "$FULL_SQL" > "$FULL_GZIP"
+          node scripts/backup-crypto.mjs encrypt "$FULL_GZIP" "$FULL_ENCRYPTED"
+          sha256sum "$FULL_SQL" "$FULL_ENCRYPTED" "$SCHEMA_SQL" > "$CHECKSUM"
+          node scripts/build-backup-manifest.mjs "$FULL_SQL" "$FULL_ENCRYPTED" "$SCHEMA_SQL" "$CHECKSUM" "$MANIFEST"
+          test -s "$FULL_ENCRYPTED"
+          test -s "$CHECKSUM"
+          test -s "$MANIFEST"
+
+      - name: Verify encrypted round trip
+        shell: bash
+        run: |
+          set -euo pipefail
+          verify_gzip="$BACKUP_WORK_DIR/verify.sql.gz"
+          verify_sql="$BACKUP_WORK_DIR/verify.sql"
+          node scripts/backup-crypto.mjs decrypt "$FULL_ENCRYPTED" "$verify_gzip"
+          gzip -dc "$verify_gzip" > "$verify_sql"
+          test "$(sha256sum "$FULL_SQL" | cut -d' ' -f1)" = "$(sha256sum "$verify_sql" | cut -d' ' -f1)"
+          grep -Eq 'CREATE (TABLE|SCHEMA)' "$verify_sql"
+          rm -f "$verify_gzip" "$verify_sql"
+
+      - name: Upload privately to Google Drive and verify metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/google-drive-backup.mjs "$FULL_ENCRYPTED" "$SCHEMA_SQL" "$CHECKSUM" "$MANIFEST"
+          node -e "const fs=require('fs');fs.writeFileSync(process.env.BACKUP_LOG,JSON.stringify({backupId:process.env.BACKUP_ID,status:'COMPLETED',uploaded:true,verified:true,finishedAt:new Date().toISOString()},null,2)+'\n',{mode:0o600})"
+
+      - name: Delete temporary unencrypted SQL and artifacts
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -n "${BACKUP_WORK_DIR:-}" ] && [[ "$BACKUP_WORK_DIR" == "$RUNNER_TEMP"/avs-backup-* ]]; then
+            find "$BACKUP_WORK_DIR" -type f -exec shred -u {} \; 2>/dev/null || true
+            rm -rf -- "$BACKUP_WORK_DIR"
+          fi

@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { ValidationPipe } from "@nestjs/common";
+import { RequestMethod, ValidationPipe } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
@@ -17,7 +17,8 @@ async function bootstrap(): Promise<void> {
     bufferLogs: true,
     rawBody: true,
   });
-  app.useLogger(app.get(Logger));
+  const logger = app.get(Logger);
+  app.useLogger(logger);
   const config = app.get(ConfigService);
   const prefix = config.get<string>("API_PREFIX", "api/v1");
   const trustedProxyHops = config.get<number | false>("TRUST_PROXY", false);
@@ -26,7 +27,14 @@ async function bootstrap(): Promise<void> {
     app.getHttpAdapter().getInstance().set("trust proxy", trustedProxyHops);
   }
 
-  app.setGlobalPrefix(prefix);
+  app.setGlobalPrefix(prefix, {
+    exclude: [
+      { path: "health", method: RequestMethod.GET },
+      { path: "health/live", method: RequestMethod.GET },
+      { path: "health/ready", method: RequestMethod.GET },
+      { path: "health/ready/dependencies", method: RequestMethod.GET },
+    ],
+  });
   app.use(cookieParser());
   app.use(compression());
   app.use(
@@ -75,9 +83,23 @@ async function bootstrap(): Promise<void> {
     }),
   );
   app.useGlobalInterceptors(new SerializationInterceptor());
-  const socketAdapter = new RedisIoAdapter(app);
-  await socketAdapter.connect(config.getOrThrow<string>("REDIS_URL"));
-  app.useWebSocketAdapter(socketAdapter);
+  const redisUrl = config.get<string>("REDIS_URL");
+  if (redisUrl) {
+    const socketAdapter = new RedisIoAdapter(app);
+    try {
+      await socketAdapter.connect(redisUrl);
+      app.useWebSocketAdapter(socketAdapter);
+    } catch (error) {
+      logger.warn(
+        { error: error instanceof Error ? error.message : "unknown" },
+        "Redis is unavailable; using the single-instance Socket.IO adapter.",
+      );
+    }
+  } else {
+    logger.warn(
+      "REDIS_URL is not configured; using the single-instance Socket.IO adapter.",
+    );
+  }
   app.enableShutdownHooks();
 
   if (config.get<boolean>("SWAGGER_ENABLED", false)) {
@@ -100,7 +122,8 @@ async function bootstrap(): Promise<void> {
     );
   }
 
-  await app.listen(config.get<number>("PORT", 4000), "0.0.0.0");
+  const port = Number(config.get<number>("PORT", 10000));
+  await app.listen(port, "0.0.0.0");
 }
 
 void bootstrap();

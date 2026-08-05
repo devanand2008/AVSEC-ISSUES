@@ -1748,7 +1748,10 @@ export class FeedbackService {
   }
 
   private webFeedbackUrl(token: string): string {
-    return `${this.config.get<string>("WEB_URL", "http://localhost:3000").replace(/\/$/, "")}/feedback/scan/${token}`;
+    const publicAppUrl =
+      this.config.get<string>("PUBLIC_APP_URL") ??
+      this.config.get<string>("WEB_URL", "http://localhost:3000");
+    return `${publicAppUrl.replace(/\/$/, "")}/feedback/scan/${token}`;
   }
 
   private hashIp(ip?: string): string | undefined {

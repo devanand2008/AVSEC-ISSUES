@@ -52,6 +52,11 @@ export const environmentSchema = z
     NODE_ENV: z
       .enum(["development", "test", "production"])
       .default("development"),
+    APP_NAME: z.string().trim().min(1).default("AVS College Management System"),
+    APP_TIMEZONE: z.string().trim().min(1).default("Asia/Kolkata"),
+    DATABASE_MODE: z
+      .enum(["EXTERNAL_PERSISTENT", "RENDER_FREE_PILOT"])
+      .default("EXTERNAL_PERSISTENT"),
     PORT: z.coerce.number().int().min(1).max(65535).default(4000),
     API_PREFIX: z
       .string()
@@ -60,6 +65,10 @@ export const environmentSchema = z
       .default("api/v1")
       .transform((value) => value.replace(/^\/+|\/+$/g, "")),
     WEB_URL: z.url().default("http://localhost:3000"),
+    PUBLIC_APP_URL: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.url().optional(),
+    ),
     CORS_ALLOWED_ORIGINS: optionalString,
     TRUST_PROXY: trustProxy,
     GLOBAL_RATE_LIMIT_TTL_MS: z.coerce
@@ -83,10 +92,13 @@ export const environmentSchema = z
     LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1_000).default(10),
     POSTGRES_PASSWORD: optionalString,
     DATABASE_URL: z.string().min(1),
+    DIRECT_DATABASE_URL: optionalString,
     DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(20),
     REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
     JWT_ACCESS_SECRET: z.string().min(32),
     JWT_REFRESH_SECRET: z.string().min(32),
+    QR_TOKEN_SECRET: optionalSecret,
+    BACKUP_TRIGGER_SECRET: optionalSecret,
     JWT_ACCESS_EXPIRY: z.string().default("15m"),
     JWT_REFRESH_EXPIRY: z.string().default("7d"),
     AUTH_REFRESH_DATABASE_TIMEOUT_MS: z.coerce
@@ -122,6 +134,7 @@ export const environmentSchema = z
     ),
     GOOGLE_OAUTH_CLIENT_ID: optionalString,
     GOOGLE_OAUTH_CLIENT_SECRET: optionalSecret,
+    GOOGLE_OAUTH_REFRESH_TOKEN: optionalSecret,
     GOOGLE_OAUTH_REDIRECT_URI: z.preprocess(
       (value) => (value === "" ? undefined : value),
       z.url().optional(),

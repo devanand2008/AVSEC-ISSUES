@@ -40,7 +40,6 @@ mkcert-master/*.crt
 
 # ── Docker / CI (prevent recursive context) ──
 docker-compose*.yml
-Dockerfile
 **/Dockerfile
 
 # ── Version control and CI ──
@@ -64,6 +63,10 @@ Dockerfile
 *.log
 *.err.log
 *.out.log
+*.sql
+*.dump
+*.backup
+temp
 
 # ── Root-level legacy files (not part of the NestJS/Next.js app) ──
 Attendance.html
@@ -82,7 +85,7 @@ docs
 
 # ── Operational directories ──
 backups
-scripts
+scripts/*
 worker management system2
 .codex-run
 artifacts
@@ -109,4 +112,12 @@ logs
 !packages/**/tsconfig*.json
 !package.json
 !package-lock.json
+!Dockerfile
+!scripts/render-start.sh
+!scripts/unified-server.mjs
+!scripts/assert-migration-safety.mjs
+!scripts/backup-crypto.mjs
+!scripts/build-backup-manifest.mjs
+!scripts/google-drive-backup.mjs
+!scripts/test-sql-restore.sh
 apps/flutter_app
