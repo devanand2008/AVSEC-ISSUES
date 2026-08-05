@@ -1,7 +1,9 @@
 # Google Cloud deployment audit
 
-Audit date: 5 August 2026  
-Repository: `https://github.com/devanand2008/AVSEC-ISSUES`  
+Audit date: 5 August 2026
+
+Repository: `https://github.com/devanand2008/AVSEC-ISSUES`
+
 Audited commit: `00210910af38c66d298095b86c85d166169ecf51` (`main`, synchronized with `origin/main`)
 
 ## Deployment gate status

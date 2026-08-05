@@ -1,8 +1,11 @@
 # Google Cloud resource plan
 
-Plan date: 5 August 2026  
-Application: AVS College Management System  
-Default region: `asia-south1`  
+Plan date: 5 August 2026
+
+Application: AVS College Management System
+
+Default region: `asia-south1`
+
 Application timezone: `Asia/Kolkata`
 
 ## Approval gate
@@ -19,7 +22,8 @@ No Google Cloud resources may be created from this plan until the authenticated 
 | Region | Proposed `asia-south1`; not configured in gcloud |
 | Primary requested identity | `devanand.s2008@gmail.com` (user-provided, not yet authenticated) |
 
-Suggested project display name: `AVS College Management System`  
+Suggested project display name: `AVS College Management System`
+
 Suggested project ID pattern: `avs-college-management-<unique-suffix>`
 
 ## Proposed production resources requiring approval
