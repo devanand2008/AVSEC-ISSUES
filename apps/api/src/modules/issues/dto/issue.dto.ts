@@ -1,12 +1,18 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsBoolean, IsDateString, IsEnum, IsOptional, IsString, IsUUID, Length, MaxLength } from "class-validator";
+import { Transform } from "class-transformer";
+import { IsBoolean, IsDateString, IsEnum, IsIn, IsOptional, IsString, IsUUID, Length, Matches, MaxLength } from "class-validator";
 import { IssuePriority, IssueStatus } from "../../../generated/prisma/enums";
 
 export class CreateIssueDto {
-  @ApiProperty() @IsUUID() roomId!: string;
+  @ApiPropertyOptional({ enum: ["ROOM", "AREA"] }) @IsOptional() @IsIn(["ROOM", "AREA"]) locationType?: "ROOM" | "AREA";
+  @ApiPropertyOptional() @IsOptional() @IsUUID() floorId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() roomId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() areaId?: string;
+  @ApiPropertyOptional() @IsOptional() @Transform(({ value }) => typeof value === "string" ? value.trim() : value) @IsString() @MaxLength(150) @Matches(/^(?!.*(?:<|>|javascript:|script\b))[\s\S]*$/i, { message: "Custom area name contains unsafe content." }) customAreaName?: string;
   @ApiProperty() @IsUUID() categoryId!: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() issueTypeId?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() assetId?: string;
+  @ApiPropertyOptional() @IsOptional() @Transform(({ value }) => typeof value === "string" ? value.trim() : value) @IsString() @MaxLength(150) @Matches(/^(?!.*(?:<|>|javascript:|script\b))[\s\S]*$/i, { message: "Custom asset name contains unsafe content." }) customAssetName?: string;
   @ApiProperty() @IsString() @Length(3, 160) title!: string;
   @ApiProperty() @IsString() @Length(10, 5000) description!: string;
   @ApiPropertyOptional({ enum: IssuePriority }) @IsOptional() @IsEnum(IssuePriority) prioritySuggestion?: IssuePriority;

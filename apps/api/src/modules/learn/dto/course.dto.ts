@@ -176,6 +176,17 @@ export class CreateCourseAssessmentDto {
   @ApiProperty({ required: false })
   @IsOptional()
   questionsJson?: unknown;
+
+  @ApiProperty({ required: false }) @IsOptional() @IsString() @MaxLength(4000) instructions?: string;
+  @ApiProperty({ required: false }) @IsOptional() @IsInt() @Min(1) @Max(200) questionCount?: number;
+  @ApiProperty({ required: false }) @IsOptional() @IsInt() @Min(1) @Max(100) passPercentage?: number;
+  @ApiProperty({ required: false }) @IsOptional() @IsInt() @Min(1) @Max(360) timeLimitMinutes?: number;
+  @ApiProperty({ required: false }) @IsOptional() @IsInt() @Min(1) @Max(20) maximumAttempts?: number;
+  @ApiProperty({ required: false }) @IsOptional() @IsBoolean() shuffleQuestions?: boolean;
+  @ApiProperty({ required: false }) @IsOptional() @IsBoolean() shuffleOptions?: boolean;
+  @ApiProperty({ required: false }) @IsOptional() @IsBoolean() showCorrectAnswers?: boolean;
+  @ApiProperty({ required: false }) @IsOptional() @IsBoolean() showExplanations?: boolean;
+  @ApiProperty({ enum: ["DRAFT", "PUBLISHED"], required: false }) @IsOptional() @IsIn(["DRAFT", "PUBLISHED"]) status?: "DRAFT" | "PUBLISHED";
 }
 
 export class CompleteLessonDto {
@@ -201,15 +212,16 @@ export class RecordLearningProgressDto {
 }
 
 export class SubmitAssessmentDto {
+  @ApiProperty({ required: false }) @IsOptional() @IsUUID() attemptId?: string;
   @ApiProperty({ description: "Question IDs mapped to selected option indexes or source code." })
   @IsObject()
-  answersJson!: Record<string, string | number>;
+  answersJson!: Record<string, string | number | string[] | number[]>;
 }
 
 export class RunLearningCodeDto {
-  @ApiProperty({ enum: ["c", "cpp", "java", "python", "javascript", "sql"] })
+  @ApiProperty({ enum: ["c", "cpp", "java", "python", "javascript"] })
   @IsString()
-  @IsIn(["c", "cpp", "java", "python", "javascript", "sql"])
+  @IsIn(["c", "cpp", "java", "python", "javascript"])
   language!: string;
 
   @ApiProperty()

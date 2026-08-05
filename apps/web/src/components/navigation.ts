@@ -209,7 +209,7 @@ export const navigation: NavigationItem[] = [
     href: "/attendance/corrections",
     label: "Attendance corrections",
     icon: ShieldCheck,
-    any: ["attendance.correction.approve"],
+    any: ["attendance.correction.request", "attendance.correction.approve"],
   },
   { href: "/issues", label: "Issues", icon: FileWarning },
   {
@@ -475,4 +475,3 @@ export function getMobileBottomNav(roles: readonly string[] = []): BottomNavItem
     { href: "/profile/me", label: "Profile", iconName: "profile" },
   ];
 }
-

@@ -1,11 +1,14 @@
 import 'package:avs_college_flutter/core/network/avs_api_client.dart';
 import 'package:avs_college_flutter/features/auth/auth_user.dart';
+import 'package:avs_college_flutter/features/avs_bot/avs_bot_screen.dart';
 import 'package:avs_college_flutter/features/home/app_shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('student shell exposes the production navigation', (tester) async {
+  testWidgets('student shell exposes the production navigation', (
+    tester,
+  ) async {
     const user = AuthUser(
       id: '2eeff776-d430-4de6-bd23-d8c7372ec73f',
       fullName: 'AVS Student',
@@ -29,5 +32,33 @@ void main() {
     expect(find.text('Attendance'), findsOneWidget);
     expect(find.text('Messages'), findsOneWidget);
     expect(find.text('Profile'), findsOneWidget);
+  });
+
+  testWidgets('overview shows AVS Bot for an authorised user', (tester) async {
+    const user = AuthUser(
+      id: '2eeff776-d430-4de6-bd23-d8c7372ec73f',
+      fullName: 'AVS Student',
+      mustChangePassword: false,
+      profileCompletionStatus: 'APPROVED',
+      roles: ['STUDENT'],
+      permissions: ['ai.use'],
+      email: 'student@avsenggcollege.ac.in',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AvsAppShell(
+          user: user,
+          client: AvsApiClient(baseUrl: 'https://college.test/api/v1'),
+          onLogout: () async {},
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('overview-avs-bot-card')), findsOneWidget);
+    expect(find.text('AVS Bot'), findsNWidgets(2));
+    await tester.tap(find.byKey(const Key('overview-avs-bot-card')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(AvsBotScreen), findsOneWidget);
   });
 }

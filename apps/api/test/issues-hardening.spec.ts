@@ -32,6 +32,9 @@ function setup() {
   const prisma = {
     issue: { findFirst: jest.fn() },
     room: { findFirst: jest.fn() },
+    floor: { findFirst: jest.fn() },
+    area: { findFirst: jest.fn() },
+    asset: { findFirst: jest.fn() },
     issueCategory: { findFirst: jest.fn() },
     qrCode: { findUnique: jest.fn() },
     user: { findFirst: jest.fn() },
@@ -98,6 +101,62 @@ describe("IssuesService authorization and assignment hardening", () => {
     expect(tx.issueOccurrence.create).toHaveBeenCalledWith({
       data: { issueId: duplicate.id, reporterUserId: user.id, description: "The ceiling fan has stopped." },
     });
+  });
+
+  it("validates a registered asset against the selected area", async () => {
+    const { service, prisma, tx } = setup();
+    const floorId = "00000000-0000-4000-8000-000000000030";
+    const areaId = "00000000-0000-4000-8000-000000000031";
+    const assetId = "00000000-0000-4000-8000-000000000032";
+    const categoryId = "00000000-0000-4000-8000-000000000033";
+    const duplicate = {
+      id: "00000000-0000-4000-8000-000000000034",
+      issueNumber: "ISS-2026-000034",
+      title: "Projector fault",
+      status: "ASSIGNED",
+      affectedUserCount: 1,
+      reporterId: user.id,
+      assignedToId: null,
+      priority: "MEDIUM",
+      teamId: null,
+      acknowledgementDueAt: null,
+      resolutionDueAt: null,
+    };
+    prisma.floor.findFirst.mockResolvedValue({
+      id: floorId,
+      blockId: "00000000-0000-4000-8000-000000000035",
+      block: {
+        id: "00000000-0000-4000-8000-000000000035",
+        campusId: "00000000-0000-4000-8000-000000000036",
+        campus: { id: "00000000-0000-4000-8000-000000000036" },
+      },
+    });
+    prisma.area.findFirst.mockResolvedValue({ id: areaId, floorId });
+    prisma.asset.findFirst.mockResolvedValue({ id: assetId, areaId });
+    prisma.issueCategory.findFirst.mockResolvedValue({ id: categoryId });
+    prisma.issue.findFirst.mockResolvedValue(duplicate);
+    tx.issueAffectedUser.findUnique.mockResolvedValue({ issueId: duplicate.id, userId: user.id });
+    tx.issue.update.mockResolvedValue({ ...duplicate, occurrenceCount: 2 });
+    tx.notification.create.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000037" });
+
+    await expect(service.create(user, {
+      locationType: "AREA",
+      floorId,
+      areaId,
+      assetId,
+      categoryId,
+      title: "Projector fault",
+      description: "The auditorium projector does not power on.",
+    }, "area-idempotency-key", { requestId: "request-area" })).resolves.toEqual(expect.objectContaining({
+      linkedToExisting: true,
+      id: duplicate.id,
+    }));
+    expect(prisma.asset.findFirst).toHaveBeenCalledWith({
+      where: { id: assetId, isActive: true, areaId },
+    });
+    expect(prisma.issue.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ roomId: null, areaId, customAreaName: null, assetId }),
+    }));
   });
 
   it("accepts a secure block QR token for issue submission inside that block", async () => {

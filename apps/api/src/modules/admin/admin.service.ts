@@ -99,7 +99,7 @@ export class AdminService {
     return this.prisma.issueEscalation.findMany({
       where: { issue: { collegeId: user.collegeId } },
       include: {
-        issue: { select: { id: true, issueNumber: true, title: true, status: true, priority: true, room: { select: { name: true } } } },
+        issue: { select: { id: true, issueNumber: true, title: true, status: true, priority: true, customAreaName: true, room: { select: { name: true } }, area: { select: { name: true } } } },
       },
       orderBy: { escalatedAt: "desc" },
       take: 200,
@@ -153,9 +153,10 @@ export class AdminService {
   /* ─── Asset management ─── */
   adminAssets(user: AuthPrincipal) {
     return this.prisma.asset.findMany({
-      where: { room: { floor: { block: { campus: { collegeId: user.collegeId } } } } },
+      where: { OR: [{ room: { floor: { block: { campus: { collegeId: user.collegeId } } } } }, { area: { floor: { block: { campus: { collegeId: user.collegeId } } } } }] },
       include: {
         room: { select: { id: true, name: true, code: true, floor: { select: { name: true, block: { select: { name: true, campus: { select: { name: true } } } } } } } },
+        area: { select: { id: true, name: true, code: true, floor: { select: { name: true, block: { select: { name: true, campus: { select: { name: true } } } } } } } },
         category: { select: { id: true, name: true } },
         _count: { select: { issues: true } },
       },
@@ -168,25 +169,30 @@ export class AdminService {
   }
 
   async createAsset(user: AuthPrincipal, input: CreateAssetDto, requestId: string) {
-    const room = await this.prisma.room.findFirst({ where: { id: input.roomId, isActive: true, floor: { block: { campus: { collegeId: user.collegeId } } } } });
-    if (!room) throw new BadRequestException("Room is not active in this college.");
+    if (Boolean(input.roomId) === Boolean(input.areaId)) throw new BadRequestException("Select exactly one room or area for the asset.");
+    const activeCampus = { collegeId: user.collegeId, isActive: true, archivedAt: null };
+    const room = input.roomId ? await this.prisma.room.findFirst({ where: { id: input.roomId, isActive: true, archivedAt: null, floor: { isActive: true, archivedAt: null, block: { isActive: true, archivedAt: null, campus: activeCampus } } } }) : null;
+    const area = input.areaId ? await this.prisma.area.findFirst({ where: { id: input.areaId, isActive: true, archivedAt: null, floor: { isActive: true, archivedAt: null, block: { isActive: true, archivedAt: null, campus: activeCampus } } } }) : null;
+    if (input.roomId && !room) throw new BadRequestException("Room is not active in this college.");
+    if (input.areaId && !area) throw new BadRequestException("Area is not active in this college.");
     const category = await this.prisma.assetCategory.findFirst({ where: { id: input.categoryId, isActive: true } });
     if (!category) throw new BadRequestException("Asset category is not active.");
     const asset = await this.prisma.asset.create({
       data: {
-        roomId: input.roomId,
+        roomId: input.roomId ?? null,
+        areaId: input.areaId ?? null,
         categoryId: input.categoryId,
         code: input.code.trim().toUpperCase(),
         name: input.name.trim(),
         serialNumber: input.serialNumber?.trim() || null,
       },
     });
-    await this.auditTrail.record({ actorId: user.id, action: "asset.created", entityType: "Asset", entityId: asset.id, afterValue: { code: asset.code, name: asset.name, roomId: asset.roomId }, requestId });
+    await this.auditTrail.record({ actorId: user.id, action: "asset.created", entityType: "Asset", entityId: asset.id, afterValue: { code: asset.code, name: asset.name, roomId: asset.roomId, areaId: asset.areaId }, requestId });
     return asset;
   }
 
   async updateAssetStatus(user: AuthPrincipal, id: string, input: UpdateAssetStatusDto, requestId: string) {
-    const existing = await this.prisma.asset.findFirst({ where: { id, room: { floor: { block: { campus: { collegeId: user.collegeId } } } } } });
+    const existing = await this.prisma.asset.findFirst({ where: { id, OR: [{ room: { floor: { block: { campus: { collegeId: user.collegeId } } } } }, { area: { floor: { block: { campus: { collegeId: user.collegeId } } } } }] } });
     if (!existing) throw new NotFoundException("Asset not found.");
     const asset = await this.prisma.asset.update({ where: { id }, data: { isActive: input.isActive } });
     await this.auditTrail.record({ actorId: user.id, action: "asset.status_updated", entityType: "Asset", entityId: id, beforeValue: { isActive: existing.isActive }, afterValue: { isActive: asset.isActive }, requestId });

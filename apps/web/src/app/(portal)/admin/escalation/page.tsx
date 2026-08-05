@@ -20,7 +20,9 @@ interface EscalationEvent {
     title: string;
     status: string;
     priority: string;
-    room: { name: string };
+    room: { name: string } | null;
+    area: { name: string } | null;
+    customAreaName: string | null;
   };
 }
 
@@ -53,7 +55,7 @@ export default function EscalationPage() {
           const isOverdue = event.nextEscalationAt && new Date(event.nextEscalationAt) < now;
           return <tr key={event.id}>
             <td><Link href={`/issues/${event.issue.id}`} style={{ fontWeight: 600, color: "var(--primary)" }}>{event.issue.issueNumber}</Link><br /><small className="muted">{event.issue.title}</small></td>
-            <td>{event.issue.room.name}</td>
+            <td>{event.issue.room?.name ?? event.issue.area?.name ?? event.issue.customAreaName ?? "Unspecified"}</td>
             <td><span className="badge" style={{ background: event.level >= 3 ? "#fef2f2" : event.level >= 2 ? "#fff7ed" : "#f0fdf4", color: event.level >= 3 ? "#dc2626" : event.level >= 2 ? "#d97706" : "#16a34a" }}>L{event.level}</span></td>
             <td><StatusBadge value={event.issue.priority} /></td>
             <td><StatusBadge value={event.issue.status} /></td>

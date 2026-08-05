@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, Send, ShieldCheck, Square } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { authenticatedStream, api, ApiError, idempotencyKey } from "@/lib/api";
@@ -16,19 +16,35 @@ interface SseEvent {
   event: string;
   data: Record<string, unknown>;
 }
+interface Conversation { id: string; title: string; updatedAt: string }
 
 export default function AvsBotPage() {
+  const queryClient = useQueryClient();
   const suggestions = useQuery({
     queryKey: ["avs-bot-suggestions"],
     queryFn: () => api.get<{ questions: string[] }>("/ai/suggested-questions"),
   });
-  const [conversationId, setConversationId] = useState<string>();
+  const [conversationId, setConversationId] = useState<string | null>();
   const [messages, setMessages] = useState<BotMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string>();
+  const [retryMessage, setRetryMessage] = useState<string>();
   const controller = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement | null>(null);
   const [streaming, setStreaming] = useState(false);
+  const conversations = useQuery({ queryKey: ["avs-bot-conversations"], queryFn: () => api.get<Conversation[]>("/ai/conversations") });
+  const activeConversationId = conversationId === undefined ? conversations.data?.[0]?.id : conversationId ?? undefined;
+  const history = useQuery({
+    queryKey: ["avs-bot-messages", activeConversationId],
+    queryFn: () => api.get<BotMessage[]>(`/ai/conversations/${activeConversationId}/messages`),
+    enabled: Boolean(activeConversationId && !streaming),
+  });
+
+  useEffect(() => {
+    if (!history.data || streaming) return;
+    const timeout = window.setTimeout(() => setMessages(history.data), 0);
+    return () => window.clearTimeout(timeout);
+  }, [history.data, streaming]);
 
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -41,6 +57,7 @@ export default function AvsBotPage() {
     if (!value || controller.current) return;
     setDraft("");
     setError(undefined);
+    setRetryMessage(undefined);
     const userId = idempotencyKey();
     const assistantId = `pending-${userId}`;
     setMessages((current) => [
@@ -55,7 +72,7 @@ export default function AvsBotPage() {
       const response = await authenticatedStream(
         "/ai/chat/stream",
         {
-          conversationId,
+          ...(activeConversationId ? { conversationId: activeConversationId } : {}),
           message: value,
           clientRequestId: userId,
         },
@@ -75,6 +92,7 @@ export default function AvsBotPage() {
       await readSse(response.body, (item) => {
         if (item.event === "conversation") {
           setConversationId(String(item.data.id));
+          void queryClient.invalidateQueries({ queryKey: ["avs-bot-conversations"] });
         } else if (item.event === "delta") {
           setMessages((current) =>
             current.map((entry) =>
@@ -145,10 +163,15 @@ export default function AvsBotPage() {
             : entry,
         ),
       );
-      if (!cancelled) setError(failureMessage);
+      if (!cancelled) {
+        setError(failureMessage);
+        setRetryMessage(value);
+      }
     } finally {
       controller.current = null;
       setStreaming(false);
+      void queryClient.invalidateQueries({ queryKey: ["avs-bot-conversations"] });
+      if (activeConversationId) void queryClient.invalidateQueries({ queryKey: ["avs-bot-messages", activeConversationId] });
     }
   }
 
@@ -168,6 +191,13 @@ export default function AvsBotPage() {
           <p className="page-subtitle">
             Ask about authorised college information and application features.
           </p>
+        </div>
+        <div className="button-row">
+          <select className="input" aria-label="AVS Bot conversation" value={activeConversationId ?? ""} onChange={(event) => { controller.current?.abort(); setConversationId(event.target.value || null); setMessages([]); }}>
+            <option value="">New conversation</option>
+            {conversations.data?.map((conversation) => <option key={conversation.id} value={conversation.id}>{conversation.title}</option>)}
+          </select>
+          <button type="button" className="btn btn-secondary" onClick={() => { controller.current?.abort(); setConversationId(null); setMessages([]); }}>New chat</button>
         </div>
       </div>
       <section
@@ -207,7 +237,8 @@ export default function AvsBotPage() {
             background: "#f8fafc",
           }}
         >
-          {!messages.length && (
+          {history.isLoading && <p className="muted">Loading conversation…</p>}
+          {!history.isLoading && !messages.length && (
             <div className="empty">
               <Bot size={42} style={{ margin: "0 auto 12px" }} />
               <strong>How can AVS Bot help?</strong>
@@ -254,7 +285,8 @@ export default function AvsBotPage() {
           ))}
           {error && (
             <div role="alert" className="error">
-              {error}
+              <span>{error}</span>{" "}
+              {retryMessage && <button type="button" className="btn btn-secondary" onClick={() => void send(retryMessage)}>Retry</button>}
             </div>
           )}
           <div ref={end} />

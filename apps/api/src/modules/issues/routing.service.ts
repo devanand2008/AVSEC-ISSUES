@@ -8,8 +8,9 @@ interface RouteInput {
   campusId: string;
   blockId: string;
   floorId: string;
-  roomId: string;
-  roomType: RoomType;
+  roomId: string | null;
+  areaId: string | null;
+  roomType: RoomType | null;
   departmentId: string | null;
   categoryId: string;
   issueTypeId: string | null;
@@ -40,8 +41,9 @@ export class RoutingService {
           { OR: [{ campusId: null }, { campusId: input.campusId }] },
           { OR: [{ blockId: null }, { blockId: input.blockId }] },
           { OR: [{ floorId: null }, { floorId: input.floorId }] },
-          { OR: [{ roomId: null }, { roomId: input.roomId }] },
-          { OR: [{ roomType: null }, { roomType: input.roomType }] },
+          { OR: [{ roomId: null }, ...(input.roomId ? [{ roomId: input.roomId }] : [])] },
+          { OR: [{ areaId: null }, ...(input.areaId ? [{ areaId: input.areaId }] : [])] },
+          { OR: [{ roomType: null }, ...(input.roomType ? [{ roomType: input.roomType }] : [])] },
           { OR: [{ departmentId: null }, ...(input.departmentId ? [{ departmentId: input.departmentId }] : [])] },
           { OR: [{ categoryId: null }, { categoryId: input.categoryId }] },
           { OR: [{ issueTypeId: null }, ...(input.issueTypeId ? [{ issueTypeId: input.issueTypeId }] : [])] },
@@ -77,10 +79,12 @@ export class RoutingService {
     return { teamId: fallback?.id ?? null, assignedToId, routingRuleId: null, fallback: true, reason, snapshot: { fallback: true, teamId: fallback?.id ?? null, assignedToId, reason } };
   }
 
-  private score(rule: { roomId: string | null; issueTypeId: string | null; categoryId: string | null; floorId: string | null; blockId: string | null; departmentId: string | null; campusId: string | null; assetId: string | null; roomType: RoomType | null }, input: RouteInput): number {
-    if (rule.roomId === input.roomId && rule.issueTypeId === input.issueTypeId && rule.issueTypeId) return 900;
-    if (rule.roomId === input.roomId && rule.categoryId === input.categoryId) return 800;
-    if (rule.roomId === input.roomId) return 700;
+  private score(rule: { roomId: string | null; areaId: string | null; issueTypeId: string | null; categoryId: string | null; floorId: string | null; blockId: string | null; departmentId: string | null; campusId: string | null; assetId: string | null; roomType: RoomType | null }, input: RouteInput): number {
+    if (input.roomId && rule.roomId === input.roomId && rule.issueTypeId === input.issueTypeId && rule.issueTypeId) return 900;
+    if (input.roomId && rule.roomId === input.roomId && rule.categoryId === input.categoryId) return 800;
+    if (input.areaId && rule.areaId === input.areaId && rule.categoryId === input.categoryId) return 780;
+    if (input.roomId && rule.roomId === input.roomId) return 700;
+    if (input.areaId && rule.areaId === input.areaId) return 680;
     if (rule.floorId === input.floorId && rule.categoryId === input.categoryId) return 600;
     if (rule.blockId === input.blockId && rule.categoryId === input.categoryId) return 500;
     if (rule.departmentId === input.departmentId && rule.departmentId && rule.categoryId === input.categoryId) return 400;

@@ -217,6 +217,13 @@ export const api = {
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   },
+  preview: async (path: string) => {
+    const previewWindow = window.open("", "_blank", "noopener,noreferrer");
+    const url = URL.createObjectURL(await requestBlob(path));
+    if (previewWindow) previewWindow.location.href = url;
+    else window.open(url, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
+  },
   upload: async (url: string, file: File, headers: HeadersInit = {}) => {
     const response = await fetch(url, { method: "PUT", body: file, headers });
     if (!response.ok)

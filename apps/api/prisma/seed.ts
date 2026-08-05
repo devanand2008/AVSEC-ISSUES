@@ -1012,6 +1012,18 @@ async function main() {
       roomType: "CLASSROOM",
     },
   });
+  const firstFloorCorridor = await prisma.area.upsert({
+    where: {
+      floorId_code: { floorId: room101.floorId, code: "CORRIDOR-EAST" },
+    },
+    create: {
+      floorId: room101.floorId,
+      code: "CORRIDOR-EAST",
+      name: "East Corridor",
+      description: "Development test area for issue reporting and asset routing.",
+    },
+    update: { isActive: true, archivedAt: null },
+  });
   const assetCategory = await prisma.assetCategory.upsert({
     where: { name: "Electrical Equipment" },
     create: { name: "Electrical Equipment" },
@@ -1026,6 +1038,16 @@ async function main() {
       name: "Ceiling Fan 1",
     },
     update: {},
+  });
+  await prisma.asset.upsert({
+    where: { code: "LIGHT-CORRIDOR-EAST-01" },
+    create: {
+      areaId: firstFloorCorridor.id,
+      categoryId: assetCategory.id,
+      code: "LIGHT-CORRIDOR-EAST-01",
+      name: "East Corridor Tube Light 1",
+    },
+    update: { areaId: firstFloorCorridor.id, roomId: null, isActive: true },
   });
 
   const categoryInputs: Array<[string, string, string[]]> = [

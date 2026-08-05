@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { AccessService } from "../../common/access/access.service";
 import type { AuthPrincipal } from "../../common/http/request-context";
+import { attendanceCredit } from "../attendance/attendance-value";
 import { PrismaService } from "../../database/prisma.service";
 import type { Prisma } from "../../generated/prisma/client";
 import { stringify } from "csv-stringify/sync";
@@ -21,7 +22,7 @@ export class ReportsService {
       this.prisma.issue.count({ where: { AND: [issueWhere, { resolvedAt: { gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()) } }] } }),
       this.prisma.notificationRecipient.count({ where: { userId: user.id, readAt: null } }),
       this.prisma.issue.findMany({ where: issueWhere, orderBy: { updatedAt: "desc" }, take: 5, select: { id: true, issueNumber: true, title: true, status: true, priority: true, updatedAt: true } }),
-      this.prisma.issue.findMany({ where: issueWhere, orderBy: { createdAt: "desc" }, take: 5000, select: { id: true, status: true, priority: true, createdAt: true, acknowledgedAt: true, resolvedAt: true, resolutionDueAt: true, escalationLevel: true, category: { select: { name: true } }, block: { select: { name: true } }, floor: { select: { name: true } }, room: { select: { name: true } }, department: { select: { name: true } }, assignedTo: { select: { fullName: true } }, team: { select: { name: true } }, asset: { select: { name: true, code: true } } } }),
+      this.prisma.issue.findMany({ where: issueWhere, orderBy: { createdAt: "desc" }, take: 5000, select: { id: true, status: true, priority: true, createdAt: true, acknowledgedAt: true, resolvedAt: true, resolutionDueAt: true, escalationLevel: true, customAreaName: true, category: { select: { name: true } }, block: { select: { name: true } }, floor: { select: { name: true } }, room: { select: { name: true } }, area: { select: { name: true } }, department: { select: { name: true } }, assignedTo: { select: { fullName: true } }, team: { select: { name: true } }, asset: { select: { name: true, code: true } } } }),
     ]);
     const acknowledged = analytics.filter((issue) => issue.acknowledgedAt);
     const resolved = analytics.filter((issue) => issue.resolvedAt);
@@ -50,22 +51,22 @@ export class ReportsService {
       issuesByFloor: breakdown(analytics.map((issue) => issue.floor.name)),
       issuesByDepartment: breakdown(analytics.map((issue) => issue.department?.name)),
       issuesByResponsiblePerson: breakdown(analytics.map((issue) => issue.assignedTo?.fullName ?? issue.team?.name)),
-      repeatProblemLocations: breakdown(analytics.map((issue) => issue.room.name)).filter((item) => item.count > 1).slice(0, 10),
+      repeatProblemLocations: breakdown(analytics.map((issue) => issue.room?.name ?? issue.area?.name ?? issue.customAreaName)).filter((item) => item.count > 1).slice(0, 10),
       frequentlyDamagedAssets: breakdown(analytics.map((issue) => issue.asset ? `${issue.asset.code} · ${issue.asset.name}` : null)).filter((item) => item.name !== "Unspecified").slice(0, 10),
       analyticsTruncated: analytics.length === 5000,
     };
   }
 
   async issuesCsv(user: AuthPrincipal, requestId: string, status?: string): Promise<Buffer> {
-    const allowedStatuses = ["NEW", "NEEDS_MANUAL_ASSIGNMENT", "ASSIGNED", "ACKNOWLEDGED", "IN_PROGRESS", "WAITING_FOR_MATERIAL", "WAITING_FOR_VENDOR", "ON_HOLD", "RESOLVED", "VERIFICATION_PENDING", "VERIFIED", "CLOSED", "REOPENED", "REJECTED", "CANCELLED"] as const;
+    const allowedStatuses = ["NEW", "NEEDS_MANUAL_ASSIGNMENT", "ASSIGNED", "ACKNOWLEDGED", "IN_PROGRESS", "WAITING_FOR_MATERIAL", "WAITING_FOR_PARTS", "WAITING_FOR_APPROVAL", "WAITING_FOR_VENDOR", "ON_HOLD", "OVERDUE", "RESOLVED", "VERIFICATION_PENDING", "VERIFIED", "CLOSED", "REOPENED", "REJECTED", "CANCELLED"] as const;
     const selectedStatus = allowedStatuses.find((item) => item === status);
     const issues = await this.prisma.issue.findMany({
       where: { AND: [this.access.issueWhere(user), ...(selectedStatus ? [{ status: selectedStatus }] : [])] },
       take: 10_000,
       orderBy: { createdAt: "desc" },
-      include: { campus: { select: { name: true } }, block: { select: { name: true } }, floor: { select: { name: true } }, room: { select: { code: true, name: true } }, department: { select: { code: true, name: true } }, category: { select: { name: true } }, issueType: { select: { name: true } }, reporter: { select: { collegeIdentityId: true, fullName: true } }, assignedTo: { select: { collegeIdentityId: true, fullName: true } }, team: { select: { name: true } } },
+      include: { campus: { select: { name: true } }, block: { select: { name: true } }, floor: { select: { name: true } }, room: { select: { code: true, name: true } }, area: { select: { code: true, name: true } }, department: { select: { code: true, name: true } }, category: { select: { name: true } }, issueType: { select: { name: true } }, reporter: { select: { collegeIdentityId: true, fullName: true } }, assignedTo: { select: { collegeIdentityId: true, fullName: true } }, team: { select: { name: true } } },
     });
-    const output = stringify(issues.map((issue) => ({ issue_number: issue.issueNumber, title: issue.title, status: issue.status, priority: issue.priority, campus: issue.campus.name, block: issue.block.name, floor: issue.floor.name, room_code: issue.room.code, room: issue.room.name, department: issue.department?.name ?? "", category: issue.category.name, problem: issue.issueType?.name ?? "Other", reporter_id: issue.reporter.collegeIdentityId, reporter: issue.reporter.fullName, assigned_to: issue.assignedTo?.fullName ?? issue.team?.name ?? "", acknowledgement_due_at: issue.acknowledgementDueAt?.toISOString() ?? "", resolution_due_at: issue.resolutionDueAt?.toISOString() ?? "", acknowledged_at: issue.acknowledgedAt?.toISOString() ?? "", resolved_at: issue.resolvedAt?.toISOString() ?? "", created_at: issue.createdAt.toISOString(), updated_at: issue.updatedAt.toISOString() })), { header: true });
+    const output = stringify(issues.map((issue) => ({ issue_number: issue.issueNumber, title: issue.title, status: issue.status, priority: issue.priority, campus: issue.campus.name, block: issue.block.name, floor: issue.floor.name, location_code: issue.room?.code ?? issue.area?.code ?? "", location: issue.room?.name ?? issue.area?.name ?? issue.customAreaName ?? "", department: issue.department?.name ?? "", category: issue.category.name, problem: issue.issueType?.name ?? "Other", reporter_id: issue.reporter.collegeIdentityId, reporter: issue.reporter.fullName, assigned_to: issue.assignedTo?.fullName ?? issue.team?.name ?? "", acknowledgement_due_at: issue.acknowledgementDueAt?.toISOString() ?? "", resolution_due_at: issue.resolutionDueAt?.toISOString() ?? "", acknowledged_at: issue.acknowledgedAt?.toISOString() ?? "", resolved_at: issue.resolvedAt?.toISOString() ?? "", created_at: issue.createdAt.toISOString(), updated_at: issue.updatedAt.toISOString() })), { header: true });
     await this.audit.record({ actorId: user.id, action: "issues.exported", entityType: "Issue", afterValue: { rows: issues.length, status: selectedStatus ?? null }, requestId });
     return Buffer.from(`\uFEFF${output}`, "utf8");
   }
@@ -145,7 +146,7 @@ export class ReportsService {
     const where = this.attendanceWhere(user);
     const records = await this.prisma.attendanceRecord.findMany({
       where: { session: { ...where, sessionDate: { gte: since } } },
-      select: { status: true, session: { select: { sessionDate: true } } },
+      select: { status: true, effectiveAttendanceValue: true, session: { select: { sessionDate: true } } },
     });
     const map = new Map<string, { date: string; present: number; absent: number; late: number; excused: number }>();
     for (let i = 0; i < cap; i++) {
@@ -157,8 +158,11 @@ export class ReportsService {
       const key = record.session.sessionDate.toISOString().slice(0, 10);
       if (!map.has(key)) continue;
       const slot = map.get(key)!;
-      if (record.status === "PRESENT") slot.present++;
-      else if (record.status === "ABSENT") slot.absent++;
+      if (["PRESENT", "HALF_DAY_PRESENT", "HALF_DAY_ABSENT"].includes(record.status)) {
+        const credit = attendanceCredit(record);
+        slot.present += credit;
+        slot.absent += 1 - credit;
+      } else if (record.status === "ABSENT") slot.absent++;
       else if (record.status === "LATE") slot.late++;
       else if (["ON_DUTY", "MEDICAL_LEAVE", "AUTHORIZED_LEAVE"].includes(record.status)) slot.excused++;
     }

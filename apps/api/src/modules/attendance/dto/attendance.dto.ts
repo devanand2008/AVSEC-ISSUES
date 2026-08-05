@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsDateString, IsEmail, IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min, MinLength, ValidateNested } from "class-validator";
-import { AttendanceCode } from "../../../generated/prisma/enums";
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsDateString, IsEmail, IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from "class-validator";
+import { AttendanceCode, AttendancePartStatus, SessionType } from "../../../generated/prisma/enums";
 
 export class CreateAttendanceSessionDto {
   @ApiProperty() @IsUUID() academicYearId!: string;
@@ -9,11 +9,16 @@ export class CreateAttendanceSessionDto {
   @ApiProperty() @IsUUID() subjectId!: string;
   @ApiProperty() @IsDateString({ strict: true }) sessionDate!: string;
   @ApiProperty() @IsInt() @Min(1) @Max(20) periodNumber!: number;
+  @ApiPropertyOptional({ enum: SessionType }) @IsOptional() @IsEnum(SessionType) sessionType?: SessionType;
+  @ApiPropertyOptional({ example: "09:00" }) @IsOptional() @Matches(/^([01]\d|2[0-3]):[0-5]\d$/) startTime?: string;
+  @ApiPropertyOptional({ example: "09:50" }) @IsOptional() @Matches(/^([01]\d|2[0-3]):[0-5]\d$/) endTime?: string;
 }
 
 export class AttendanceRecordDto {
   @ApiProperty() @IsUUID() studentUserId!: string;
   @ApiProperty({ enum: AttendanceCode }) @IsEnum(AttendanceCode) status!: AttendanceCode;
+  @ApiPropertyOptional({ enum: AttendancePartStatus }) @IsOptional() @IsEnum(AttendancePartStatus) morningStatus?: AttendancePartStatus;
+  @ApiPropertyOptional({ enum: AttendancePartStatus }) @IsOptional() @IsEnum(AttendancePartStatus) afternoonStatus?: AttendancePartStatus;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) note?: string;
 }
 

@@ -1,8 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import type { CreateBroadcastDto } from "./dto/broadcast.dto";
+import type { Prisma } from "../../generated/prisma/client";
 
 @Injectable()
 export class BroadcastService {
@@ -38,17 +39,55 @@ export class BroadcastService {
     return broadcast;
   }
 
+  async recipients(user: AuthPrincipal, filters: { page: number; pageSize: number; search?: string; role?: string; departmentId?: string; sectionId?: string; programmeId?: string; academicYearId?: string; semesterId?: string }) {
+    const page = Math.max(1, Number.isFinite(filters.page) ? filters.page : 1);
+    const pageSize = Math.min(100, Math.max(1, Number.isFinite(filters.pageSize) ? filters.pageSize : 20));
+    const search = filters.search?.trim().slice(0, 120);
+    const where: Prisma.UserWhereInput = { AND: [
+      { collegeId: user.collegeId, status: "ACTIVE", archivedAt: null },
+      ...(search ? [{ OR: [{ fullName: { contains: search, mode: "insensitive" as const } }, { collegeIdentityId: { contains: search, mode: "insensitive" as const } }, { email: { contains: search, mode: "insensitive" as const } }] }] : []),
+      ...(filters.role ? [{ roles: { some: { role: { code: filters.role, isActive: true } } } }] : []),
+      ...(filters.departmentId ? [{ OR: [{ studentProfile: { departmentId: filters.departmentId } }, { staffProfile: { departmentId: filters.departmentId } }] }] : []),
+      ...(filters.sectionId ? [{ studentProfile: { sectionId: filters.sectionId } }] : []),
+      ...(filters.programmeId ? [{ studentProfile: { programmeId: filters.programmeId } }] : []),
+      ...(filters.academicYearId ? [{ studentProfile: { section: { semester: { academicYearId: filters.academicYearId } } } }] : []),
+      ...(filters.semesterId ? [{ studentProfile: { section: { semesterId: filters.semesterId } } }] : []),
+    ] };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.user.findMany({ where, skip: (page - 1) * pageSize, take: pageSize, orderBy: [{ fullName: "asc" }, { collegeIdentityId: "asc" }], select: { id: true, publicId: true, collegeIdentityId: true, fullName: true, email: true, roles: { where: { role: { isActive: true } }, select: { role: { select: { code: true, name: true } } } }, studentProfile: { select: { department: { select: { id: true, name: true } }, section: { select: { id: true, code: true, name: true } } } }, staffProfile: { select: { department: { select: { id: true, name: true } } } } } }),
+      this.prisma.user.count({ where }),
+    ]);
+    return { items: items.map((item) => ({ id: item.id, publicId: item.publicId, collegeIdentityId: item.collegeIdentityId, name: item.fullName, fullName: item.fullName, officialEmail: item.email, roles: item.roles.map(({ role }) => role), department: item.studentProfile?.department ?? item.staffProfile?.department ?? null, section: item.studentProfile?.section ?? null })), meta: { page, pageSize, total, pageCount: Math.ceil(total / pageSize) } };
+  }
+
   async create(actor: AuthPrincipal, input: CreateBroadcastDto, requestId: string) {
     if (!actor.permissions.includes("broadcasts.create")) {
       throw new ForbiddenException("You do not have permission to create broadcasts.");
     }
     if (!input.title?.trim()) throw new BadRequestException("Title is required.");
     if (!input.body?.trim()) throw new BadRequestException("Message body is required.");
-    if (!["ALL", "ROLE", "DEPARTMENT", "SECTION", "INDIVIDUAL"].includes(input.audienceType)) {
+    if (!["ALL", "ROLE", "DEPARTMENT", "PROGRAMME", "ACADEMIC_YEAR", "SEMESTER", "SECTION", "INDIVIDUAL"].includes(input.audienceType)) {
       throw new BadRequestException("Invalid audience type.");
     }
-    if (["ROLE", "DEPARTMENT", "SECTION", "INDIVIDUAL"].includes(input.audienceType) && !input.audienceValue?.trim()) {
+    if (["ROLE", "DEPARTMENT", "PROGRAMME", "ACADEMIC_YEAR", "SEMESTER", "SECTION"].includes(input.audienceType) && !input.audienceValue?.trim()) {
       throw new BadRequestException(`audienceValue is required for audienceType '${input.audienceType}'.`);
+    }
+    const individualValues = input.audienceType === "INDIVIDUAL"
+      ? [...new Set(input.recipientIds?.length
+        ? input.recipientIds
+        : input.audienceValue?.split(",").map((value) => value.trim()).filter(Boolean) ?? [])]
+      : [];
+    if (input.audienceType === "INDIVIDUAL" && !individualValues.length) {
+      throw new BadRequestException("Select at least one active recipient.");
+    }
+    if (individualValues.length > 500) {
+      throw new BadRequestException("Select no more than 500 individual recipients per broadcast.");
+    }
+    const individualUserIds = input.audienceType === "INDIVIDUAL"
+      ? await this.resolveRecipients(actor.collegeId, "INDIVIDUAL", individualValues.join(","))
+      : [];
+    if (input.audienceType === "INDIVIDUAL" && individualUserIds.length !== individualValues.length) {
+      throw new BadRequestException("One or more selected recipients are inactive or outside your college.");
     }
 
     const broadcast = await this.prisma.$transaction(async (tx) => {
@@ -59,17 +98,23 @@ export class BroadcastService {
           title: input.title.trim(),
           body: input.body.trim(),
           audienceType: input.audienceType,
-          audienceValue: input.audienceValue?.trim(),
+          audienceValue: input.audienceType === "INDIVIDUAL" ? null : input.audienceValue?.trim(),
           scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined,
           status: input.scheduledAt ? "SCHEDULED" : "DRAFT",
         },
       });
+      if (individualUserIds.length) {
+        await tx.broadcastRecipient.createMany({
+          data: individualUserIds.map((userId) => ({ broadcastId: created.id, userId })),
+          skipDuplicates: true,
+        });
+      }
       await this.audit.record({
         actorId: actor.id,
         action: "broadcast.created",
         entityType: "Broadcast",
         entityId: created.id,
-        afterValue: { title: created.title, audienceType: created.audienceType, audienceValue: created.audienceValue },
+        afterValue: { title: created.title, audienceType: created.audienceType, audienceValue: created.audienceValue, selectedRecipientCount: individualUserIds.length },
         requestId,
       }, tx);
       return created;
@@ -90,32 +135,51 @@ export class BroadcastService {
     }
 
     // Resolve recipients based on audienceType
-    const userIds = await this.resolveRecipients(actor.collegeId, broadcast.audienceType, broadcast.audienceValue ?? undefined);
+    const userIds = broadcast.audienceType === "INDIVIDUAL"
+      ? await this.activeSelectedRecipients(actor.collegeId, broadcast.id, broadcast.audienceValue ?? undefined)
+      : await this.resolveRecipients(actor.collegeId, broadcast.audienceType, broadcast.audienceValue ?? undefined);
     if (!userIds.length) throw new BadRequestException("No eligible recipients found for this broadcast.");
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // Create recipient records
+      const claimed = await tx.broadcast.updateMany({
+        where: { id, collegeId: actor.collegeId, status: { in: ["DRAFT", "SCHEDULED"] } },
+        data: { status: "SENDING", totalRecipients: userIds.length, sentAt: new Date(), errorMessage: null },
+      });
+      if (claimed.count !== 1) {
+        throw new ConflictException("This broadcast has already been sent or changed. Refresh and try again.");
+      }
       await tx.broadcastRecipient.createMany({
         data: userIds.map((userId) => ({ broadcastId: id, userId })),
         skipDuplicates: true,
       });
-      const updated = await tx.broadcast.update({
-        where: { id },
+      const notification = await tx.notification.create({
         data: {
-          status: "SENDING",
-          totalRecipients: userIds.length,
-          sentAt: new Date(),
+          type: "BROADCAST",
+          title: broadcast.title,
+          body: broadcast.body,
+          relatedEntityType: "Broadcast",
+          relatedEntityId: broadcast.id,
+          data: { broadcastId: broadcast.id, audienceType: broadcast.audienceType },
+          recipients: { create: userIds.map((userId) => ({ userId })) },
         },
       });
-      // Deliver via conversation messages (system broadcast as a direct message to each)
-      // For now, mark all as delivered synchronously (no external push service configured)
-      await tx.broadcastRecipient.updateMany({
-        where: { broadcastId: id },
-        data: { status: "DELIVERED", deliveredAt: new Date() },
+      await tx.outboxEvent.create({
+        data: {
+          aggregateType: "Broadcast",
+          aggregateId: broadcast.id,
+          eventType: "broadcast.sent",
+          payload: { broadcastId: broadcast.id, notificationId: notification.id },
+          idempotencyKey: `broadcast.sent:${broadcast.id}`,
+        },
       });
-      await tx.broadcast.update({
+      const deliveredAt = new Date();
+      await tx.broadcastRecipient.updateMany({
+        where: { broadcastId: id, userId: { in: userIds } },
+        data: { status: "DELIVERED", deliveredAt },
+      });
+      const updated = await tx.broadcast.update({
         where: { id },
-        data: { status: "SENT", deliveredCount: userIds.length },
+        data: { status: "SENT", deliveredCount: userIds.length, failedCount: 0 },
       });
       await this.audit.record({
         actorId: actor.id,
@@ -128,6 +192,19 @@ export class BroadcastService {
       return updated;
     });
     return result;
+  }
+
+  private async activeSelectedRecipients(collegeId: string, broadcastId: string, legacyAudienceValue?: string): Promise<string[]> {
+    const selected = await this.prisma.broadcastRecipient.findMany({ where: { broadcastId }, select: { userId: true } });
+    if (!selected.length && legacyAudienceValue) {
+      return this.resolveRecipients(collegeId, "INDIVIDUAL", legacyAudienceValue);
+    }
+    if (!selected.length) return [];
+    const users = await this.prisma.user.findMany({
+      where: { collegeId, status: "ACTIVE", archivedAt: null, id: { in: selected.map(({ userId }) => userId) } },
+      select: { id: true },
+    });
+    return users.map(({ id }) => id);
   }
 
   async cancel(actor: AuthPrincipal, id: string, requestId: string) {
@@ -193,6 +270,30 @@ export class BroadcastService {
       });
       return users.map((u) => u.id);
     }
+    if (audienceType === "PROGRAMME") {
+      if (!audienceValue) return [];
+      const users = await this.prisma.user.findMany({
+        where: { ...baseWhere, studentProfile: { programmeId: audienceValue } },
+        select: { id: true },
+      });
+      return users.map((u) => u.id);
+    }
+    if (audienceType === "ACADEMIC_YEAR") {
+      if (!audienceValue) return [];
+      const users = await this.prisma.user.findMany({
+        where: { ...baseWhere, studentProfile: { section: { semester: { academicYearId: audienceValue } } } },
+        select: { id: true },
+      });
+      return users.map((u) => u.id);
+    }
+    if (audienceType === "SEMESTER") {
+      if (!audienceValue) return [];
+      const users = await this.prisma.user.findMany({
+        where: { ...baseWhere, studentProfile: { section: { semesterId: audienceValue } } },
+        select: { id: true },
+      });
+      return users.map((u) => u.id);
+    }
     if (audienceType === "SECTION") {
       if (!audienceValue) return [];
       const users = await this.prisma.user.findMany({
@@ -206,11 +307,12 @@ export class BroadcastService {
     }
     if (audienceType === "INDIVIDUAL") {
       if (!audienceValue) return [];
-      const user = await this.prisma.user.findFirst({
-        where: { ...baseWhere, OR: [{ id: audienceValue }, { collegeIdentityId: audienceValue }] },
+      const values = audienceValue.split(",").map((value) => value.trim()).filter(Boolean);
+      const users = await this.prisma.user.findMany({
+        where: { ...baseWhere, OR: [{ id: { in: values } }, { publicId: { in: values } }, { collegeIdentityId: { in: values } }] },
         select: { id: true },
       });
-      return user ? [user.id] : [];
+      return users.map((recipient) => recipient.id);
     }
     return [];
   }

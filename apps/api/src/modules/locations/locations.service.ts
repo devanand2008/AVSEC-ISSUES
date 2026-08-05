@@ -7,6 +7,7 @@ import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
 import type {
   ArchiveLocationDto,
+  CreateAreaDto,
   CreateBlockDto,
   CreateCampusDto,
   CreateFloorDto,
@@ -41,15 +42,25 @@ export class LocationsService {
     });
   }
 
-  blocks(user: AuthPrincipal, campusId: string) {
+  async blocks(user: AuthPrincipal, campusId: string) {
+    const campus = await this.prisma.campus.findFirst({
+      where: { id: campusId, collegeId: user.collegeId, isActive: true, archivedAt: null },
+      select: { id: true },
+    });
+    if (!campus) throw new NotFoundException("Active campus not found in your college.");
     return this.prisma.block.findMany({
-      where: { campusId, campus: { collegeId: user.collegeId, archivedAt: null }, isActive: true, archivedAt: null },
+      where: { campusId, campus: { collegeId: user.collegeId, isActive: true, archivedAt: null }, isActive: true, archivedAt: null },
       select: { id: true, code: true, name: true, description: true, campusId: true, isActive: true },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     });
   }
 
-  floors(user: AuthPrincipal, blockId: string) {
+  async floors(user: AuthPrincipal, blockId: string) {
+    const block = await this.prisma.block.findFirst({
+      where: { id: blockId, isActive: true, archivedAt: null, campus: { collegeId: user.collegeId, isActive: true, archivedAt: null } },
+      select: { id: true },
+    });
+    if (!block) throw new NotFoundException("Active block not found in your college.");
     return this.prisma.floor.findMany({
       where: { blockId, block: { campus: { collegeId: user.collegeId, archivedAt: null }, archivedAt: null }, isActive: true, archivedAt: null },
       select: { id: true, code: true, name: true, level: true, blockId: true, isActive: true },
@@ -57,10 +68,33 @@ export class LocationsService {
     });
   }
 
-  rooms(user: AuthPrincipal, floorId: string) {
+  async rooms(user: AuthPrincipal, floorId: string) {
+    await this.requireActiveFloor(user, floorId);
     return this.prisma.room.findMany({
-      where: { floorId, floor: { block: { campus: { collegeId: user.collegeId, archivedAt: null }, archivedAt: null }, archivedAt: null }, isActive: true, archivedAt: null },
+      where: { floorId, floor: { block: { campus: { collegeId: user.collegeId, isActive: true, archivedAt: null }, isActive: true, archivedAt: null }, isActive: true, archivedAt: null }, isActive: true, archivedAt: null },
       select: { id: true, code: true, name: true, roomNumber: true, roomType: true, capacity: true, floorId: true, departmentId: true, isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    });
+  }
+
+  async areas(user: AuthPrincipal, floorId: string) {
+    await this.requireActiveFloor(user, floorId);
+    return this.prisma.area.findMany({
+      where: {
+        floorId,
+        floor: {
+          block: {
+            campus: { collegeId: user.collegeId, isActive: true, archivedAt: null },
+            isActive: true,
+            archivedAt: null,
+          },
+          isActive: true,
+          archivedAt: null,
+        },
+        isActive: true,
+        archivedAt: null,
+      },
+      select: { id: true, code: true, name: true, description: true, floorId: true, isActive: true },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     });
   }
@@ -109,10 +143,66 @@ export class LocationsService {
     }
   }
 
-  assets(user: AuthPrincipal, roomId: string) {
+  async assets(user: AuthPrincipal, location: { roomId?: string; areaId?: string }) {
+    if (Boolean(location.roomId) === Boolean(location.areaId)) {
+      throw new BadRequestException("Select either a room or an area to load assets.");
+    }
+    if (location.roomId) {
+      const room = await this.prisma.room.findFirst({
+        where: {
+          id: location.roomId,
+          isActive: true,
+          archivedAt: null,
+          floor: {
+            isActive: true,
+            archivedAt: null,
+            block: {
+              isActive: true,
+              archivedAt: null,
+              campus: { collegeId: user.collegeId, isActive: true, archivedAt: null },
+            },
+          },
+        },
+        select: { id: true },
+      });
+      if (!room) throw new NotFoundException("Active room not found in your college.");
+    } else {
+      const area = await this.prisma.area.findFirst({
+        where: {
+          id: location.areaId,
+          isActive: true,
+          archivedAt: null,
+          floor: {
+            isActive: true,
+            archivedAt: null,
+            block: {
+              isActive: true,
+              archivedAt: null,
+              campus: { collegeId: user.collegeId, isActive: true, archivedAt: null },
+            },
+          },
+        },
+        select: { id: true },
+      });
+      if (!area) throw new NotFoundException("Active area not found in your college.");
+    }
     return this.prisma.asset.findMany({
-      where: { roomId, room: { floor: { block: { campus: { collegeId: user.collegeId } } } }, isActive: true },
-      select: { id: true, code: true, name: true, category: { select: { name: true } } },
+      where: {
+        ...(location.roomId
+          ? { roomId: location.roomId }
+          : { areaId: location.areaId }),
+        isActive: true,
+      },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        roomId: true,
+        areaId: true,
+        category: { select: { name: true } },
+        room: { select: { code: true, name: true } },
+        area: { select: { code: true, name: true } },
+      },
       orderBy: { name: "asc" },
     });
   }
@@ -183,6 +273,41 @@ export class LocationsService {
       await this.audit.record({ actorId: user.id, action: "location.room_created", entityType: "Room", entityId: created.id, afterValue: created, requestId }, tx);
       return created;
     });
+  }
+
+  async createArea(user: AuthPrincipal, input: CreateAreaDto, requestId: string) {
+    await this.validateRoomParents(user, input.floorId);
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.area.create({
+        data: {
+          floorId: input.floorId,
+          code: input.code.trim().toUpperCase(),
+          name: input.name.trim(),
+          description: input.description?.trim(),
+          sortOrder: input.sortOrder ?? 0,
+          isActive: input.isActive ?? true,
+        },
+      });
+      await this.audit.record({ actorId: user.id, action: "location.area_created", entityType: "Area", entityId: created.id, afterValue: created, requestId }, tx);
+      return created;
+    });
+  }
+
+  private async requireActiveFloor(user: AuthPrincipal, floorId: string): Promise<void> {
+    const floor = await this.prisma.floor.findFirst({
+      where: {
+        id: floorId,
+        isActive: true,
+        archivedAt: null,
+        block: {
+          isActive: true,
+          archivedAt: null,
+          campus: { collegeId: user.collegeId, isActive: true, archivedAt: null },
+        },
+      },
+      select: { id: true },
+    });
+    if (!floor) throw new NotFoundException("Active floor not found in your college.");
   }
 
   async updateCampus(user: AuthPrincipal, id: string, input: UpdateCampusDto, requestId: string) {

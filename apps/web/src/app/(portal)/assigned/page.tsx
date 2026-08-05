@@ -18,7 +18,9 @@ interface Issue {
   createdAt: string;
   acknowledgementDueAt: string | null;
   resolutionDueAt: string | null;
-  room: { name: string; code: string };
+  room: { name: string; code: string } | null;
+  area: { name: string; code: string } | null;
+  customAreaName: string | null;
   category: { name: string };
 }
 
@@ -29,26 +31,26 @@ interface AssignedResponse {
 
 export default function AssignedIssuesPage() {
   const { user } = useAuth();
-  const pending = useQuery({ queryKey: ["assigned", "pending"], queryFn: () => api.get<AssignedResponse>("/issues?assigned=true&status=ASSIGNED&pageSize=50") });
-  const inProgress = useQuery({ queryKey: ["assigned", "in-progress"], queryFn: () => api.get<AssignedResponse>("/issues?assigned=true&status=IN_PROGRESS&pageSize=50") });
-  const acknowledged = useQuery({ queryKey: ["assigned", "acknowledged"], queryFn: () => api.get<AssignedResponse>("/issues?assigned=true&status=ACKNOWLEDGED&pageSize=50") });
+  const assigned = useQuery({ queryKey: ["maintenance", "assigned"], queryFn: () => api.get<AssignedResponse>("/maintenance/issues/assigned?pageSize=100") });
 
-  const isLoading = pending.isLoading || inProgress.isLoading || acknowledged.isLoading;
-  const isError = pending.isError || inProgress.isError || acknowledged.isError;
+  const isLoading = assigned.isLoading;
+  const isError = assigned.isError;
 
   if (isLoading) return <LoadingState />;
   if (isError) return <ErrorState />;
 
   const now = new Date();
-  const pendingIssues = pending.data?.data ?? [];
-  const activeIssues = [...(acknowledged.data?.data ?? []), ...(inProgress.data?.data ?? [])];
+  const allIssues = assigned.data?.data ?? [];
+  const pendingIssues = allIssues.filter((issue) => ["NEW", "NEEDS_MANUAL_ASSIGNMENT", "ASSIGNED"].includes(issue.status));
+  const activeIssues = allIssues.filter((issue) => ["ACKNOWLEDGED", "IN_PROGRESS", "WAITING_FOR_MATERIAL", "WAITING_FOR_PARTS", "WAITING_FOR_APPROVAL", "WAITING_FOR_VENDOR", "ON_HOLD", "OVERDUE", "REOPENED"].includes(issue.status));
+  const verificationIssues = allIssues.filter((issue) => ["RESOLVED", "VERIFICATION_PENDING"].includes(issue.status));
   const overdueIssues = [...pendingIssues, ...activeIssues].filter((issue) => issue.resolutionDueAt && new Date(issue.resolutionDueAt) < now);
 
   const cards = [
     { label: "Awaiting acknowledgement", value: pendingIssues.length, icon: FileWarning, color: "#d97706", bg: "#fff7ed" },
     { label: "Active work", value: activeIssues.length, icon: Wrench, color: "#2563eb", bg: "#eff6ff" },
     { label: "Overdue", value: overdueIssues.length, icon: Clock3, color: "#dc2626", bg: "#fff1f2" },
-    { label: "Total assigned", value: (pending.data?.meta.total ?? 0) + (inProgress.data?.meta.total ?? 0) + (acknowledged.data?.meta.total ?? 0), icon: CheckCircle2, color: "#16a34a", bg: "#f0fdf4" },
+    { label: "Total assigned", value: assigned.data?.meta.total ?? 0, icon: CheckCircle2, color: "#16a34a", bg: "#f0fdf4" },
   ];
 
   return <>
@@ -66,12 +68,17 @@ export default function AssignedIssuesPage() {
       <IssueTable issues={activeIssues} showDue />
     </section>}
 
+    {verificationIssues.length > 0 && <section className="card" style={{ marginTop: 18 }}>
+      <div className="section-head"><div><h2><CheckCircle2 size={18} style={{ color: "#16a34a", verticalAlign: "-3px" }} /> Verification pending</h2><p>Completed work awaiting reporter or supervisor verification.</p></div></div>
+      <IssueTable issues={verificationIssues} showDue />
+    </section>}
+
     {overdueIssues.length > 0 && <section className="card" style={{ marginTop: 18 }}>
       <div className="section-head"><div><h2><Clock3 size={18} style={{ color: "#dc2626", verticalAlign: "-3px" }} /> Overdue</h2><p>Past their resolution deadline.</p></div></div>
       <IssueTable issues={overdueIssues} showDue />
     </section>}
 
-    {pendingIssues.length === 0 && activeIssues.length === 0 && <div className="card" style={{ marginTop: 18 }}><div className="empty" style={{ padding: 40 }}>No issues are currently assigned to you. Check back later or view <Link href="/issues" style={{ color: "var(--primary)" }}>all issues</Link>.</div></div>}
+    {pendingIssues.length === 0 && activeIssues.length === 0 && verificationIssues.length === 0 && <div className="card" style={{ marginTop: 18 }}><div className="empty" style={{ padding: 40 }}>No issues are currently assigned to you. Check back later or view <Link href="/issues" style={{ color: "var(--primary)" }}>all issues</Link>.</div></div>}
   </>;
 }
 
@@ -82,7 +89,7 @@ function IssueTable({ issues, showDue }: { issues: Issue[]; showDue?: boolean })
       const isOverdue = issue.resolutionDueAt && new Date(issue.resolutionDueAt) < now;
       return <tr key={issue.id}>
         <td><Link href={`/issues/${issue.id}`} style={{ fontWeight: 600, color: "var(--primary)" }}>{issue.issueNumber}</Link><br /><small className="muted">{issue.title}</small></td>
-        <td>{issue.room.name} <small className="muted">{issue.room.code}</small></td>
+        <td>{issue.room?.name ?? issue.area?.name ?? issue.customAreaName ?? "Unspecified"} <small className="muted">{issue.room?.code ?? issue.area?.code ?? ""}</small></td>
         <td>{issue.category.name}</td>
         <td><StatusBadge value={issue.priority} /></td>
         <td><StatusBadge value={issue.status} /></td>

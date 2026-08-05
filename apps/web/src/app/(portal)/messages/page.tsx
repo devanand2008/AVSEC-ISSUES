@@ -213,6 +213,8 @@ function MessagesPageInner() {
   const cameraRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<HTMLDivElement | null>(null);
   const draftsRef = useRef<Map<string, string>>(new Map());
+  const queuedMessagesRef = useRef<Map<string, { conversationId: string; body: string; replyToId?: string; attachments: File[]; clientId: string }>>(new Map());
+  const retryQueuedRef = useRef<() => void>(() => undefined);
   const [selected, setSelected] = useState(() => searchParams?.get("id") ?? "");
   const [body, setBody] = useState("");
   const [conversationSearch, setConversationSearch] = useState(() => searchParams?.get("search") ?? "");
@@ -230,6 +232,8 @@ function MessagesPageInner() {
   const [editingMessage, setEditingMessage] = useState<{ id: string; text: string } | null>(null);
   const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
+  const [connectionState, setConnectionState] = useState<"connecting" | "connected" | "reconnecting" | "offline" | "connection_failed">("connecting");
+  const [queuedConversationIds, setQueuedConversationIds] = useState<Set<string>>(new Set());
   const canCreateDirect = user?.permissions.includes("conversations.create_direct") ?? false;
 
   /* ─── queries ─── */
@@ -277,12 +281,24 @@ function MessagesPageInner() {
   /* ─── socket ─── */
   useEffect(() => {
     if (!activeId) return;
+    const connectingTimer = window.setTimeout(() => setConnectionState("connecting"), 0);
     const socket = io(resolveRuntimeUrl(process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:4000/realtime"), {
       withCredentials: true,
       transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 750,
     });
     socketRef.current = socket;
-    socket.on("connect", () => socket.emit("conversation.join", { conversationId: activeId }));
+    socket.on("connect", () => {
+      setConnectionState("connected");
+      socket.emit("conversation.join", { conversationId: activeId });
+      refreshMessages();
+      retryQueuedRef.current();
+    });
+    socket.on("disconnect", (reason) => setConnectionState(reason === "io client disconnect" ? "offline" : "reconnecting"));
+    socket.on("connect_error", () => setConnectionState("reconnecting"));
+    socket.io.on("reconnect_failed", () => setConnectionState("connection_failed"));
     socket.on("message.created", () => refreshMessages());
     socket.on("message.updated", () => refreshMessages());
     socket.on("message.read", () => refreshMessages());
@@ -292,7 +308,7 @@ function MessagesPageInner() {
     socket.on("presence.changed", (event: { userId: string; isOnline: boolean }) =>
       setOnlineUsers((current) => { const next = new Set(current); if (event.isOnline) next.add(event.userId); else next.delete(event.userId); return next; })
     );
-    return () => { socket.disconnect(); socketRef.current = null; };
+    return () => { window.clearTimeout(connectingTimer); socket.disconnect(); socketRef.current = null; };
   }, [activeId, refreshMessages]);
 
   /* ─── mark read ─── */
@@ -335,36 +351,52 @@ function MessagesPageInner() {
 
   /* ─── mutations ─── */
   const send = useMutation({
-    mutationFn: async () => {
-      const firstType = attachments[0]?.type ?? "";
-      const messageType = firstType.startsWith("image/") ? "IMAGE" : firstType.startsWith("video/") ? "VIDEO" : firstType.startsWith("audio/") ? "AUDIO" : attachments.length ? "DOCUMENT" : "TEXT";
+    mutationFn: async (outgoing: { conversationId: string; body: string; replyToId?: string; attachments: File[]; clientId: string }) => {
+      const firstType = outgoing.attachments[0]?.type ?? "";
+      const messageType = firstType.startsWith("image/") ? "IMAGE" : firstType.startsWith("video/") ? "VIDEO" : firstType.startsWith("audio/") ? "AUDIO" : outgoing.attachments.length ? "DOCUMENT" : "TEXT";
       const attachmentUploadIds: string[] = [];
-      for (const [index, file] of attachments.entries()) {
-        setUploadStatus(`Uploading ${index + 1} of ${attachments.length}…`);
+      for (const [index, file] of outgoing.attachments.entries()) {
+        setUploadStatus(`Uploading ${index + 1} of ${outgoing.attachments.length}…`);
         const signed = await api.post<{ uploadId: string; storageKey: string; uploadUrl: string; requiredHeaders: Record<string, string> }>(
           "/messages/attachments",
-          { conversationId: activeId, fileName: file.name, mimeType: file.type, sizeBytes: file.size, purpose: "MESSAGE" },
+          { conversationId: outgoing.conversationId, fileName: file.name, mimeType: file.type, sizeBytes: file.size, purpose: "MESSAGE" },
         );
         await api.upload(resolveRuntimeUrl(signed.uploadUrl), file, signed.requiredHeaders);
         await api.post(`/messages/attachments/${signed.uploadId}/complete`, {
-          conversationId: activeId, fileName: file.name, mimeType: file.type, sizeBytes: file.size, purpose: "MESSAGE", storageKey: signed.storageKey,
+          conversationId: outgoing.conversationId, fileName: file.name, mimeType: file.type, sizeBytes: file.size, purpose: "MESSAGE", storageKey: signed.storageKey,
         });
         attachmentUploadIds.push(signed.uploadId);
       }
-      return api.post<{ id: string }>(`/conversations/${activeId}/messages`, {
-        body: body.trim(),
-        ...(replyTo ? { replyToId: replyTo.id } : {}),
+      return api.post<{ id: string }>(`/conversations/${outgoing.conversationId}/messages`, {
+        body: outgoing.body,
+        ...(outgoing.replyToId ? { replyToId: outgoing.replyToId } : {}),
         messageType,
         ...(attachmentUploadIds.length ? { attachmentUploadIds } : {}),
-        clientId: idempotencyKey(),
+        clientId: outgoing.clientId,
       });
     },
-    onSuccess: () => {
-      draftsRef.current.delete(activeId);
-      setBody(""); setReplyTo(null); setAttachments([]); setUploadStatus(""); setError(""); refreshMessages();
+    onSuccess: (_result, outgoing) => {
+      queuedMessagesRef.current.delete(outgoing.conversationId);
+      setQueuedConversationIds(new Set(queuedMessagesRef.current.keys()));
+      draftsRef.current.delete(outgoing.conversationId);
+      setUploadStatus(""); setError(""); refreshMessages();
+      window.setTimeout(() => retryQueuedRef.current(), 0);
     },
-    onError: (caught) => { setUploadStatus(""); handleError(caught); },
+    onError: (_caught, outgoing) => {
+      queuedMessagesRef.current.set(outgoing.conversationId, outgoing);
+      setQueuedConversationIds(new Set(queuedMessagesRef.current.keys()));
+      setUploadStatus("");
+      setError("Message is pending and will retry when AVS Messenger reconnects.");
+    },
   });
+
+  useEffect(() => {
+    retryQueuedRef.current = () => {
+      if (!socketRef.current?.connected || send.isPending) return;
+      const next = queuedMessagesRef.current.values().next().value;
+      if (next) send.mutate(next);
+    };
+  }, [send]);
 
   const createDirect = useMutation({
     mutationFn: (participantPublicId: string) => api.post<Conversation>("/conversations/direct", { participantPublicId }),
@@ -401,7 +433,28 @@ function MessagesPageInner() {
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    if ((body.trim() || attachments.length) && !send.isPending) send.mutate();
+    queueOrSend();
+  }
+  function queueOrSend() {
+    if ((!body.trim() && !attachments.length) || send.isPending || !activeId || queuedMessagesRef.current.has(activeId)) return;
+    const outgoing = {
+      conversationId: activeId,
+      body: body.trim(),
+      ...(replyTo ? { replyToId: replyTo.id } : {}),
+      attachments: [...attachments],
+      clientId: idempotencyKey(),
+    };
+    if (connectionState === "connected") {
+      draftsRef.current.delete(activeId);
+      setBody(""); setReplyTo(null); setAttachments([]);
+      send.mutate(outgoing);
+      return;
+    }
+    queuedMessagesRef.current.set(activeId, outgoing);
+    setQueuedConversationIds(new Set(queuedMessagesRef.current.keys()));
+    draftsRef.current.delete(activeId);
+    setBody(""); setReplyTo(null); setAttachments([]);
+    setError("Message queued locally. It will send after AVS Messenger reconnects.");
   }
   function chooseFiles(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
@@ -589,6 +642,19 @@ function MessagesPageInner() {
                   </button>
                 </div>
               </header>
+
+              {connectionState !== "connected" && (
+                <div className="avs-error-bar avs-error-bar--notice" role="status">
+                  <span>{connectionState === "connecting" ? "Connecting to AVS Messenger…" : connectionState === "reconnecting" ? "Connection lost. Reconnecting… Your draft is preserved." : connectionState === "connection_failed" ? "Unable to connect to AVS Messenger. Your draft and pending message are preserved." : "Messenger is offline. Your draft is preserved until reconnection."}</span>
+                  <button type="button" onClick={() => { setConnectionState("connecting"); if (socketRef.current?.connected) retryQueuedRef.current(); else socketRef.current?.connect(); }}>Retry</button>
+                </div>
+              )}
+              {queuedConversationIds.size > 0 && (
+                <div className="avs-error-bar avs-error-bar--notice" role="status">
+                  <span>{queuedConversationIds.size} pending message{queuedConversationIds.size === 1 ? "" : "s"}. Pending messages are not shown as sent and retry after reconnection.</span>
+                  {connectionState === "connected" && <button type="button" disabled={send.isPending} onClick={() => retryQueuedRef.current()}>Retry now</button>}
+                </div>
+              )}
 
               {/* Error bar */}
               {error && (
@@ -843,7 +909,7 @@ function MessagesPageInner() {
                       e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if ((body.trim() || attachments.length) && !send.isPending) send.mutate(); }
+                      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); queueOrSend(); }
                     }}
                   />
                 </div>
@@ -852,7 +918,7 @@ function MessagesPageInner() {
                   type="submit"
                   className={`avs-send-btn ${(body.trim() || attachments.length) ? "avs-send-btn--active" : ""}`}
                   aria-label="Send message"
-                  disabled={(!body.trim() && !attachments.length) || send.isPending}
+                  disabled={(!body.trim() && !attachments.length) || send.isPending || queuedConversationIds.has(activeId)}
                 >
                   {send.isPending ? <LoaderCircle className="spin" size={20} /> : <Send size={20} />}
                 </button>

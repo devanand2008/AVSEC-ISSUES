@@ -2,6 +2,27 @@ import 'package:flutter/material.dart';
 
 import '../../core/network/avs_api_client.dart';
 
+const _roomTypes = <String>[
+  'CLASSROOM',
+  'LABORATORY',
+  'SEMINAR_HALL',
+  'AUDITORIUM',
+  'STAFF_ROOM',
+  'HOD_ROOM',
+  'PRINCIPAL_OFFICE',
+  'ADMINISTRATIVE_OFFICE',
+  'LIBRARY',
+  'WORKSHOP',
+  'RESTROOM',
+  'CANTEEN',
+  'HOSTEL_ROOM',
+  'CORRIDOR',
+  'STAIRCASE',
+  'PARKING_AREA',
+  'PLAYGROUND',
+  'OTHER',
+];
+
 class CampusSetupScreen extends StatelessWidget {
   const CampusSetupScreen({super.key, required this.client});
 
@@ -554,18 +575,7 @@ class _LocationListState extends State<_LocationList> {
                     DropdownButtonFormField<String>(
                       initialValue: roomType,
                       decoration: const InputDecoration(labelText: 'Room type'),
-                      items: const [
-                        'CLASSROOM',
-                        'LABORATORY',
-                        'OFFICE',
-                        'STAFF_ROOM',
-                        'SEMINAR_HALL',
-                        'AUDITORIUM',
-                        'LIBRARY',
-                        'RESTROOM',
-                        'STORE_ROOM',
-                        'OTHER',
-                      ]
+                      items: _roomTypes
                           .map((value) => DropdownMenuItem(
                               value: value, child: Text(value.replaceAll('_', ' '))))
                           .toList(),

@@ -236,6 +236,10 @@ export const environmentSchema = z
     OPENAI_MONTHLY_BUDGET_USD: optionalPositiveNumber,
     OPENAI_INPUT_COST_PER_MILLION_USD: optionalPositiveNumber,
     OPENAI_OUTPUT_COST_PER_MILLION_USD: optionalPositiveNumber,
+    AVS_CERTIFICATE_BUILDING_URL: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.url().optional(),
+    ),
     AI_KNOWLEDGE_PROVIDER: z
       .enum(["internal", "openai_file_search"])
       .default("internal"),

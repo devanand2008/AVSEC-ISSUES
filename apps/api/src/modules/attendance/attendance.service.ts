@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { addHours } from "date-fns";
+import { fromZonedTime } from "date-fns-tz";
 import { AccessService } from "../../common/access/access.service";
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { IdempotencyService } from "../../common/idempotency/idempotency.service";
@@ -7,8 +8,7 @@ import { PrismaService } from "../../database/prisma.service";
 import { Prisma } from "../../generated/prisma/client";
 import { UsersService } from "../users/users.service";
 import type { AddClassStudentDto, CreateAttendanceSessionDto, RequestCorrectionDto, ReviewCorrectionDto, SubmitAttendanceDto } from "./dto/attendance.dto";
-
-const attendedCodes = new Set(["PRESENT", "LATE", "ON_DUTY", "AUTHORIZED_LEAVE"]);
+import { attendanceCredit, attendanceParts } from "./attendance-value";
 
 @Injectable()
 export class AttendanceService {
@@ -21,15 +21,23 @@ export class AttendanceService {
 
   async createSession(user: AuthPrincipal, input: CreateAttendanceSessionDto) {
     const date = new Date(`${input.sessionDate}T00:00:00.000Z`);
-    const subject = await this.prisma.subject.findFirst({ where: { id: input.subjectId, semester: { sections: { some: { id: input.sectionId } }, academicYearId: input.academicYearId, programme: { collegeId: user.collegeId } } } });
+    if (Boolean(input.startTime) !== Boolean(input.endTime)) throw new BadRequestException("Start time and end time must be supplied together.");
+    const subject = await this.prisma.subject.findFirst({
+      where: { id: input.subjectId, semester: { sections: { some: { id: input.sectionId } }, academicYearId: input.academicYearId, programme: { collegeId: user.collegeId } } },
+      select: { id: true, semester: { select: { programme: { select: { college: { select: { timezone: true } } } } } } },
+    });
     if (!subject) throw new BadRequestException("Subject, section and academic year do not match.");
+    const timezone = subject.semester.programme.college.timezone;
+    const startsAt = input.startTime ? fromZonedTime(`${input.sessionDate}T${input.startTime}:00`, timezone) : undefined;
+    const endsAt = input.endTime ? fromZonedTime(`${input.sessionDate}T${input.endTime}:00`, timezone) : undefined;
+    if (startsAt && endsAt && endsAt <= startsAt) throw new BadRequestException("Session end time must be after its start time.");
     const elevated = user.permissions.includes("attendance.read_college") && this.access.isCollegeWide(user);
     if (!elevated) {
       const assignment = await this.prisma.facultySubjectAssignment.findFirst({ where: { facultyId: user.id, subjectId: input.subjectId, sectionId: input.sectionId, isActive: true, attendancePermission: true, validFrom: { lte: date }, OR: [{ validUntil: null }, { validUntil: { gte: date } }] } });
       if (!assignment) throw new ForbiddenException("You do not have attendance permission for this subject and section.");
     }
     try {
-      return await this.prisma.attendanceSession.create({ data: { academicYearId: input.academicYearId, sectionId: input.sectionId, subjectId: input.subjectId, facultyId: user.id, sessionDate: date, periodNumber: input.periodNumber } });
+      return await this.prisma.attendanceSession.create({ data: { academicYearId: input.academicYearId, sectionId: input.sectionId, subjectId: input.subjectId, facultyId: user.id, sessionDate: date, periodNumber: input.periodNumber, sessionType: input.sessionType ?? "LECTURE", startsAt, endsAt } });
     } catch (error) {
       if ((error as { code?: string }).code !== "P2002") throw error;
       return this.prisma.attendanceSession.findFirstOrThrow({ where: { sectionId: input.sectionId, subjectId: input.subjectId, sessionDate: date, periodNumber: input.periodNumber } });
@@ -49,11 +57,11 @@ export class AttendanceService {
   async roster(user: AuthPrincipal, sessionId: string) {
     const session = await this.authorizedSession(user, sessionId, true);
     const students = await this.prisma.studentProfile.findMany({ where: { sectionId: session.sectionId, user: { status: "ACTIVE" } }, include: { user: { select: { id: true, publicId: true, fullName: true } } }, orderBy: [{ rollNumber: "asc" }, { user: { fullName: "asc" } }] });
-    const existing = await this.prisma.attendanceRecord.findMany({ where: { sessionId }, select: { id: true, studentUserId: true, status: true, note: true } });
+    const existing = await this.prisma.attendanceRecord.findMany({ where: { sessionId }, select: { id: true, studentUserId: true, status: true, morningStatus: true, afternoonStatus: true, effectiveAttendanceValue: true, note: true } });
     const byStudent = new Map(existing.map((record) => [record.studentUserId, record]));
     return {
-      session: { id: session.id, status: session.status, submittedAt: session.submittedAt, lockedAt: session.lockedAt, version: session.version },
-      students: students.map((profile) => ({ recordId: existing.find((record) => record.studentUserId === profile.userId)?.id, userId: profile.user.id, publicId: profile.user.publicId, studentId: profile.studentId, rollNumber: profile.rollNumber, fullName: profile.user.fullName, status: byStudent.get(profile.userId)?.status ?? null, note: byStudent.get(profile.userId)?.note ?? null })),
+      session: { id: session.id, status: session.status, sessionType: session.sessionType, submittedAt: session.submittedAt, lockedAt: session.lockedAt, version: session.version },
+      students: students.map((profile) => { const record = byStudent.get(profile.userId); return { recordId: record?.id, userId: profile.user.id, publicId: profile.user.publicId, studentId: profile.studentId, rollNumber: profile.rollNumber, fullName: profile.user.fullName, status: record?.status ?? null, morningStatus: record?.morningStatus ?? null, afternoonStatus: record?.afternoonStatus ?? null, effectiveAttendanceValue: record ? Number(record.effectiveAttendanceValue) : null, note: record?.note ?? null }; }),
     };
   }
 
@@ -118,11 +126,12 @@ export class AttendanceService {
       for (const inputRecord of input.records) {
         const existing = await tx.attendanceRecord.findUnique({ where: { sessionId_studentUserId: { sessionId, studentUserId: inputRecord.studentUserId } } });
         const note = inputRecord.note?.trim() || undefined;
+        const parts = this.partsFor(inputRecord.status, inputRecord.morningStatus, inputRecord.afternoonStatus);
         const record = existing
-          ? await tx.attendanceRecord.update({ where: { id: existing.id }, data: { status: inputRecord.status, note, markedAt: new Date(), version: { increment: 1 } } })
-          : await tx.attendanceRecord.create({ data: { sessionId, studentUserId: inputRecord.studentUserId, status: inputRecord.status, note } });
-        if (!existing || existing.status !== inputRecord.status || (existing.note || undefined) !== note) {
-          await tx.attendanceChangeHistory.create({ data: { recordId: record.id, previousStatus: existing?.status, newStatus: inputRecord.status, previousNote: existing?.note, newNote: note, changedById: user.id, reason: "Attendance draft saved.", requestId } });
+          ? await tx.attendanceRecord.update({ where: { id: existing.id }, data: { status: inputRecord.status, ...parts, note, markedAt: new Date(), version: { increment: 1 } } })
+          : await tx.attendanceRecord.create({ data: { sessionId, studentUserId: inputRecord.studentUserId, status: inputRecord.status, ...parts, note } });
+        if (!existing || existing.status !== inputRecord.status || existing.morningStatus !== parts.morningStatus || existing.afternoonStatus !== parts.afternoonStatus || (existing.note || undefined) !== note) {
+          await tx.attendanceChangeHistory.create({ data: { recordId: record.id, previousStatus: existing?.status, newStatus: inputRecord.status, previousMorningStatus: existing?.morningStatus, previousAfternoonStatus: existing?.afternoonStatus, morningStatus: parts.morningStatus, afternoonStatus: parts.afternoonStatus, previousEffectiveAttendanceValue: existing?.effectiveAttendanceValue, newEffectiveAttendanceValue: parts.effectiveAttendanceValue, previousNote: existing?.note, newNote: note, changedById: user.id, reason: "Attendance draft saved.", requestId } });
         }
       }
       const version = input.expectedVersion + 1;
@@ -161,10 +170,11 @@ export class AttendanceService {
       for (const inputRecord of input.records) {
         const existing = await tx.attendanceRecord.findUnique({ where: { sessionId_studentUserId: { sessionId, studentUserId: inputRecord.studentUserId } } });
         const note = inputRecord.note?.trim() || undefined;
+        const parts = this.partsFor(inputRecord.status, inputRecord.morningStatus, inputRecord.afternoonStatus);
         const record = existing
-          ? await tx.attendanceRecord.update({ where: { id: existing.id }, data: { status: inputRecord.status, note, markedAt: submittedAt, version: { increment: 1 } } })
-          : await tx.attendanceRecord.create({ data: { sessionId, studentUserId: inputRecord.studentUserId, status: inputRecord.status, note, markedAt: submittedAt } });
-        if (!existing || existing.status !== inputRecord.status || (existing.note || undefined) !== note) await tx.attendanceChangeHistory.create({ data: { recordId: record.id, previousStatus: existing?.status, newStatus: inputRecord.status, previousNote: existing?.note, newNote: note, changedById: user.id, reason: existing ? "Attendance resubmission within the permitted window." : "Initial attendance submission.", requestId } });
+          ? await tx.attendanceRecord.update({ where: { id: existing.id }, data: { status: inputRecord.status, ...parts, note, markedAt: submittedAt, version: { increment: 1 } } })
+          : await tx.attendanceRecord.create({ data: { sessionId, studentUserId: inputRecord.studentUserId, status: inputRecord.status, ...parts, note, markedAt: submittedAt } });
+        if (!existing || existing.status !== inputRecord.status || existing.morningStatus !== parts.morningStatus || existing.afternoonStatus !== parts.afternoonStatus || (existing.note || undefined) !== note) await tx.attendanceChangeHistory.create({ data: { recordId: record.id, previousStatus: existing?.status, newStatus: inputRecord.status, previousMorningStatus: existing?.morningStatus, previousAfternoonStatus: existing?.afternoonStatus, morningStatus: parts.morningStatus, afternoonStatus: parts.afternoonStatus, previousEffectiveAttendanceValue: existing?.effectiveAttendanceValue, newEffectiveAttendanceValue: parts.effectiveAttendanceValue, previousNote: existing?.note, newNote: note, changedById: user.id, reason: existing ? "Attendance resubmission within the permitted window." : "Initial attendance submission.", requestId } });
       }
       const response = { sessionId, status: "SUBMITTED" as const, submittedAt, version: input.expectedVersion + 1, recordCount: input.records.length };
       await tx.idempotencyKey.create({ data: { actorId: user.id, endpoint: `/attendance/sessions/${sessionId}/submit`, key, requestHash: hash, responseStatus: 200, responseBody: response, resourceId: sessionId, expiresAt: addHours(new Date(), 24) } });
@@ -189,10 +199,10 @@ export class AttendanceService {
     for (const record of records) {
       const row = grouped.get(record.session.subjectId) ?? { subject: record.session.subject, total: 0, attended: 0 };
       row.total += 1;
-      if (["PRESENT", "LATE", "ON_DUTY", "AUTHORIZED_LEAVE"].includes(record.status)) row.attended += 1;
+      row.attended += attendanceCredit(record);
       grouped.set(record.session.subjectId, row);
     }
-    const periodOverall = this.percentage(records.filter((record) => ["PRESENT", "LATE", "ON_DUTY", "AUTHORIZED_LEAVE"].includes(record.status)).length, records.length);
+    const periodOverall = this.percentage(records.reduce((sum, record) => sum + attendanceCredit(record), 0), records.length);
     const latestOverallImport = importedSummaries.find((summary) => summary.subjectId === null);
     return {
       overall: latestOverallImport?.percentage ?? periodOverall,
@@ -285,8 +295,9 @@ export class AttendanceService {
     for (const record of records) {
       const slot = grouped.get(record.session.sectionId) ?? { section: record.session.section, total: 0, attended: 0, absent: 0, onDuty: 0, leave: 0 };
       slot.total += 1;
-      if (["PRESENT", "LATE", "ON_DUTY", "AUTHORIZED_LEAVE"].includes(record.status)) slot.attended += 1;
-      if (record.status === "ABSENT") slot.absent += 1;
+      const credit = attendanceCredit(record);
+      slot.attended += credit;
+      slot.absent += 1 - credit;
       if (record.status === "ON_DUTY") slot.onDuty += 1;
       if (["MEDICAL_LEAVE", "AUTHORIZED_LEAVE"].includes(record.status)) slot.leave += 1;
       grouped.set(record.session.sectionId, slot);
@@ -390,11 +401,22 @@ export class AttendanceService {
     }
   }
 
+  async requestCorrectionForRecord(user: AuthPrincipal, input: RequestCorrectionDto) {
+    const sessionWhere = await this.sessionWhere(user);
+    const record = await this.prisma.attendanceRecord.findFirst({
+      where: { id: input.recordId, session: sessionWhere },
+      select: { sessionId: true },
+    });
+    if (!record) throw new NotFoundException("Attendance record not found.");
+    return this.requestCorrection(user, record.sessionId, input);
+  }
+
   async reviewCorrection(user: AuthPrincipal, correctionId: string, approved: boolean, input: ReviewCorrectionDto, requestId: string) {
     if (!user.permissions.includes("attendance.correction.approve")) throw new ForbiddenException("You cannot review attendance corrections.");
     const sessionWhere = await this.sessionWhere(user);
     const correction = await this.prisma.attendanceCorrectionRequest.findFirst({ where: { id: correctionId, status: "PENDING", session: sessionWhere }, include: { record: true, session: true } });
     if (!correction) throw new NotFoundException("Pending correction request not found.");
+    if (correction.requestedById === user.id) throw new ForbiddenException("You cannot approve your own attendance correction request.");
     return this.prisma.$transaction(async (tx) => {
       const claimed = await tx.attendanceCorrectionRequest.updateMany({
         where: { id: correction.id, status: "PENDING" },
@@ -403,18 +425,20 @@ export class AttendanceService {
       if (claimed.count !== 1) throw new ConflictException("This correction was already reviewed.");
       if (approved) {
         if (correction.record.status === correction.requestedStatus) throw new ConflictException("The attendance record already has the requested status.");
-        const changed = await tx.attendanceRecord.updateMany({ where: { id: correction.recordId, version: correction.record.version }, data: { status: correction.requestedStatus, version: { increment: 1 } } });
+        const parts = this.partsFor(correction.requestedStatus);
+        const changed = await tx.attendanceRecord.updateMany({ where: { id: correction.recordId, version: correction.record.version }, data: { status: correction.requestedStatus, ...parts, correctionReason: correction.reason, correctedById: user.id, correctedAt: new Date(), version: { increment: 1 } } });
         if (changed.count !== 1) throw new ConflictException("The attendance record changed while this correction was being reviewed.");
-        await tx.attendanceChangeHistory.create({ data: { recordId: correction.recordId, previousStatus: correction.record.status, newStatus: correction.requestedStatus, previousNote: correction.record.note, newNote: correction.record.note, changedById: user.id, reason: correction.reason, requestId } });
+        await tx.attendanceChangeHistory.create({ data: { recordId: correction.recordId, previousStatus: correction.record.status, newStatus: correction.requestedStatus, previousMorningStatus: correction.record.morningStatus, previousAfternoonStatus: correction.record.afternoonStatus, morningStatus: parts.morningStatus, afternoonStatus: parts.afternoonStatus, previousEffectiveAttendanceValue: correction.record.effectiveAttendanceValue, newEffectiveAttendanceValue: parts.effectiveAttendanceValue, previousNote: correction.record.note, newNote: correction.record.note, changedById: user.id, reason: correction.reason, requestId } });
       }
       return tx.attendanceCorrectionRequest.findUniqueOrThrow({ where: { id: correction.id } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async corrections(user: AuthPrincipal, status?: "PENDING" | "APPROVED" | "REJECTED") {
+    if (!user.permissions.includes("attendance.correction.approve") && !user.permissions.includes("attendance.correction.request")) throw new ForbiddenException("You cannot access attendance corrections.");
     const sessionWhere = await this.sessionWhere(user);
     return this.prisma.attendanceCorrectionRequest.findMany({
-      where: { session: sessionWhere, ...(status ? { status } : {}) },
+      where: { session: sessionWhere, ...(!user.permissions.includes("attendance.correction.approve") ? { requestedById: user.id } : {}), ...(status ? { status } : {}) },
       include: {
         record: { include: { student: { select: { publicId: true, fullName: true, collegeIdentityId: true } } } },
         session: { include: { subject: { select: { code: true, name: true } }, section: { select: { code: true, name: true } } } },
@@ -424,6 +448,17 @@ export class AttendanceService {
       orderBy: { createdAt: "desc" },
       take: 200,
     });
+  }
+
+  async correction(user: AuthPrincipal, id: string) {
+    if (!user.permissions.includes("attendance.correction.approve") && !user.permissions.includes("attendance.correction.request")) throw new ForbiddenException("You cannot access attendance corrections.");
+    const sessionWhere = await this.sessionWhere(user);
+    const correction = await this.prisma.attendanceCorrectionRequest.findFirst({
+      where: { id, session: sessionWhere, ...(!user.permissions.includes("attendance.correction.approve") ? { requestedById: user.id } : {}) },
+      include: { record: { include: { student: { select: { publicId: true, fullName: true, collegeIdentityId: true } } } }, session: { include: { subject: true, section: true } }, requestedBy: { select: { publicId: true, fullName: true } }, reviewedBy: { select: { publicId: true, fullName: true } } },
+    });
+    if (!correction) throw new NotFoundException("Attendance correction request not found.");
+    return correction;
   }
 
   private async authorizedSession(user: AuthPrincipal, sessionId: string, requireMarkPermission = false) {
@@ -508,14 +543,14 @@ export class AttendanceService {
       department?: { name: string } | null;
       section?: { code: string; name: string } | null;
     },
-    records: Array<{ status: string; session: { subjectId: string; sessionDate: Date; subject?: { code: string; name: string } } }>,
+    records: Array<{ status: string; effectiveAttendanceValue?: number | { toNumber(): number } | null; session: { subjectId: string; sessionDate: Date; subject?: { code: string; name: string } } }>,
     thresholds: { required: number; warning: number; critical: number },
     showContact: boolean,
     sessions?: Array<{ subject: { id: string; code: string; name: string }; sessionDate: Date }>,
   ) {
     const totalPeriods = sessions?.length ?? records.length;
-    const presentPeriods = records.filter((record) => attendedCodes.has(record.status)).length;
-    const absentPeriods = records.filter((record) => record.status === "ABSENT").length;
+    const presentPeriods = records.reduce((sum, record) => sum + attendanceCredit(record), 0);
+    const absentPeriods = Math.max(0, totalPeriods - presentPeriods);
     const onDutyPeriods = records.filter((record) => record.status === "ON_DUTY").length;
     const leavePeriods = records.filter((record) => ["MEDICAL_LEAVE", "AUTHORIZED_LEAVE"].includes(record.status)).length;
     const attendancePercentage = this.percentage(presentPeriods, totalPeriods);
@@ -524,7 +559,7 @@ export class AttendanceService {
       if (!record.session.subject) continue;
       const slot = subjectMap.get(record.session.subjectId) ?? { subject: record.session.subject, total: 0, attended: 0 };
       slot.total += 1;
-      if (attendedCodes.has(record.status)) slot.attended += 1;
+      slot.attended += attendanceCredit(record);
       subjectMap.set(record.session.subjectId, slot);
     }
     const lastAttendance = records.reduce<Date | null>((latest, record) => !latest || record.session.sessionDate > latest ? record.session.sessionDate : latest, null);
@@ -565,6 +600,11 @@ export class AttendanceService {
     if (percentage >= thresholds.required) return "SAFE";
     if (percentage >= thresholds.warning) return "WARNING";
     return "CRITICAL";
+  }
+
+  private partsFor(status: Parameters<typeof attendanceParts>[0], morningStatus?: Parameters<typeof attendanceParts>[1], afternoonStatus?: Parameters<typeof attendanceParts>[2]) {
+    try { return attendanceParts(status, morningStatus, afternoonStatus); }
+    catch (error) { throw new BadRequestException(error instanceof Error ? error.message : "Invalid half-day attendance values."); }
   }
 
   private classesNeeded(attended: number, total: number, requiredPercentage: number): number {

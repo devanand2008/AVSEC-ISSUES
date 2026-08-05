@@ -48,6 +48,15 @@ export class CreateRoomDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
+export class CreateAreaDto {
+  @ApiProperty() @IsUUID() floorId!: string;
+  @ApiProperty() @IsString() @Length(1, 40) code!: string;
+  @ApiProperty() @IsString() @Length(2, 150) name!: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) description?: string;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(10_000) sortOrder?: number;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
+}
+
 export class UpdateLocationStatusDto {
   @ApiProperty() @IsBoolean() isActive!: boolean;
 }

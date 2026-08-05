@@ -123,6 +123,22 @@ export class LearningStorageController {
 }
 
 @ApiTags("learning-resources")
+@Controller("learn/subjects/:subjectId")
+export class LearnSubjectResourceUploadController {
+  constructor(private readonly storage: StorageService) {}
+
+  @Post("resources")
+  completeResource(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("subjectId", ParseUUIDPipe) subjectId: string,
+    @Body() input: CompleteSubjectResourceDto,
+    @CurrentRequestId() requestId: string,
+  ) {
+    return this.storage.completeSubjectResource(user, subjectId, input, requestId);
+  }
+}
+
+@ApiTags("learning-resources")
 @Controller("learn")
 export class LearningResourceDownloadController {
   constructor(private readonly storage: StorageService) {}

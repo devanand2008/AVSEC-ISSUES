@@ -22,6 +22,7 @@ export function AvsBotWidget() {
   const [messages, setMessages] = useState<BotMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string>();
+  const [retryMessage, setRetryMessage] = useState<string>();
   const controller = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement | null>(null);
   const [streaming, setStreaming] = useState(false);
@@ -39,6 +40,7 @@ export function AvsBotWidget() {
     if (!value || controller.current) return;
     setDraft("");
     setError(undefined);
+    setRetryMessage(undefined);
     const userId = idempotencyKey();
     const assistantId = `pending-${userId}`;
     setMessages((current) => [
@@ -143,7 +145,10 @@ export function AvsBotWidget() {
             : entry,
         ),
       );
-      if (!cancelled) setError(failureMessage);
+      if (!cancelled) {
+        setError(failureMessage);
+        setRetryMessage(value);
+      }
     } finally {
       controller.current = null;
       setStreaming(false);
@@ -212,7 +217,7 @@ export function AvsBotWidget() {
                 )}
               </article>
             ))}
-            {error && <div className="error-box" style={{ fontSize: "0.85rem" }}>{error}</div>}
+            {error && <div className="error-box" role="alert" style={{ fontSize: "0.85rem" }}>{error}{retryMessage && <button type="button" className="btn btn-secondary" onClick={() => void send(retryMessage)} style={{ marginLeft: 8 }}>Retry</button>}</div>}
             <div ref={end} />
           </div>
           <form onSubmit={submit} style={{ padding: 12, borderTop: "1px solid var(--border)", display: "flex", gap: 8, background: "white" }}>

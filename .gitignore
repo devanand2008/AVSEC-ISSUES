@@ -1,6 +1,7 @@
 # Dependencies and builds
 node_modules/
 .npm-cache/
+.codex-npm-cache/
 dist/
 build/
 .next/

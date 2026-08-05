@@ -50,6 +50,7 @@ Dockerfile
 
 # ── Caches ──
 .npm-cache
+.codex-npm-cache
 **/.cache
 
 # ── IDE and editor ──

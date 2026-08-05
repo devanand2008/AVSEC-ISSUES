@@ -18,6 +18,9 @@ export class IssuesController {
 
   @Get("issues")
   list(@CurrentUser() user: AuthPrincipal, @Query("page", new DefaultValuePipe(1), ParseIntPipe) page: number, @Query("pageSize", new DefaultValuePipe(20), ParseIntPipe) pageSize: number, @Query("status", new ParseEnumPipe(IssueStatus, { optional: true })) status?: IssueStatus, @Query("search") search?: string, @Query("assigned", new ParseBoolPipe({ optional: true })) assigned?: boolean) { return this.issues.list(user, Math.max(1, page), Math.min(100, Math.max(1, pageSize)), { status, search, assigned }); }
+  @Permissions("issues.read_assigned")
+  @Get("maintenance/issues/assigned")
+  assigned(@CurrentUser() user: AuthPrincipal, @Query("page", new DefaultValuePipe(1), ParseIntPipe) page: number, @Query("pageSize", new DefaultValuePipe(100), ParseIntPipe) pageSize: number, @Query("status", new ParseEnumPipe(IssueStatus, { optional: true })) status?: IssueStatus) { return this.issues.assigned(user, Math.max(1, page), Math.min(100, Math.max(1, pageSize)), status); }
   @Permissions("issues.assign") @Get("issues/assignment-options") assignmentOptions(@CurrentUser() user: AuthPrincipal) { return this.issues.assignmentOptions(user); }
   @Get("issues/:id") detail(@CurrentUser() user: AuthPrincipal, @Param("id") id: string) { return this.issues.detail(user, id); }
   @Permissions("issues.assign")

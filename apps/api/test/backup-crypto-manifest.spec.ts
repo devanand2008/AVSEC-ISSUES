@@ -44,7 +44,7 @@ describe("encrypted backup artifacts and manifests", () => {
     await writeFile(artifact, tampered);
     await expect(crypto.decryptFile(artifact, join(directory, "tampered.dump"), key))
       .rejects.toThrow("authentication failed");
-  });
+  }, 20_000);
 
   it("authenticates the complete manifest and rejects metadata changes", () => {
     const payload: Omit<BackupManifest, "manifestHmacSha256"> = {

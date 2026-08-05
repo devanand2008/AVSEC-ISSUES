@@ -28,7 +28,7 @@ interface Broadcast {
   id: string;
   title: string;
   body: string;
-  audienceType: "ALL" | "ROLE" | "DEPARTMENT" | "SECTION" | "INDIVIDUAL";
+  audienceType: "ALL" | "ROLE" | "DEPARTMENT" | "PROGRAMME" | "ACADEMIC_YEAR" | "SEMESTER" | "SECTION" | "INDIVIDUAL";
   audienceValue: string | null;
   status: "DRAFT" | "SCHEDULED" | "QUEUED" | "SENDING" | "SENT" | "FAILED" | "CANCELLED";
   totalRecipients: number;
@@ -43,11 +43,17 @@ interface BroadcastMeta { page: number; pageSize: number; total: number; pageCou
 interface Department { id: string; code: string; name: string }
 interface Role { code: string; name: string }
 interface Section { id: string; code: string; name: string }
+interface AcademicOption { id: string; code?: string; name: string; number?: number }
+interface Recipient { id: string; publicId: string; collegeIdentityId: string; fullName: string; roles: Array<{ code: string; name: string }>; department: { id: string; name: string } | null; section: { id: string; code: string; name: string } | null }
+interface RecipientResponse { items: Recipient[]; meta: { page: number; pageSize: number; total: number; pageCount: number } }
 
 const AUDIENCE_LABELS: Record<string, string> = {
   ALL: "All Users",
   ROLE: "By Role",
   DEPARTMENT: "By Department",
+  PROGRAMME: "By Programme",
+  ACADEMIC_YEAR: "By Academic Year",
+  SEMESTER: "By Semester",
   SECTION: "By Class/Section",
   INDIVIDUAL: "Individual User",
 };
@@ -95,7 +101,7 @@ function formatDate(value: string) {
 interface ComposeForm {
   title: string;
   body: string;
-  audienceType: "ALL" | "ROLE" | "DEPARTMENT" | "SECTION" | "INDIVIDUAL";
+  audienceType: "ALL" | "ROLE" | "DEPARTMENT" | "PROGRAMME" | "ACADEMIC_YEAR" | "SEMESTER" | "SECTION" | "INDIVIDUAL";
   audienceValue: string;
   scheduledAt: string;
 }
@@ -104,6 +110,9 @@ const blank: ComposeForm = { title: "", body: "", audienceType: "ALL", audienceV
 function ComposeBroadcast({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<ComposeForm>(blank);
   const [error, setError] = useState("");
+  const [recipientSearch, setRecipientSearch] = useState("");
+  const [recipientPage, setRecipientPage] = useState(1);
+  const [selectedRecipients, setSelectedRecipients] = useState<Record<string, Recipient>>({});
 
   const departments = useQuery({
     queryKey: ["departments-for-broadcast"],
@@ -117,13 +126,28 @@ function ComposeBroadcast({ onClose, onSaved }: { onClose: () => void; onSaved: 
     queryKey: ["sections-for-broadcast"],
     queryFn: () => api.get<Section[]>("/academic/sections"),
   });
+  const programmes = useQuery({ queryKey: ["programmes-for-broadcast"], queryFn: () => api.get<AcademicOption[]>("/academic/programmes") });
+  const academicYears = useQuery({ queryKey: ["years-for-broadcast"], queryFn: () => api.get<AcademicOption[]>("/academic/years") });
+  const semesters = useQuery({ queryKey: ["semesters-for-broadcast"], queryFn: () => api.get<AcademicOption[]>("/academic/semesters") });
+  const recipientFilter = form.audienceType === "ROLE" ? `role=${encodeURIComponent(form.audienceValue)}`
+    : form.audienceType === "DEPARTMENT" ? `departmentId=${encodeURIComponent(form.audienceValue)}`
+      : form.audienceType === "PROGRAMME" ? `programmeId=${encodeURIComponent(form.audienceValue)}`
+        : form.audienceType === "ACADEMIC_YEAR" ? `academicYearId=${encodeURIComponent(form.audienceValue)}`
+          : form.audienceType === "SEMESTER" ? `semesterId=${encodeURIComponent(form.audienceValue)}`
+            : form.audienceType === "SECTION" ? `sectionId=${encodeURIComponent(form.audienceValue)}` : "";
+  const recipients = useQuery({
+    queryKey: ["broadcast-recipients", form.audienceType, form.audienceValue, recipientSearch, recipientPage],
+    queryFn: () => api.get<RecipientResponse>(`/broadcast/recipients?page=${recipientPage}&pageSize=20&search=${encodeURIComponent(recipientSearch)}${recipientFilter ? `&${recipientFilter}` : ""}`),
+    enabled: form.audienceType === "INDIVIDUAL" || (form.audienceType !== "ALL" && Boolean(form.audienceValue)),
+  });
 
   const saveMutation = useMutation({
     mutationFn: () => api.post<Broadcast>("/broadcasts", {
       title: form.title.trim(),
       body: form.body.trim(),
       audienceType: form.audienceType,
-      audienceValue: form.audienceType !== "ALL" ? form.audienceValue || undefined : undefined,
+      audienceValue: !["ALL", "INDIVIDUAL"].includes(form.audienceType) ? form.audienceValue || undefined : undefined,
+      recipientIds: form.audienceType === "INDIVIDUAL" ? Object.keys(selectedRecipients) : undefined,
       scheduledAt: form.scheduledAt || undefined,
     }),
     onSuccess: () => { onSaved(); onClose(); },
@@ -135,7 +159,8 @@ function ComposeBroadcast({ onClose, onSaved }: { onClose: () => void; onSaved: 
     setError("");
     if (!form.title.trim()) return setError("Title is required.");
     if (!form.body.trim()) return setError("Message body is required.");
-    if (form.audienceType !== "ALL" && !form.audienceValue) return setError("Please specify the audience value.");
+    if (form.audienceType === "INDIVIDUAL" && !Object.keys(selectedRecipients).length) return setError("Select at least one recipient.");
+    if (!["ALL", "INDIVIDUAL"].includes(form.audienceType) && !form.audienceValue) return setError("Please specify the audience value.");
     saveMutation.mutate();
   }
 
@@ -167,7 +192,7 @@ function ComposeBroadcast({ onClose, onSaved }: { onClose: () => void; onSaved: 
             <select
               className="input"
               value={form.audienceType}
-              onChange={(e) => setForm({ ...form, audienceType: e.target.value as ComposeForm["audienceType"], audienceValue: "" })}
+              onChange={(e) => { setForm({ ...form, audienceType: e.target.value as ComposeForm["audienceType"], audienceValue: "" }); setRecipientPage(1); setSelectedRecipients({}); }}
             >
               {Object.entries(AUDIENCE_LABELS).map(([val, label]) => (
                 <option key={val} value={val}>{label}</option>
@@ -179,6 +204,9 @@ function ComposeBroadcast({ onClose, onSaved }: { onClose: () => void; onSaved: 
               <label>
                 {form.audienceType === "ROLE" ? "Role" :
                   form.audienceType === "DEPARTMENT" ? "Department" :
+                  form.audienceType === "PROGRAMME" ? "Programme" :
+                  form.audienceType === "ACADEMIC_YEAR" ? "Academic Year" :
+                  form.audienceType === "SEMESTER" ? "Semester" :
                   form.audienceType === "SECTION" ? "Section" : "College ID or User ID"}
                 <span style={{ color: "#dc2626" }}> *</span>
               </label>
@@ -206,6 +234,24 @@ function ComposeBroadcast({ onClose, onSaved }: { onClose: () => void; onSaved: 
                   ))}
                 </select>
               )}
+              {form.audienceType === "PROGRAMME" && (
+                <select className="input" value={form.audienceValue} onChange={(e) => setForm({ ...form, audienceValue: e.target.value })}>
+                  <option value="">Select programme…</option>
+                  {programmes.data?.map((item) => <option key={item.id} value={item.id}>{item.name}{item.code ? ` (${item.code})` : ""}</option>)}
+                </select>
+              )}
+              {form.audienceType === "ACADEMIC_YEAR" && (
+                <select className="input" value={form.audienceValue} onChange={(e) => setForm({ ...form, audienceValue: e.target.value })}>
+                  <option value="">Select academic year…</option>
+                  {academicYears.data?.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              )}
+              {form.audienceType === "SEMESTER" && (
+                <select className="input" value={form.audienceValue} onChange={(e) => setForm({ ...form, audienceValue: e.target.value })}>
+                  <option value="">Select semester…</option>
+                  {semesters.data?.map((item) => <option key={item.id} value={item.id}>{item.name}{item.number ? ` (Semester ${item.number})` : ""}</option>)}
+                </select>
+              )}
               {form.audienceType === "SECTION" && (
                 <select
                   className="input"
@@ -221,11 +267,27 @@ function ComposeBroadcast({ onClose, onSaved }: { onClose: () => void; onSaved: 
               {form.audienceType === "INDIVIDUAL" && (
                 <input
                   className="input"
-                  placeholder="Enter College ID (e.g. 22EE001)"
-                  value={form.audienceValue}
-                  onChange={(e) => setForm({ ...form, audienceValue: e.target.value })}
+                  placeholder="Search name, college ID or email"
+                  value={recipientSearch}
+                  onChange={(e) => { setRecipientSearch(e.target.value); setRecipientPage(1); }}
                 />
               )}
+            </div>
+          )}
+          {form.audienceType !== "ALL" && (form.audienceType === "INDIVIDUAL" || form.audienceValue) && (
+            <div className="field form-span">
+              <label>{form.audienceType === "INDIVIDUAL" ? `Recipients (${Object.keys(selectedRecipients).length} selected)` : "Recipient preview"}</label>
+              {recipients.isLoading ? <small className="muted">Loading recipients…</small> : recipients.isError ? <div className="error-box">Recipients could not be loaded. Please retry. <button className="btn btn-secondary" type="button" onClick={() => void recipients.refetch()}>Retry</button></div> : <>
+                {form.audienceType !== "INDIVIDUAL" && <small className="muted">{recipients.data?.meta.total ?? 0} active recipients match this audience.</small>}
+                {form.audienceType === "INDIVIDUAL" && <><div className="button-row" style={{ marginBottom: 8 }}>
+                  <button type="button" className="btn btn-secondary" disabled={!recipients.data?.items.length} onClick={() => setSelectedRecipients((current) => ({ ...current, ...Object.fromEntries((recipients.data?.items ?? []).map((item) => [item.id, item])) }))}>Select current page</button>
+                  <button type="button" className="btn btn-secondary" disabled={!Object.keys(selectedRecipients).length} onClick={() => setSelectedRecipients({})}>Clear selection</button>
+                </div><div style={{ maxHeight: 240, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
+                  {!recipients.data?.items.length && <p className="muted" style={{ padding: 12 }}>No active recipients match this search.</p>}
+                  {recipients.data?.items.map((recipient) => <label key={recipient.id} style={{ display: "flex", gap: 10, padding: 10, borderBottom: "1px solid var(--border)", alignItems: "center" }}><input type="checkbox" checked={Boolean(selectedRecipients[recipient.id])} onChange={() => setSelectedRecipients((current) => { const next = { ...current }; if (next[recipient.id]) delete next[recipient.id]; else next[recipient.id] = recipient; return next; })} /><span><strong>{recipient.fullName}</strong><small className="muted" style={{ display: "block" }}>{recipient.collegeIdentityId} · {recipient.department?.name ?? recipient.roles.map((role) => role.name).join(", ")}</small></span></label>)}
+                </div></>}
+                {(recipients.data?.meta.pageCount ?? 0) > 1 && <div className="button-row" style={{ marginTop: 8 }}><button type="button" className="btn btn-secondary" disabled={recipientPage <= 1} onClick={() => setRecipientPage((page) => page - 1)}>Previous</button><small className="muted">Page {recipientPage} of {recipients.data?.meta.pageCount}</small><button type="button" className="btn btn-secondary" disabled={recipientPage >= (recipients.data?.meta.pageCount ?? 1)} onClick={() => setRecipientPage((page) => page + 1)}>Next</button></div>}
+              </>}
             </div>
           )}
           <div className="field">

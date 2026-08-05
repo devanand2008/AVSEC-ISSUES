@@ -1924,6 +1924,929 @@ class LocalCachePreferencesCompanion
   }
 }
 
+class $LocalAiConversationsTable extends LocalAiConversations
+    with TableInfo<$LocalAiConversationsTable, LocalAiConversation> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalAiConversationsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _encryptedPayloadMeta = const VerificationMeta(
+    'encryptedPayload',
+  );
+  @override
+  late final GeneratedColumn<String> encryptedPayload = GeneratedColumn<String>(
+    'encrypted_payload',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, encryptedPayload, updatedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_ai_conversations';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LocalAiConversation> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('encrypted_payload')) {
+      context.handle(
+        _encryptedPayloadMeta,
+        encryptedPayload.isAcceptableOrUnknown(
+          data['encrypted_payload']!,
+          _encryptedPayloadMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_encryptedPayloadMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  LocalAiConversation map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LocalAiConversation(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      encryptedPayload: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}encrypted_payload'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalAiConversationsTable createAlias(String alias) {
+    return $LocalAiConversationsTable(attachedDatabase, alias);
+  }
+}
+
+class LocalAiConversation extends DataClass
+    implements Insertable<LocalAiConversation> {
+  final String id;
+  final String encryptedPayload;
+  final DateTime updatedAt;
+  const LocalAiConversation({
+    required this.id,
+    required this.encryptedPayload,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['encrypted_payload'] = Variable<String>(encryptedPayload);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  LocalAiConversationsCompanion toCompanion(bool nullToAbsent) {
+    return LocalAiConversationsCompanion(
+      id: Value(id),
+      encryptedPayload: Value(encryptedPayload),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory LocalAiConversation.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LocalAiConversation(
+      id: serializer.fromJson<String>(json['id']),
+      encryptedPayload: serializer.fromJson<String>(json['encryptedPayload']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'encryptedPayload': serializer.toJson<String>(encryptedPayload),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  LocalAiConversation copyWith({
+    String? id,
+    String? encryptedPayload,
+    DateTime? updatedAt,
+  }) => LocalAiConversation(
+    id: id ?? this.id,
+    encryptedPayload: encryptedPayload ?? this.encryptedPayload,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  LocalAiConversation copyWithCompanion(LocalAiConversationsCompanion data) {
+    return LocalAiConversation(
+      id: data.id.present ? data.id.value : this.id,
+      encryptedPayload: data.encryptedPayload.present
+          ? data.encryptedPayload.value
+          : this.encryptedPayload,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalAiConversation(')
+          ..write('id: $id, ')
+          ..write('encryptedPayload: $encryptedPayload, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, encryptedPayload, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LocalAiConversation &&
+          other.id == this.id &&
+          other.encryptedPayload == this.encryptedPayload &&
+          other.updatedAt == this.updatedAt);
+}
+
+class LocalAiConversationsCompanion
+    extends UpdateCompanion<LocalAiConversation> {
+  final Value<String> id;
+  final Value<String> encryptedPayload;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const LocalAiConversationsCompanion({
+    this.id = const Value.absent(),
+    this.encryptedPayload = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalAiConversationsCompanion.insert({
+    required String id,
+    required String encryptedPayload,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       encryptedPayload = Value(encryptedPayload),
+       updatedAt = Value(updatedAt);
+  static Insertable<LocalAiConversation> custom({
+    Expression<String>? id,
+    Expression<String>? encryptedPayload,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (encryptedPayload != null) 'encrypted_payload': encryptedPayload,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalAiConversationsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? encryptedPayload,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return LocalAiConversationsCompanion(
+      id: id ?? this.id,
+      encryptedPayload: encryptedPayload ?? this.encryptedPayload,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (encryptedPayload.present) {
+      map['encrypted_payload'] = Variable<String>(encryptedPayload.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalAiConversationsCompanion(')
+          ..write('id: $id, ')
+          ..write('encryptedPayload: $encryptedPayload, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $LocalAiMessagesTable extends LocalAiMessages
+    with TableInfo<$LocalAiMessagesTable, LocalAiMessage> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalAiMessagesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _conversationIdMeta = const VerificationMeta(
+    'conversationId',
+  );
+  @override
+  late final GeneratedColumn<String> conversationId = GeneratedColumn<String>(
+    'conversation_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _encryptedPayloadMeta = const VerificationMeta(
+    'encryptedPayload',
+  );
+  @override
+  late final GeneratedColumn<String> encryptedPayload = GeneratedColumn<String>(
+    'encrypted_payload',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _stateMeta = const VerificationMeta('state');
+  @override
+  late final GeneratedColumn<String> state = GeneratedColumn<String>(
+    'state',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('COMPLETED'),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    conversationId,
+    encryptedPayload,
+    state,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_ai_messages';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LocalAiMessage> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('conversation_id')) {
+      context.handle(
+        _conversationIdMeta,
+        conversationId.isAcceptableOrUnknown(
+          data['conversation_id']!,
+          _conversationIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_conversationIdMeta);
+    }
+    if (data.containsKey('encrypted_payload')) {
+      context.handle(
+        _encryptedPayloadMeta,
+        encryptedPayload.isAcceptableOrUnknown(
+          data['encrypted_payload']!,
+          _encryptedPayloadMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_encryptedPayloadMeta);
+    }
+    if (data.containsKey('state')) {
+      context.handle(
+        _stateMeta,
+        state.isAcceptableOrUnknown(data['state']!, _stateMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  LocalAiMessage map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LocalAiMessage(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      conversationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}conversation_id'],
+      )!,
+      encryptedPayload: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}encrypted_payload'],
+      )!,
+      state: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}state'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalAiMessagesTable createAlias(String alias) {
+    return $LocalAiMessagesTable(attachedDatabase, alias);
+  }
+}
+
+class LocalAiMessage extends DataClass implements Insertable<LocalAiMessage> {
+  final String id;
+  final String conversationId;
+  final String encryptedPayload;
+  final String state;
+  final DateTime createdAt;
+  const LocalAiMessage({
+    required this.id,
+    required this.conversationId,
+    required this.encryptedPayload,
+    required this.state,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['conversation_id'] = Variable<String>(conversationId);
+    map['encrypted_payload'] = Variable<String>(encryptedPayload);
+    map['state'] = Variable<String>(state);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  LocalAiMessagesCompanion toCompanion(bool nullToAbsent) {
+    return LocalAiMessagesCompanion(
+      id: Value(id),
+      conversationId: Value(conversationId),
+      encryptedPayload: Value(encryptedPayload),
+      state: Value(state),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory LocalAiMessage.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LocalAiMessage(
+      id: serializer.fromJson<String>(json['id']),
+      conversationId: serializer.fromJson<String>(json['conversationId']),
+      encryptedPayload: serializer.fromJson<String>(json['encryptedPayload']),
+      state: serializer.fromJson<String>(json['state']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'conversationId': serializer.toJson<String>(conversationId),
+      'encryptedPayload': serializer.toJson<String>(encryptedPayload),
+      'state': serializer.toJson<String>(state),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  LocalAiMessage copyWith({
+    String? id,
+    String? conversationId,
+    String? encryptedPayload,
+    String? state,
+    DateTime? createdAt,
+  }) => LocalAiMessage(
+    id: id ?? this.id,
+    conversationId: conversationId ?? this.conversationId,
+    encryptedPayload: encryptedPayload ?? this.encryptedPayload,
+    state: state ?? this.state,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  LocalAiMessage copyWithCompanion(LocalAiMessagesCompanion data) {
+    return LocalAiMessage(
+      id: data.id.present ? data.id.value : this.id,
+      conversationId: data.conversationId.present
+          ? data.conversationId.value
+          : this.conversationId,
+      encryptedPayload: data.encryptedPayload.present
+          ? data.encryptedPayload.value
+          : this.encryptedPayload,
+      state: data.state.present ? data.state.value : this.state,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalAiMessage(')
+          ..write('id: $id, ')
+          ..write('conversationId: $conversationId, ')
+          ..write('encryptedPayload: $encryptedPayload, ')
+          ..write('state: $state, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, conversationId, encryptedPayload, state, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LocalAiMessage &&
+          other.id == this.id &&
+          other.conversationId == this.conversationId &&
+          other.encryptedPayload == this.encryptedPayload &&
+          other.state == this.state &&
+          other.createdAt == this.createdAt);
+}
+
+class LocalAiMessagesCompanion extends UpdateCompanion<LocalAiMessage> {
+  final Value<String> id;
+  final Value<String> conversationId;
+  final Value<String> encryptedPayload;
+  final Value<String> state;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const LocalAiMessagesCompanion({
+    this.id = const Value.absent(),
+    this.conversationId = const Value.absent(),
+    this.encryptedPayload = const Value.absent(),
+    this.state = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalAiMessagesCompanion.insert({
+    required String id,
+    required String conversationId,
+    required String encryptedPayload,
+    this.state = const Value.absent(),
+    required DateTime createdAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       conversationId = Value(conversationId),
+       encryptedPayload = Value(encryptedPayload),
+       createdAt = Value(createdAt);
+  static Insertable<LocalAiMessage> custom({
+    Expression<String>? id,
+    Expression<String>? conversationId,
+    Expression<String>? encryptedPayload,
+    Expression<String>? state,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (conversationId != null) 'conversation_id': conversationId,
+      if (encryptedPayload != null) 'encrypted_payload': encryptedPayload,
+      if (state != null) 'state': state,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalAiMessagesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? conversationId,
+    Value<String>? encryptedPayload,
+    Value<String>? state,
+    Value<DateTime>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return LocalAiMessagesCompanion(
+      id: id ?? this.id,
+      conversationId: conversationId ?? this.conversationId,
+      encryptedPayload: encryptedPayload ?? this.encryptedPayload,
+      state: state ?? this.state,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (conversationId.present) {
+      map['conversation_id'] = Variable<String>(conversationId.value);
+    }
+    if (encryptedPayload.present) {
+      map['encrypted_payload'] = Variable<String>(encryptedPayload.value);
+    }
+    if (state.present) {
+      map['state'] = Variable<String>(state.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalAiMessagesCompanion(')
+          ..write('id: $id, ')
+          ..write('conversationId: $conversationId, ')
+          ..write('encryptedPayload: $encryptedPayload, ')
+          ..write('state: $state, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $LocalAiDraftsTable extends LocalAiDrafts
+    with TableInfo<$LocalAiDraftsTable, LocalAiDraft> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalAiDraftsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _conversationIdMeta = const VerificationMeta(
+    'conversationId',
+  );
+  @override
+  late final GeneratedColumn<String> conversationId = GeneratedColumn<String>(
+    'conversation_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _encryptedPayloadMeta = const VerificationMeta(
+    'encryptedPayload',
+  );
+  @override
+  late final GeneratedColumn<String> encryptedPayload = GeneratedColumn<String>(
+    'encrypted_payload',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    conversationId,
+    encryptedPayload,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_ai_drafts';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LocalAiDraft> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('conversation_id')) {
+      context.handle(
+        _conversationIdMeta,
+        conversationId.isAcceptableOrUnknown(
+          data['conversation_id']!,
+          _conversationIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_conversationIdMeta);
+    }
+    if (data.containsKey('encrypted_payload')) {
+      context.handle(
+        _encryptedPayloadMeta,
+        encryptedPayload.isAcceptableOrUnknown(
+          data['encrypted_payload']!,
+          _encryptedPayloadMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_encryptedPayloadMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {conversationId};
+  @override
+  LocalAiDraft map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LocalAiDraft(
+      conversationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}conversation_id'],
+      )!,
+      encryptedPayload: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}encrypted_payload'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalAiDraftsTable createAlias(String alias) {
+    return $LocalAiDraftsTable(attachedDatabase, alias);
+  }
+}
+
+class LocalAiDraft extends DataClass implements Insertable<LocalAiDraft> {
+  final String conversationId;
+  final String encryptedPayload;
+  final DateTime updatedAt;
+  const LocalAiDraft({
+    required this.conversationId,
+    required this.encryptedPayload,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['conversation_id'] = Variable<String>(conversationId);
+    map['encrypted_payload'] = Variable<String>(encryptedPayload);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  LocalAiDraftsCompanion toCompanion(bool nullToAbsent) {
+    return LocalAiDraftsCompanion(
+      conversationId: Value(conversationId),
+      encryptedPayload: Value(encryptedPayload),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory LocalAiDraft.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LocalAiDraft(
+      conversationId: serializer.fromJson<String>(json['conversationId']),
+      encryptedPayload: serializer.fromJson<String>(json['encryptedPayload']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'conversationId': serializer.toJson<String>(conversationId),
+      'encryptedPayload': serializer.toJson<String>(encryptedPayload),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  LocalAiDraft copyWith({
+    String? conversationId,
+    String? encryptedPayload,
+    DateTime? updatedAt,
+  }) => LocalAiDraft(
+    conversationId: conversationId ?? this.conversationId,
+    encryptedPayload: encryptedPayload ?? this.encryptedPayload,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  LocalAiDraft copyWithCompanion(LocalAiDraftsCompanion data) {
+    return LocalAiDraft(
+      conversationId: data.conversationId.present
+          ? data.conversationId.value
+          : this.conversationId,
+      encryptedPayload: data.encryptedPayload.present
+          ? data.encryptedPayload.value
+          : this.encryptedPayload,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalAiDraft(')
+          ..write('conversationId: $conversationId, ')
+          ..write('encryptedPayload: $encryptedPayload, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(conversationId, encryptedPayload, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LocalAiDraft &&
+          other.conversationId == this.conversationId &&
+          other.encryptedPayload == this.encryptedPayload &&
+          other.updatedAt == this.updatedAt);
+}
+
+class LocalAiDraftsCompanion extends UpdateCompanion<LocalAiDraft> {
+  final Value<String> conversationId;
+  final Value<String> encryptedPayload;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const LocalAiDraftsCompanion({
+    this.conversationId = const Value.absent(),
+    this.encryptedPayload = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalAiDraftsCompanion.insert({
+    required String conversationId,
+    required String encryptedPayload,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : conversationId = Value(conversationId),
+       encryptedPayload = Value(encryptedPayload),
+       updatedAt = Value(updatedAt);
+  static Insertable<LocalAiDraft> custom({
+    Expression<String>? conversationId,
+    Expression<String>? encryptedPayload,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (conversationId != null) 'conversation_id': conversationId,
+      if (encryptedPayload != null) 'encrypted_payload': encryptedPayload,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalAiDraftsCompanion copyWith({
+    Value<String>? conversationId,
+    Value<String>? encryptedPayload,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return LocalAiDraftsCompanion(
+      conversationId: conversationId ?? this.conversationId,
+      encryptedPayload: encryptedPayload ?? this.encryptedPayload,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (conversationId.present) {
+      map['conversation_id'] = Variable<String>(conversationId.value);
+    }
+    if (encryptedPayload.present) {
+      map['encrypted_payload'] = Variable<String>(encryptedPayload.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalAiDraftsCompanion(')
+          ..write('conversationId: $conversationId, ')
+          ..write('encryptedPayload: $encryptedPayload, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AvsLocalDatabase extends GeneratedDatabase {
   _$AvsLocalDatabase(QueryExecutor e) : super(e);
   $AvsLocalDatabaseManager get managers => $AvsLocalDatabaseManager(this);
@@ -1938,6 +2861,12 @@ abstract class _$AvsLocalDatabase extends GeneratedDatabase {
   );
   late final $LocalCachePreferencesTable localCachePreferences =
       $LocalCachePreferencesTable(this);
+  late final $LocalAiConversationsTable localAiConversations =
+      $LocalAiConversationsTable(this);
+  late final $LocalAiMessagesTable localAiMessages = $LocalAiMessagesTable(
+    this,
+  );
+  late final $LocalAiDraftsTable localAiDrafts = $LocalAiDraftsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1949,6 +2878,9 @@ abstract class _$AvsLocalDatabase extends GeneratedDatabase {
     localDrafts,
     localSyncCursors,
     localCachePreferences,
+    localAiConversations,
+    localAiMessages,
+    localAiDrafts,
   ];
 }
 
@@ -3106,6 +4038,572 @@ typedef $$LocalCachePreferencesTableProcessedTableManager =
       LocalCachePreference,
       PrefetchHooks Function()
     >;
+typedef $$LocalAiConversationsTableCreateCompanionBuilder =
+    LocalAiConversationsCompanion Function({
+      required String id,
+      required String encryptedPayload,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$LocalAiConversationsTableUpdateCompanionBuilder =
+    LocalAiConversationsCompanion Function({
+      Value<String> id,
+      Value<String> encryptedPayload,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$LocalAiConversationsTableFilterComposer
+    extends Composer<_$AvsLocalDatabase, $LocalAiConversationsTable> {
+  $$LocalAiConversationsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get encryptedPayload => $composableBuilder(
+    column: $table.encryptedPayload,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalAiConversationsTableOrderingComposer
+    extends Composer<_$AvsLocalDatabase, $LocalAiConversationsTable> {
+  $$LocalAiConversationsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get encryptedPayload => $composableBuilder(
+    column: $table.encryptedPayload,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalAiConversationsTableAnnotationComposer
+    extends Composer<_$AvsLocalDatabase, $LocalAiConversationsTable> {
+  $$LocalAiConversationsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get encryptedPayload => $composableBuilder(
+    column: $table.encryptedPayload,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$LocalAiConversationsTableTableManager
+    extends
+        RootTableManager<
+          _$AvsLocalDatabase,
+          $LocalAiConversationsTable,
+          LocalAiConversation,
+          $$LocalAiConversationsTableFilterComposer,
+          $$LocalAiConversationsTableOrderingComposer,
+          $$LocalAiConversationsTableAnnotationComposer,
+          $$LocalAiConversationsTableCreateCompanionBuilder,
+          $$LocalAiConversationsTableUpdateCompanionBuilder,
+          (
+            LocalAiConversation,
+            BaseReferences<
+              _$AvsLocalDatabase,
+              $LocalAiConversationsTable,
+              LocalAiConversation
+            >,
+          ),
+          LocalAiConversation,
+          PrefetchHooks Function()
+        > {
+  $$LocalAiConversationsTableTableManager(
+    _$AvsLocalDatabase db,
+    $LocalAiConversationsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalAiConversationsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalAiConversationsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$LocalAiConversationsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> encryptedPayload = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalAiConversationsCompanion(
+                id: id,
+                encryptedPayload: encryptedPayload,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String encryptedPayload,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => LocalAiConversationsCompanion.insert(
+                id: id,
+                encryptedPayload: encryptedPayload,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalAiConversationsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AvsLocalDatabase,
+      $LocalAiConversationsTable,
+      LocalAiConversation,
+      $$LocalAiConversationsTableFilterComposer,
+      $$LocalAiConversationsTableOrderingComposer,
+      $$LocalAiConversationsTableAnnotationComposer,
+      $$LocalAiConversationsTableCreateCompanionBuilder,
+      $$LocalAiConversationsTableUpdateCompanionBuilder,
+      (
+        LocalAiConversation,
+        BaseReferences<
+          _$AvsLocalDatabase,
+          $LocalAiConversationsTable,
+          LocalAiConversation
+        >,
+      ),
+      LocalAiConversation,
+      PrefetchHooks Function()
+    >;
+typedef $$LocalAiMessagesTableCreateCompanionBuilder =
+    LocalAiMessagesCompanion Function({
+      required String id,
+      required String conversationId,
+      required String encryptedPayload,
+      Value<String> state,
+      required DateTime createdAt,
+      Value<int> rowid,
+    });
+typedef $$LocalAiMessagesTableUpdateCompanionBuilder =
+    LocalAiMessagesCompanion Function({
+      Value<String> id,
+      Value<String> conversationId,
+      Value<String> encryptedPayload,
+      Value<String> state,
+      Value<DateTime> createdAt,
+      Value<int> rowid,
+    });
+
+class $$LocalAiMessagesTableFilterComposer
+    extends Composer<_$AvsLocalDatabase, $LocalAiMessagesTable> {
+  $$LocalAiMessagesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get encryptedPayload => $composableBuilder(
+    column: $table.encryptedPayload,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get state => $composableBuilder(
+    column: $table.state,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalAiMessagesTableOrderingComposer
+    extends Composer<_$AvsLocalDatabase, $LocalAiMessagesTable> {
+  $$LocalAiMessagesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get encryptedPayload => $composableBuilder(
+    column: $table.encryptedPayload,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get state => $composableBuilder(
+    column: $table.state,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalAiMessagesTableAnnotationComposer
+    extends Composer<_$AvsLocalDatabase, $LocalAiMessagesTable> {
+  $$LocalAiMessagesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get encryptedPayload => $composableBuilder(
+    column: $table.encryptedPayload,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get state =>
+      $composableBuilder(column: $table.state, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$LocalAiMessagesTableTableManager
+    extends
+        RootTableManager<
+          _$AvsLocalDatabase,
+          $LocalAiMessagesTable,
+          LocalAiMessage,
+          $$LocalAiMessagesTableFilterComposer,
+          $$LocalAiMessagesTableOrderingComposer,
+          $$LocalAiMessagesTableAnnotationComposer,
+          $$LocalAiMessagesTableCreateCompanionBuilder,
+          $$LocalAiMessagesTableUpdateCompanionBuilder,
+          (
+            LocalAiMessage,
+            BaseReferences<
+              _$AvsLocalDatabase,
+              $LocalAiMessagesTable,
+              LocalAiMessage
+            >,
+          ),
+          LocalAiMessage,
+          PrefetchHooks Function()
+        > {
+  $$LocalAiMessagesTableTableManager(
+    _$AvsLocalDatabase db,
+    $LocalAiMessagesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalAiMessagesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalAiMessagesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LocalAiMessagesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> conversationId = const Value.absent(),
+                Value<String> encryptedPayload = const Value.absent(),
+                Value<String> state = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalAiMessagesCompanion(
+                id: id,
+                conversationId: conversationId,
+                encryptedPayload: encryptedPayload,
+                state: state,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String conversationId,
+                required String encryptedPayload,
+                Value<String> state = const Value.absent(),
+                required DateTime createdAt,
+                Value<int> rowid = const Value.absent(),
+              }) => LocalAiMessagesCompanion.insert(
+                id: id,
+                conversationId: conversationId,
+                encryptedPayload: encryptedPayload,
+                state: state,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalAiMessagesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AvsLocalDatabase,
+      $LocalAiMessagesTable,
+      LocalAiMessage,
+      $$LocalAiMessagesTableFilterComposer,
+      $$LocalAiMessagesTableOrderingComposer,
+      $$LocalAiMessagesTableAnnotationComposer,
+      $$LocalAiMessagesTableCreateCompanionBuilder,
+      $$LocalAiMessagesTableUpdateCompanionBuilder,
+      (
+        LocalAiMessage,
+        BaseReferences<
+          _$AvsLocalDatabase,
+          $LocalAiMessagesTable,
+          LocalAiMessage
+        >,
+      ),
+      LocalAiMessage,
+      PrefetchHooks Function()
+    >;
+typedef $$LocalAiDraftsTableCreateCompanionBuilder =
+    LocalAiDraftsCompanion Function({
+      required String conversationId,
+      required String encryptedPayload,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$LocalAiDraftsTableUpdateCompanionBuilder =
+    LocalAiDraftsCompanion Function({
+      Value<String> conversationId,
+      Value<String> encryptedPayload,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$LocalAiDraftsTableFilterComposer
+    extends Composer<_$AvsLocalDatabase, $LocalAiDraftsTable> {
+  $$LocalAiDraftsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get encryptedPayload => $composableBuilder(
+    column: $table.encryptedPayload,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalAiDraftsTableOrderingComposer
+    extends Composer<_$AvsLocalDatabase, $LocalAiDraftsTable> {
+  $$LocalAiDraftsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get encryptedPayload => $composableBuilder(
+    column: $table.encryptedPayload,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalAiDraftsTableAnnotationComposer
+    extends Composer<_$AvsLocalDatabase, $LocalAiDraftsTable> {
+  $$LocalAiDraftsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get encryptedPayload => $composableBuilder(
+    column: $table.encryptedPayload,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$LocalAiDraftsTableTableManager
+    extends
+        RootTableManager<
+          _$AvsLocalDatabase,
+          $LocalAiDraftsTable,
+          LocalAiDraft,
+          $$LocalAiDraftsTableFilterComposer,
+          $$LocalAiDraftsTableOrderingComposer,
+          $$LocalAiDraftsTableAnnotationComposer,
+          $$LocalAiDraftsTableCreateCompanionBuilder,
+          $$LocalAiDraftsTableUpdateCompanionBuilder,
+          (
+            LocalAiDraft,
+            BaseReferences<
+              _$AvsLocalDatabase,
+              $LocalAiDraftsTable,
+              LocalAiDraft
+            >,
+          ),
+          LocalAiDraft,
+          PrefetchHooks Function()
+        > {
+  $$LocalAiDraftsTableTableManager(
+    _$AvsLocalDatabase db,
+    $LocalAiDraftsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalAiDraftsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalAiDraftsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LocalAiDraftsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> conversationId = const Value.absent(),
+                Value<String> encryptedPayload = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalAiDraftsCompanion(
+                conversationId: conversationId,
+                encryptedPayload: encryptedPayload,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String conversationId,
+                required String encryptedPayload,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => LocalAiDraftsCompanion.insert(
+                conversationId: conversationId,
+                encryptedPayload: encryptedPayload,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalAiDraftsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AvsLocalDatabase,
+      $LocalAiDraftsTable,
+      LocalAiDraft,
+      $$LocalAiDraftsTableFilterComposer,
+      $$LocalAiDraftsTableOrderingComposer,
+      $$LocalAiDraftsTableAnnotationComposer,
+      $$LocalAiDraftsTableCreateCompanionBuilder,
+      $$LocalAiDraftsTableUpdateCompanionBuilder,
+      (
+        LocalAiDraft,
+        BaseReferences<_$AvsLocalDatabase, $LocalAiDraftsTable, LocalAiDraft>,
+      ),
+      LocalAiDraft,
+      PrefetchHooks Function()
+    >;
 
 class $AvsLocalDatabaseManager {
   final _$AvsLocalDatabase _db;
@@ -3125,4 +4623,10 @@ class $AvsLocalDatabaseManager {
       $$LocalSyncCursorsTableTableManager(_db, _db.localSyncCursors);
   $$LocalCachePreferencesTableTableManager get localCachePreferences =>
       $$LocalCachePreferencesTableTableManager(_db, _db.localCachePreferences);
+  $$LocalAiConversationsTableTableManager get localAiConversations =>
+      $$LocalAiConversationsTableTableManager(_db, _db.localAiConversations);
+  $$LocalAiMessagesTableTableManager get localAiMessages =>
+      $$LocalAiMessagesTableTableManager(_db, _db.localAiMessages);
+  $$LocalAiDraftsTableTableManager get localAiDrafts =>
+      $$LocalAiDraftsTableTableManager(_db, _db.localAiDrafts);
 }

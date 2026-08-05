@@ -7,6 +7,8 @@ import '../admin/bulk_user_import_screen.dart';
 import '../admin/data_maintenance_screen.dart';
 import '../attendance/attendance_excel_screen.dart';
 import '../auth/auth_user.dart';
+import '../avs_bot/avs_bot_admin_screens.dart';
+import '../avs_bot/avs_bot_screen.dart';
 import '../campus/campus_setup_screen.dart';
 import '../learning/learning_home_screen.dart';
 import '../messaging/conversations_screen.dart';
@@ -37,6 +39,42 @@ class AvsAppShell extends StatefulWidget {
 class _AvsAppShellState extends State<AvsAppShell> {
   int _index = 0;
 
+  void _openAvsBot() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AvsBotScreen(
+          client: widget.client,
+          user: widget.user,
+          cache: widget.messageCache,
+          cacheError: widget.messageCacheError,
+          onOpenRoute: _openBotRoute,
+        ),
+      ),
+    );
+  }
+
+  void _openBotRoute(String route) {
+    final isAdmin = widget.user.roles.any(
+      (role) => ['SUPER_ADMIN', 'MAIN_ADMIN', 'PRINCIPAL'].contains(role),
+    );
+    final target = switch (route) {
+      '/attendance' => isAdmin ? 4 : 1,
+      '/campus' => isAdmin ? 1 : 0,
+      '/learn' => isAdmin ? 6 : 2,
+      '/profile' => isAdmin ? 6 : 4,
+      _ => 0,
+    };
+    setState(() => _index = target);
+    if (!mounted) return;
+    if (!{'/attendance', '/campus', '/learn', '/profile'}.contains(route)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Open the related item from the dashboard navigation.'),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isAdmin = widget.user.roles.any(
@@ -44,7 +82,7 @@ class _AvsAppShellState extends State<AvsAppShell> {
     );
     final pages = isAdmin
         ? [
-            _Dashboard(user: widget.user),
+            _Dashboard(user: widget.user, onOpenAvsBot: _openAvsBot),
             CampusSetupScreen(client: widget.client),
             PeopleListScreen(client: widget.client),
             SectionManagementScreen(client: widget.client),
@@ -64,7 +102,7 @@ class _AvsAppShellState extends State<AvsAppShell> {
             ),
           ]
         : [
-            _Dashboard(user: widget.user),
+            _Dashboard(user: widget.user, onOpenAvsBot: _openAvsBot),
             const _SimplePage(
               title: 'Attendance',
               icon: Icons.fact_check_outlined,
@@ -110,10 +148,7 @@ class _AvsAppShellState extends State<AvsAppShell> {
               icon: Icon(Icons.forum_outlined),
               label: 'Messenger',
             ),
-            NavigationDestination(
-              icon: Icon(Icons.more_horiz),
-              label: 'More',
-            ),
+            NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
           ]
         : const [
             NavigationDestination(
@@ -181,6 +216,14 @@ class _AvsAppShellState extends State<AvsAppShell> {
                   ],
                 )
               : pages[_index],
+          floatingActionButton: widget.user.permissions.contains('ai.use')
+              ? FloatingActionButton.extended(
+                  heroTag: 'avs-bot-launcher',
+                  onPressed: _openAvsBot,
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('AVS Bot'),
+                )
+              : null,
           bottomNavigationBar: wide || isAdmin
               ? null
               : NavigationBar(
@@ -232,10 +275,7 @@ class _LearnHub extends StatelessWidget {
           ),
           Expanded(
             child: TabBarView(
-              children: [
-                SkillDashboardScreen(),
-                LearningHomeScreen(),
-              ],
+              children: [SkillDashboardScreen(), LearningHomeScreen()],
             ),
           ),
         ],
@@ -245,9 +285,10 @@ class _LearnHub extends StatelessWidget {
 }
 
 class _Dashboard extends StatelessWidget {
-  const _Dashboard({required this.user});
+  const _Dashboard({required this.user, required this.onOpenAvsBot});
 
   final AuthUser user;
+  final VoidCallback onOpenAvsBot;
 
   @override
   Widget build(BuildContext context) {
@@ -259,6 +300,45 @@ class _Dashboard extends StatelessWidget {
           style: Theme.of(context).textTheme.headlineSmall,
         ),
         const SizedBox(height: 18),
+        if (user.permissions.contains('ai.use')) ...[
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              key: const Key('overview-avs-bot-card'),
+              onTap: onOpenAvsBot,
+              child: const Padding(
+                padding: EdgeInsets.all(18),
+                child: Row(
+                  children: [
+                    CircleAvatar(child: Icon(Icons.auto_awesome_outlined)),
+                    SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'AVS Bot',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'Ask about attendance, subjects, learning resources, campus services and issues.',
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    Icon(Icons.arrow_forward),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
         const ListTile(
           leading: Icon(Icons.campaign_outlined),
           title: Text('Announcements'),
@@ -294,6 +374,20 @@ class _AdminMore extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        if (user.permissions.contains('ai.admin'))
+          ListTile(
+            leading: const Icon(Icons.auto_awesome_outlined),
+            title: const Text('AVS Bot administration'),
+            subtitle: const Text(
+              'Usage, knowledge, safety and server configuration',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => AvsBotAdminScreen(client: client),
+              ),
+            ),
+          ),
         ListTile(
           leading: const Icon(Icons.upload_file),
           title: const Text('Data Import Centre'),
@@ -344,9 +438,9 @@ class _AdminMore extends StatelessWidget {
           leading: const Icon(Icons.menu_book_outlined),
           title: const Text('AVS Learn'),
           trailing: const Icon(Icons.chevron_right),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const LearningHomeScreen()),
-          ),
+          onTap: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const LearningHomeScreen())),
         ),
         const Divider(),
         ListTile(
@@ -375,7 +469,11 @@ class _SimplePage extends StatelessWidget {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        children: [Icon(icon, size: 42), const SizedBox(height: 10), Text(title)],
+        children: [
+          Icon(icon, size: 42),
+          const SizedBox(height: 10),
+          Text(title),
+        ],
       ),
     );
   }
@@ -411,8 +509,7 @@ class _Profile extends StatelessWidget {
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.titleLarge,
         ),
-        if (user.email != null)
-          Text(user.email!, textAlign: TextAlign.center),
+        if (user.email != null) Text(user.email!, textAlign: TextAlign.center),
         const SizedBox(height: 24),
         ListTile(
           leading: const Icon(Icons.lock_outline),

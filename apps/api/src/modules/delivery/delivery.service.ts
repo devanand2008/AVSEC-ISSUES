@@ -55,7 +55,7 @@ export class DeliveryService implements OnModuleInit, OnModuleDestroy {
   }
 
   async dispatchOutbox(): Promise<void> {
-    const events = await this.prisma.outboxEvent.findMany({ where: { processedAt: null, availableAt: { lte: new Date() }, eventType: { in: ["issue.created", "issue.status_changed", "issue.escalated", "feedback.submitted"] } }, take: 25, orderBy: { createdAt: "asc" } });
+    const events = await this.prisma.outboxEvent.findMany({ where: { processedAt: null, availableAt: { lte: new Date() }, eventType: { in: ["issue.created", "issue.status_changed", "issue.escalated", "feedback.submitted", "broadcast.sent"] } }, take: 25, orderBy: { createdAt: "asc" } });
     for (const event of events) {
       try {
         const payload = event.payload as { notificationId?: string };
@@ -232,6 +232,7 @@ export class DeliveryService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async channelsForEvent(eventType: string, aggregateId: string): Promise<DeliveryChannel[]> {
+    if (eventType === "broadcast.sent") return ["PUSH"];
     if (eventType !== "feedback.submitted") return ["PUSH", "WHATSAPP"];
     const submission = await this.prisma.feedbackSubmission.findUnique({ where: { id: aggregateId }, select: { collegeId: true } });
     if (!submission) return ["PUSH"];

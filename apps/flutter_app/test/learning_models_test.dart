@@ -8,11 +8,7 @@ void main() {
       'code': 'CS101',
       'title': 'Programming',
       'status': 'PUBLISHED',
-      '_count': {
-        'modules': 2,
-        'resources': 4,
-        'assessments': 1,
-      },
+      '_count': {'modules': 2, 'resources': 4, 'assessments': 1},
     });
 
     expect(course.moduleCount, 2);

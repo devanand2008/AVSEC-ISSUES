@@ -62,7 +62,7 @@ export default function AttendancePage() {
   const [selectedSectionId, setSelectedSectionId] = useState("");
   const [activeSessionId, setActiveSessionId] = useState("");
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ academicYearId: "", sectionId: "", subjectId: "", sessionDate: getTodayInKolkata(), periodNumber: 1 });
+  const [form, setForm] = useState({ academicYearId: "", sectionId: "", subjectId: "", sessionDate: getTodayInKolkata(), periodNumber: 1, sessionType: "LECTURE", startTime: "", endTime: "" });
   const [studentForm, setStudentForm] = useState({ fullName: "", studentId: "", email: "", mobile: "", rollNumber: "", admissionYear: new Date().getFullYear(), temporaryPassword: defaultStudentPassword });
   const permissions = user?.permissions ?? [];
   const canCreate = permissions.includes("attendance.session.create");
@@ -91,7 +91,7 @@ export default function AttendancePage() {
   const formSubjectId = filteredSubjects.some((item) => item.id === form.subjectId) ? form.subjectId : "";
 
   const create = useMutation({
-    mutationFn: () => api.post<Session>("/attendance/sessions", { ...form, academicYearId: formAcademicYearId, subjectId: formSubjectId }),
+    mutationFn: () => api.post<Session>("/attendance/sessions", { ...form, academicYearId: formAcademicYearId, subjectId: formSubjectId, startTime: form.startTime || undefined, endTime: form.endTime || undefined }),
     onSuccess: (session) => {
       setShowCreate(false);
       setActiveSessionId(session.id);
@@ -233,6 +233,9 @@ export default function AttendancePage() {
         <label className="field"><span>Subject</span><select className="input" required value={formSubjectId} onChange={(event) => setForm({ ...form, subjectId: event.target.value })}><option value="">Select subject</option>{filteredSubjects.map((item) => <option key={item.id} value={item.id}>{item.code} - {item.name}</option>)}</select></label>
         <label className="field"><span>Date</span><input className="input" type="date" required value={form.sessionDate} onChange={(event) => setForm({ ...form, sessionDate: event.target.value })} /></label>
         <label className="field"><span>Period</span><input className="input" type="number" min={1} max={20} value={form.periodNumber} onChange={(event) => setForm({ ...form, periodNumber: Number(event.target.value) })} /></label>
+        <label className="field"><span>Session type</span><select className="input" value={form.sessionType} onChange={(event) => setForm({ ...form, sessionType: event.target.value })}><option value="LECTURE">Class session</option><option value="LAB">Lab session</option><option value="TUTORIAL">Tutorial</option><option value="SEMINAR">Seminar</option><option value="ACTIVITY">Activity</option><option value="OTHER">Other</option></select></label>
+        <label className="field"><span>Start time (optional)</span><input className="input" type="time" value={form.startTime} onChange={(event) => setForm({ ...form, startTime: event.target.value })} /></label>
+        <label className="field"><span>End time (optional)</span><input className="input" type="time" value={form.endTime} onChange={(event) => setForm({ ...form, endTime: event.target.value })} /></label>
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}><button type="button" className="btn btn-secondary" onClick={() => setShowCreate(false)}>Cancel</button><button className="btn btn-primary" disabled={create.isPending}>{create.isPending ? "Creating..." : "Create session"}</button></div>
     </form>}

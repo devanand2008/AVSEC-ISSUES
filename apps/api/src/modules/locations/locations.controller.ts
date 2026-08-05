@@ -4,7 +4,7 @@ import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Permissions } from "../../common/decorators/permissions.decorator";
 import { CurrentRequestId } from "../../common/decorators/request-id.decorator";
 import type { AuthPrincipal } from "../../common/http/request-context";
-import { ArchiveLocationDto, BulkLocationDto, CreateBlockDto, CreateCampusDto, CreateFloorDto, CreateRoomDto, DeleteLocationDto, UpdateBlockDto, UpdateCampusDto, UpdateFloorDto, UpdateRoomDto } from "./dto/location.dto";
+import { ArchiveLocationDto, BulkLocationDto, CreateAreaDto, CreateBlockDto, CreateCampusDto, CreateFloorDto, CreateRoomDto, DeleteLocationDto, UpdateBlockDto, UpdateCampusDto, UpdateFloorDto, UpdateRoomDto } from "./dto/location.dto";
 import { LocationsService, type LocationKind } from "./locations.service";
 
 @ApiTags("locations")
@@ -16,11 +16,16 @@ export class LocationsController {
   @Get("blocks") blocks(@CurrentUser() user: AuthPrincipal, @Query("campusId", ParseUUIDPipe) campusId: string) { return this.locations.blocks(user, campusId); }
   @Get("floors") floors(@CurrentUser() user: AuthPrincipal, @Query("blockId", ParseUUIDPipe) blockId: string) { return this.locations.floors(user, blockId); }
   @Get("rooms") rooms(@CurrentUser() user: AuthPrincipal, @Query("floorId", ParseUUIDPipe) floorId: string) { return this.locations.rooms(user, floorId); }
+  @Get("areas") areas(@CurrentUser() user: AuthPrincipal, @Query("floorId", ParseUUIDPipe) floorId: string) { return this.locations.areas(user, floorId); }
   @Get("rooms/qr/:token") roomByQr(@CurrentUser() user: AuthPrincipal, @Param("token", ParseUUIDPipe) token: string) { return this.locations.roomByQr(user, token); }
   @Permissions("locations.qr") @Get("rooms/:id/qr-code") roomQr(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string) { return this.locations.roomQr(user, id); }
   @Permissions("locations.qr") @Get("qr-sheet") qrSheet(@CurrentUser() user: AuthPrincipal, @Query("floorId", ParseUUIDPipe) floorId: string) { return this.locations.qrSheet(user, floorId); }
   @Permissions("locations.qr") @Post("rooms/:id/qr-code/rotate") rotateQr(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string) { return this.locations.rotateQr(user, id); }
-  @Get("assets") assets(@CurrentUser() user: AuthPrincipal, @Query("roomId", ParseUUIDPipe) roomId: string) { return this.locations.assets(user, roomId); }
+  @Get("assets") assets(
+    @CurrentUser() user: AuthPrincipal,
+    @Query("roomId", new ParseUUIDPipe({ optional: true })) roomId?: string,
+    @Query("areaId", new ParseUUIDPipe({ optional: true })) areaId?: string,
+  ) { return this.locations.assets(user, { roomId, areaId }); }
 
   @Permissions("locations.manage")
   @Post("blocks") createBlock(@CurrentUser() user: AuthPrincipal, @Body() input: CreateBlockDto, @CurrentRequestId() requestId: string) { return this.locations.createBlock(user, input, requestId); }
@@ -28,6 +33,29 @@ export class LocationsController {
   @Post("floors") createFloor(@CurrentUser() user: AuthPrincipal, @Body() input: CreateFloorDto, @CurrentRequestId() requestId: string) { return this.locations.createFloor(user, input, requestId); }
   @Permissions("locations.manage")
   @Post("rooms") createRoom(@CurrentUser() user: AuthPrincipal, @Body() input: CreateRoomDto, @CurrentRequestId() requestId: string) { return this.locations.createRoom(user, input, requestId); }
+  @Permissions("locations.manage")
+  @Post("areas") createArea(@CurrentUser() user: AuthPrincipal, @Body() input: CreateAreaDto, @CurrentRequestId() requestId: string) { return this.locations.createArea(user, input, requestId); }
+}
+
+@ApiTags("campus hierarchy")
+@Controller("campus")
+export class CampusHierarchyController {
+  constructor(private readonly locations: LocationsService) {}
+
+  @Get("blocks/:blockId/floors")
+  floors(@CurrentUser() user: AuthPrincipal, @Param("blockId", ParseUUIDPipe) blockId: string) {
+    return this.locations.floors(user, blockId);
+  }
+
+  @Get("floors/:floorId/rooms")
+  rooms(@CurrentUser() user: AuthPrincipal, @Param("floorId", ParseUUIDPipe) floorId: string) {
+    return this.locations.rooms(user, floorId);
+  }
+
+  @Get("floors/:floorId/areas")
+  areas(@CurrentUser() user: AuthPrincipal, @Param("floorId", ParseUUIDPipe) floorId: string) {
+    return this.locations.areas(user, floorId);
+  }
 }
 
 @ApiTags("admin locations")

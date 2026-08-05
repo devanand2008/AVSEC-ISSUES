@@ -17,6 +17,9 @@ interface RosterRow {
   rollNumber: string | null;
   fullName: string;
   status: string | null;
+  morningStatus: string | null;
+  afternoonStatus: string | null;
+  effectiveAttendanceValue: number | null;
   note: string | null;
 }
 
@@ -39,6 +42,8 @@ const statuses = [
   { value: "ON_DUTY", short: "OD", className: "duty" },
   { value: "MEDICAL_LEAVE", short: "ML", className: "leave" },
   { value: "AUTHORIZED_LEAVE", short: "AL", className: "leave" },
+  { value: "HALF_DAY_PRESENT", short: "½P", className: "late" },
+  { value: "HALF_DAY_ABSENT", short: "½A", className: "leave" },
 ];
 
 export function AttendanceMarkingPanel({ sessionId, embedded = false, onClose, onSubmitted }: AttendanceMarkingPanelProps) {
@@ -141,7 +146,10 @@ export function AttendanceMarkingPanel({ sessionId, embedded = false, onClose, o
   const canSubmitDraft = roster.session.status === "DRAFT" && permissions.includes("attendance.submit");
   const canSubmit = (canSubmitDraft || canEditSubmitted) && roster.students.length > 0;
   const canRequestCorrection = !canDirectEdit && permissions.includes("attendance.correction.request");
-  const present = roster.students.filter((row) => !["ABSENT", "MEDICAL_LEAVE"].includes(records[row.userId] ?? row.status ?? "PRESENT")).length;
+  const present = roster.students.reduce((total, row) => {
+    const status = records[row.userId] ?? row.status ?? "PRESENT";
+    return total + (["HALF_DAY_PRESENT", "HALF_DAY_ABSENT"].includes(status) ? 0.5 : ["ABSENT", "MEDICAL_LEAVE"].includes(status) ? 0 : 1);
+  }, 0);
   const statusLabel = roster.session.status.replaceAll("_", " ");
 
   function choose(student: RosterRow, status: string, advance = false) {

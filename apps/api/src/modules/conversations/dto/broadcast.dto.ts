@@ -1,11 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Transform } from "class-transformer";
-import { IsDateString, IsIn, IsOptional, IsString, Length, MaxLength } from "class-validator";
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsDateString, IsIn, IsOptional, IsString, IsUUID, Length, MaxLength } from "class-validator";
 
 export const BROADCAST_AUDIENCE_TYPES = [
   "ALL",
   "ROLE",
   "DEPARTMENT",
+  "PROGRAMME",
+  "ACADEMIC_YEAR",
+  "SEMESTER",
   "SECTION",
   "INDIVIDUAL",
 ] as const;
@@ -29,12 +32,20 @@ export class CreateBroadcastDto {
   @IsIn(BROADCAST_AUDIENCE_TYPES)
   audienceType!: BroadcastAudienceType;
 
-  @ApiPropertyOptional({ maxLength: 180 })
+  @ApiPropertyOptional({ maxLength: 120 })
   @IsOptional()
   @Transform(({ value }) => typeof value === "string" ? value.trim() : value)
   @IsString()
-  @MaxLength(180)
+  @MaxLength(120)
   audienceValue?: string;
+
+  @ApiPropertyOptional({ type: [String], description: "Selected active user IDs for an INDIVIDUAL broadcast." })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @IsUUID("4", { each: true })
+  recipientIds?: string[];
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -89,6 +89,14 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       if (!user) throw new Error("Session is inactive");
       (client.data as SocketData).userId = user.id;
       await client.join(`user:${user.id}`);
+      const memberships = await this.prisma.conversationParticipant.findMany({ where: { userId: user.id, leftAt: null, archivedAt: null }, select: { conversationId: true } });
+      await Promise.all(memberships.map((membership) => client.join(`conversation:${membership.conversationId}`)));
+      if (memberships.length) {
+        await this.prisma.messageDelivery.updateMany({
+          where: { userId: user.id, status: { in: ["PENDING", "QUEUED", "SENT", "RETRYING"] }, message: { conversationId: { in: memberships.map((membership) => membership.conversationId) } } },
+          data: { status: "DELIVERED", lastError: null },
+        });
+      }
       await this.prisma.userPresence.upsert({ where: { userId: user.id }, create: { userId: user.id, isOnline: true }, update: { isOnline: true, lastSeenAt: new Date() } });
       await this.emitPresence(user.id, true);
     } catch (error) {

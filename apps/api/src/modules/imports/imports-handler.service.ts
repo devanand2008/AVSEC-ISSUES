@@ -5,6 +5,7 @@ import { randomInt } from "node:crypto";
 import { PrismaService } from "../../database/prisma.service";
 import type { Prisma } from "../../generated/prisma/client";
 import { AccountStatus, AttendanceCode, IssuePriority, RoomType, ScopeType } from "../../generated/prisma/enums";
+import { attendanceParts } from "../attendance/attendance-value";
 import type { CredentialExportRow, ImportEntityType, ImportMode, ImportedRecord, ImportRow, ImportRowError } from "./import.types";
 
 interface ImportCreateOptions {
@@ -599,7 +600,8 @@ export class ImportsHandlerService {
     const duplicate = await tx.attendanceRecord.findUnique({ where: { sessionId_studentUserId: { sessionId: session.id, studentUserId: student.userId } } });
     if (duplicate) throw new BadRequestException("Attendance for this student and session already exists.");
     const sourceNote = [row.note?.trim(), row.marked_by ? `Legacy marker: ${row.marked_by.trim()}` : "", `Imported by ${requestedById}`].filter(Boolean).join(" | ").slice(0, 500);
-    const item = await tx.attendanceRecord.create({ data: { sessionId: session.id, studentUserId: student.userId, status: this.attendanceCode(row.status), note: sourceNote || undefined, markedAt: sessionDate } });
+    const status = this.attendanceCode(row.status);
+    const item = await tx.attendanceRecord.create({ data: { sessionId: session.id, studentUserId: student.userId, status, ...attendanceParts(status), note: sourceNote || undefined, markedAt: sessionDate } });
     return this.record(rowNumber, "AttendanceRecord", item.id, `${row.session_date} ${subject.code} - ${student.user.fullName}`);
   }
 

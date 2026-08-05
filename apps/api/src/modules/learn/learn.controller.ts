@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Header, Param, Patch, Post, Put, Query, Req, StreamableFile, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { Throttle } from "@nestjs/throttler";
 import { LearnService } from "./learn.service";
 import {
   CompleteLessonDto,
@@ -219,6 +220,7 @@ export class LearnPortalController {
 
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @ApiBearerAuth()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post("compiler/run")
   @ApiOperation({ summary: "Compile and run programming practice code" })
   async runCode(@Req() req: AuthenticatedRequest, @Body() data: RunLearningCodeDto) {
@@ -267,6 +269,13 @@ export class LearnPortalController {
   @ApiOperation({ summary: "Get current user's certificates" })
   async certificates(@Req() req: AuthenticatedRequest) {
     return this.learnService.getCertificates(req.user);
+  }
+
+  @Public()
+  @Get("certificates/verify/:certificateNumber")
+  @ApiOperation({ summary: "Verify an AVS Learn certificate" })
+  verifyCertificate(@Param("certificateNumber") certificateNumber: string) {
+    return this.learnService.verifyCertificate(certificateNumber);
   }
 
   @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -332,12 +341,26 @@ export class SkillPortalController {
     return this.learnService.recordProgress(req.user, data);
   }
 
+  @Post("compiler/run")
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  runCode(@Req() req: AuthenticatedRequest, @Body() data: RunLearningCodeDto) {
+    return this.learnService.runCode(req.user, data);
+  }
+
   @Get("assessments")
   assessments(
     @Req() req: AuthenticatedRequest,
     @Query("courseId") courseId?: string,
   ) {
     return this.learnService.getAssessments(req.user, courseId);
+  }
+
+  @Post("assessments/:assessmentId/start")
+  startAssessment(
+    @Req() req: AuthenticatedRequest,
+    @Param("assessmentId") assessmentId: string,
+  ) {
+    return this.learnService.startAssessment(req.user, assessmentId);
   }
 
   @Post("assessments/:assessmentId/submit")

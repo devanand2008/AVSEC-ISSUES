@@ -3,15 +3,16 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 class AvsApiClient {
   AvsApiClient({
     http.Client? httpClient,
     FlutterSecureStorage? storage,
     String? baseUrl,
-  })  : _httpClient = httpClient ?? http.Client(),
-        _storage = storage ?? const FlutterSecureStorage(),
-        baseUrl = baseUrl ?? _defaultBaseUrl();
+  }) : _httpClient = httpClient ?? http.Client(),
+       _storage = storage ?? const FlutterSecureStorage(),
+       baseUrl = baseUrl ?? _defaultBaseUrl();
 
   final http.Client _httpClient;
   final FlutterSecureStorage _storage;
@@ -108,10 +109,7 @@ class AvsApiClient {
     );
   }
 
-  Future<AvsDownload> postBytes(
-    String path,
-    Map<String, dynamic> body,
-  ) async {
+  Future<AvsDownload> postBytes(String path, Map<String, dynamic> body) async {
     final response = await _responseWithRefresh(
       () async => _httpClient.post(
         Uri.parse('$baseUrl$path'),
@@ -162,6 +160,7 @@ class AvsApiClient {
     required Map<String, String> fields,
     required String fileName,
     required List<int> bytes,
+    String? contentType,
   }) async {
     Future<http.Response> send() async {
       final request = http.MultipartRequest('POST', Uri.parse('$baseUrl$path'));
@@ -170,12 +169,85 @@ class AvsApiClient {
       request.headers.addAll(headers);
       request.fields.addAll(fields);
       request.files.add(
-        http.MultipartFile.fromBytes('file', bytes, filename: fileName),
+        http.MultipartFile.fromBytes(
+          'file',
+          bytes,
+          filename: fileName,
+          contentType: contentType == null
+              ? null
+              : MediaType.parse(contentType),
+        ),
       );
       return http.Response.fromStream(await _httpClient.send(request));
     }
 
     return _sendWithRefresh(send);
+  }
+
+  Stream<AvsSseEvent> postSse(String path, Map<String, dynamic> body) async* {
+    for (var attempt = 0; attempt < 2; attempt += 1) {
+      final request = http.Request('POST', Uri.parse('$baseUrl$path'))
+        ..headers.addAll(await _headers())
+        ..headers['Accept'] = 'text/event-stream'
+        ..body = jsonEncode(body);
+      final response = await _httpClient.send(request);
+      if (response.statusCode == 401 && attempt == 0) {
+        await response.stream.drain<void>();
+        if (await _refresh()) continue;
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final payload = await response.stream.bytesToString();
+        var message = response.reasonPhrase ?? 'AVS Bot request failed.';
+        try {
+          final decoded = jsonDecode(payload);
+          if (decoded is Map<String, dynamic>) {
+            final raw = decoded['message'] ?? decoded['error'];
+            if (raw != null) message = raw is List ? raw.join(' ') : '$raw';
+          }
+        } catch (_) {
+          // Keep the status-level message for non-JSON failures.
+        }
+        throw AvsApiException(response.statusCode, message);
+      }
+
+      String? eventName;
+      final dataLines = <String>[];
+      await for (final line
+          in response.stream
+              .transform(utf8.decoder)
+              .transform(const LineSplitter())) {
+        if (line.isEmpty) {
+          if (dataLines.isNotEmpty) {
+            final raw = dataLines.join('\n');
+            dynamic data;
+            try {
+              data = jsonDecode(raw);
+            } catch (_) {
+              data = raw;
+            }
+            yield AvsSseEvent(eventName ?? 'message', data);
+          }
+          eventName = null;
+          dataLines.clear();
+        } else if (line.startsWith('event:')) {
+          eventName = line.substring(6).trim();
+        } else if (line.startsWith('data:')) {
+          dataLines.add(line.substring(5).trimLeft());
+        }
+      }
+      if (dataLines.isNotEmpty) {
+        final raw = dataLines.join('\n');
+        dynamic data;
+        try {
+          data = jsonDecode(raw);
+        } catch (_) {
+          data = raw;
+        }
+        yield AvsSseEvent(eventName ?? 'message', data);
+      }
+      return;
+    }
+    throw AvsApiException(401, 'Your session expired. Please sign in again.');
   }
 
   Future<Map<String, dynamic>> login({
@@ -270,7 +342,9 @@ class AvsApiClient {
   Future<void> _storeTokens(dynamic value) async {
     if (value is! Map<String, dynamic>) {
       throw AvsApiException(
-          500, 'The authentication response did not include mobile tokens.');
+        500,
+        'The authentication response did not include mobile tokens.',
+      );
     }
     final accessToken = value['accessToken'] as String?;
     final refreshToken = value['refreshToken'] as String?;
@@ -289,8 +363,9 @@ class AvsApiClient {
   }
 
   Future<String?> _readToken(String key) async {
-    final memoryValue =
-        key == 'avs_access_token' ? _memoryAccessToken : _memoryRefreshToken;
+    final memoryValue = key == 'avs_access_token'
+        ? _memoryAccessToken
+        : _memoryRefreshToken;
     if (_secureStorageUnavailable) return memoryValue;
     try {
       return await _storage.read(key: key) ?? memoryValue;
@@ -314,18 +389,23 @@ class AvsApiClient {
 
   String? _fileName(String? disposition) {
     if (disposition == null) return null;
-    final match = RegExp('filename="?([^";]+)"?', caseSensitive: false)
-        .firstMatch(disposition);
+    final match = RegExp(
+      'filename="?([^";]+)"?',
+      caseSensitive: false,
+    ).firstMatch(disposition);
     return match?.group(1);
   }
 }
 
+class AvsSseEvent {
+  const AvsSseEvent(this.event, this.data);
+
+  final String event;
+  final dynamic data;
+}
+
 class AvsDownload {
-  const AvsDownload({
-    required this.bytes,
-    this.fileName,
-    this.contentType,
-  });
+  const AvsDownload({required this.bytes, this.fileName, this.contentType});
 
   final Uint8List bytes;
   final String? fileName;

@@ -142,5 +142,24 @@ export class AiController {
       response.end();
     }
   }
-}
 
+  @Post("chat")
+  async complete(
+    @Req() request: AuthenticatedRequest & Request,
+    @Body() input: StreamAiChatDto,
+  ) {
+    let conversationId = input.conversationId;
+    let messageId: string | undefined;
+    let content = "";
+    let status = "COMPLETED";
+    for await (const event of this.chat.chat(request.user, input, { requestId: request.id })) {
+      if (event.event === "conversation") conversationId = String(event.data.id);
+      else if (event.event === "delta") content += String(event.data.delta ?? "");
+      else if (event.event === "replace") { content = String(event.data.content ?? ""); messageId = String(event.data.messageId ?? ""); }
+      else if (event.event === "message" && event.data.role === "ASSISTANT") messageId = String(event.data.id ?? "");
+      else if (event.event === "done") { messageId = String(event.data.messageId ?? messageId ?? ""); status = String(event.data.status ?? status); }
+      else if (event.event === "error") throw new HttpException(String(event.data.message ?? "AVS Bot could not answer."), 503);
+    }
+    return { conversationId, messageId, role: "ASSISTANT", content, status };
+  }
+}

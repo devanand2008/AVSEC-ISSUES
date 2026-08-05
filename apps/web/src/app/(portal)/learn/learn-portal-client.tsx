@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -24,6 +24,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   Play,
+  Printer,
   RefreshCw,
   RotateCcw,
   Search,
@@ -73,7 +74,7 @@ interface LearnCourse {
 
 interface LearnQuestion {
   id: string;
-  type: "mcq" | "code";
+  type: "mcq" | "single_choice" | "multiple_choice" | "true_false" | "fill_blank" | "short_answer" | "code" | "code_output" | "programming_task";
   question: string;
   options?: string[];
   starterCode?: string | null;
@@ -88,6 +89,11 @@ interface LearnAssessment {
   type: "QUIZ" | "EXAM" | "ASSIGNMENT" | "CODING";
   maxScore: number;
   passingScore: number;
+  instructions: string | null;
+  questionCount: number;
+  passPercentage: number;
+  timeLimitMinutes: number | null;
+  maximumAttempts: number;
   questionsJson: {
     scope?: "lesson" | "final";
     lessonId?: string;
@@ -186,17 +192,21 @@ interface CertificateResponse {
 
 interface AssessmentStartResponse {
   assessment: LearnAssessment;
-  attempt: { startedAt: string; mode: string };
+  attempt: { id: string; startedAt: string; expiresAt: string | null; attemptNumber: number; mode: string };
 }
 
 interface AssessmentSubmitResponse extends LearnResult {
   certificate?: LearnCertificate | null;
+  review?: Array<{ id: string; question: string; submittedAnswer?: string | number | string[] | number[]; correctAnswer?: string | number | boolean | string[] | number[]; explanation?: string }>;
 }
 
 interface CompilerResponse {
   ok: boolean;
+  success: boolean;
+  status: string;
   stdout: string;
   stderr: string;
+  compileOutput: string;
   exitCode: number | null;
   provider: string;
 }
@@ -207,7 +217,6 @@ const STARTERS: Record<string, string> = {
   java: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello, AVS Learn!");\n    }\n}',
   python: 'print("Hello, AVS Learn!")',
   javascript: 'console.log("Hello, AVS Learn!");',
-  sql: "CREATE TABLE students (id INTEGER, name TEXT);\nINSERT INTO students VALUES (1, 'AVS Student');\nSELECT * FROM students;",
 };
 
 const LANGUAGES = [
@@ -216,7 +225,6 @@ const LANGUAGES = [
   { id: "java", label: "Java" },
   { id: "python", label: "Python" },
   { id: "javascript", label: "JavaScript" },
-  { id: "sql", label: "SQL" },
 ];
 
 function Stat({
@@ -277,13 +285,23 @@ export function LearnPortalClient() {
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
   const [assessmentSession, setAssessmentSession] = useState<LearnAssessment | null>(null);
-  const [assessmentAnswers, setAssessmentAnswers] = useState<Record<string, string | number>>({});
+  const [assessmentAnswers, setAssessmentAnswers] = useState<Record<string, string | number | string[] | number[]>>({});
+  const [assessmentAttemptId, setAssessmentAttemptId] = useState<string | null>(null);
   const [assessmentOutcome, setAssessmentOutcome] = useState<AssessmentSubmitResponse | null>(null);
+  const [assessmentExpiresAt, setAssessmentExpiresAt] = useState<string | null>(null);
+  const [assessmentAttemptNumber, setAssessmentAttemptNumber] = useState<number | null>(null);
+  const [assessmentClock, setAssessmentClock] = useState(() => Date.now());
   const [notice, setNotice] = useState("");
   const [compilerLanguage, setCompilerLanguage] = useState("c");
   const [compilerCode, setCompilerCode] = useState(STARTERS.c ?? "");
   const [compilerInput, setCompilerInput] = useState("");
   const [compilerOutput, setCompilerOutput] = useState("");
+
+  useEffect(() => {
+    if (!assessmentExpiresAt || !assessmentSession || assessmentOutcome) return;
+    const timer = window.setInterval(() => setAssessmentClock(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [assessmentExpiresAt, assessmentOutcome, assessmentSession]);
 
   const health = useQuery({
     queryKey: ["learn", "health"],
@@ -391,14 +409,18 @@ export function LearnPortalClient() {
   const startAssessment = useMutation({
     mutationFn: (assessmentId: string) =>
       api.post<AssessmentStartResponse>(`/learn/assessments/${assessmentId}/start`),
-    onSuccess: ({ assessment }) => {
-      const answers: Record<string, string | number> = {};
+    onSuccess: ({ assessment, attempt }) => {
+      const answers: Record<string, string | number | string[] | number[]> = {};
       assessment.questionsJson.questions?.forEach((question) => {
         if (question.type === "code") answers[question.id] = question.starterCode ?? "";
       });
       setAssessmentAnswers(answers);
       setAssessmentOutcome(null);
       setAssessmentSession(assessment);
+      setAssessmentAttemptId(attempt.id);
+      setAssessmentExpiresAt(attempt.expiresAt);
+      setAssessmentAttemptNumber(attempt.attemptNumber);
+      setAssessmentClock(Date.now());
     },
     onError: (error: Error) => setNotice(error.message),
   });
@@ -407,7 +429,7 @@ export function LearnPortalClient() {
       if (!assessmentSession) throw new Error("Assessment is not open.");
       return api.post<AssessmentSubmitResponse>(
         `/learn/assessments/${assessmentSession.id}/submit`,
-        { answersJson: assessmentAnswers },
+        { attemptId: assessmentAttemptId, answersJson: assessmentAnswers },
       );
     },
     onSuccess: async (outcome) => {
@@ -423,14 +445,14 @@ export function LearnPortalClient() {
   });
   const runCompiler = useMutation({
     mutationFn: () =>
-      api.post<CompilerResponse>("/learn/compiler/run", {
+      api.post<CompilerResponse>("/skill/compiler/run", {
         language: compilerLanguage,
         sourceCode: compilerCode,
         stdin: compilerInput,
       }),
     onSuccess: (result) => {
-      const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
-      setCompilerOutput(output || `Program finished with exit code ${result.exitCode ?? 0}.`);
+      const output = [result.compileOutput, result.stdout, result.stderr].filter(Boolean).join("\n");
+      setCompilerOutput(`${result.status}${output ? `\n${output}` : ""}`);
     },
     onError: (error: Error) => setCompilerOutput(error.message),
   });
@@ -440,6 +462,9 @@ export function LearnPortalClient() {
     setActiveLessonId(null);
     setView("learning");
   };
+  const assessmentRemainingSeconds = assessmentExpiresAt
+    ? Math.max(0, Math.ceil((new Date(assessmentExpiresAt).getTime() - assessmentClock) / 1_000))
+    : null;
   const openCompiler = (language?: string | null, code?: string | null) => {
     const supported = LANGUAGES.some((item) => item.id === language) ? language! : compilerLanguage;
     setCompilerLanguage(supported);
@@ -1004,6 +1029,14 @@ export function LearnPortalClient() {
                           </span>
                         </div>
                         <button
+                          aria-label={`Preview or print ${certificate.course.title} certificate`}
+                          onClick={() => api.preview(`/learn/certificates/${certificate.id}/download`)}
+                          title="Preview or print certificate"
+                          type="button"
+                        >
+                          <Printer size={19} />
+                        </button>
+                        <button
                           aria-label={`Download ${certificate.course.title} certificate`}
                           onClick={() =>
                             api.download(
@@ -1036,6 +1069,11 @@ export function LearnPortalClient() {
                 <p>
                   {assessmentSession.maxScore} marks / pass {assessmentSession.passingScore}
                 </p>
+                <p className="muted">
+                  {assessmentAttemptNumber ? `Attempt ${assessmentAttemptNumber} of ${assessmentSession.maximumAttempts}` : "Assessment attempt"}
+                  {assessmentRemainingSeconds !== null ? ` · ${Math.floor(assessmentRemainingSeconds / 60)}:${String(assessmentRemainingSeconds % 60).padStart(2, "0")} remaining` : " · No time limit"}
+                </p>
+                {assessmentSession.instructions && <p className="muted">{assessmentSession.instructions}</p>}
               </div>
               <button
                 aria-label="Close assessment"
@@ -1057,6 +1095,15 @@ export function LearnPortalClient() {
                   {assessmentOutcome.score}/{assessmentSession.maxScore}
                 </strong>
                 {assessmentOutcome.certificate && <p>Your AVS Learn certificate has been issued.</p>}
+                {assessmentOutcome.review?.length ? <div style={{ width: "100%", textAlign: "left", display: "grid", gap: 10 }}>
+                  <h3>Result review</h3>
+                  {assessmentOutcome.review.map((item, index) => <article className="card" key={item.id} style={{ padding: 12 }}>
+                    <strong>{index + 1}. {item.question}</strong>
+                    <small className="muted" style={{ display: "block" }}>Your answer: {Array.isArray(item.submittedAnswer) ? item.submittedAnswer.join(", ") : String(item.submittedAnswer ?? "Not answered")}</small>
+                    {item.correctAnswer !== undefined && <small style={{ display: "block", color: "var(--success)" }}>Correct answer: {Array.isArray(item.correctAnswer) ? item.correctAnswer.join(", ") : String(item.correctAnswer)}</small>}
+                    {item.explanation && <p className="muted">{item.explanation}</p>}
+                  </article>)}
+                </div> : null}
                 <div>
                   <button className="btn btn-secondary" onClick={() => setAssessmentSession(null)} type="button">
                     Close
@@ -1086,17 +1133,24 @@ export function LearnPortalClient() {
                         {question.question}
                         <small>{question.marks} marks</small>
                       </legend>
-                      {question.type === "mcq" ? (
+                      {question.type === "multiple_choice" ? (
                         <div className={styles.options}>
-                          {question.options?.map((option, optionIndex) => (
+                          {question.options?.map((option, optionIndex) => {
+                            const selected = Array.isArray(assessmentAnswers[question.id]) ? assessmentAnswers[question.id] as number[] : [];
+                            return <label key={`${question.id}-${optionIndex}`}><input type="checkbox" checked={selected.includes(optionIndex)} onChange={() => setAssessmentAnswers((current) => ({ ...current, [question.id]: selected.includes(optionIndex) ? selected.filter((value) => value !== optionIndex) : [...selected, optionIndex] }))} /><span>{option}</span></label>;
+                          })}
+                        </div>
+                      ) : ["mcq", "single_choice", "true_false"].includes(question.type) ? (
+                        <div className={styles.options}>
+                          {(question.type === "true_false" ? ["True", "False"] : question.options)?.map((option, optionIndex) => (
                             <label key={`${question.id}-${optionIndex}`}>
                               <input
-                                checked={Number(assessmentAnswers[question.id]) === optionIndex}
+                                checked={question.type === "true_false" ? String(assessmentAnswers[question.id] ?? "").toLowerCase() === option.toLowerCase() : Number(assessmentAnswers[question.id]) === optionIndex}
                                 name={question.id}
                                 onChange={() =>
                                   setAssessmentAnswers((current) => ({
                                     ...current,
-                                    [question.id]: optionIndex,
+                                    [question.id]: question.type === "true_false" ? option.toLowerCase() : optionIndex,
                                   }))
                                 }
                                 type="radio"
@@ -1145,7 +1199,7 @@ export function LearnPortalClient() {
                   </button>
                   <button
                     className="btn btn-primary"
-                    disabled={submitAssessment.isPending}
+                    disabled={submitAssessment.isPending || assessmentRemainingSeconds === 0}
                     onClick={() => submitAssessment.mutate()}
                     type="button"
                   >
@@ -1154,7 +1208,7 @@ export function LearnPortalClient() {
                     ) : (
                       <CheckCircle2 size={17} />
                     )}
-                    Submit assessment
+                    {assessmentRemainingSeconds === 0 ? "Time expired" : "Submit assessment"}
                   </button>
                 </footer>
               </>

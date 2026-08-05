@@ -42,7 +42,8 @@ export class UpdateNotificationTemplateDto {
 }
 
 export class CreateAssetDto {
-  @ApiProperty() @IsUUID() roomId!: string;
+  @ApiProperty({ required: false }) @IsOptional() @IsUUID() roomId?: string;
+  @ApiProperty({ required: false }) @IsOptional() @IsUUID() areaId?: string;
   @ApiProperty() @IsUUID() categoryId!: string;
   @ApiProperty() @IsString() @Length(2, 60) code!: string;
   @ApiProperty() @IsString() @Length(2, 160) name!: string;

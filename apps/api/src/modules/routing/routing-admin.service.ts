@@ -30,7 +30,7 @@ export class RoutingAdminService {
       input.departmentId ? this.prisma.department.findFirst({ where: { id: input.departmentId, collegeId, isActive: true }, select: { id: true } }) : null,
       input.categoryId ? this.prisma.issueCategory.findFirst({ where: { id: input.categoryId, collegeId, isActive: true }, select: { id: true } }) : null,
       input.issueTypeId ? this.prisma.issueType.findFirst({ where: { id: input.issueTypeId, isActive: true, category: { collegeId } }, select: { id: true, categoryId: true } }) : null,
-      input.assetId ? this.prisma.asset.findFirst({ where: { id: input.assetId, isActive: true, room: { floor: { block: { campus: { collegeId } } } } }, select: { id: true, roomId: true, room: { select: { floorId: true, departmentId: true, floor: { select: { blockId: true, block: { select: { campusId: true } } } } } } } }) : null,
+      input.assetId ? this.prisma.asset.findFirst({ where: { id: input.assetId, isActive: true, OR: [{ room: { floor: { block: { campus: { collegeId } } } } }, { area: { floor: { block: { campus: { collegeId } } } } }] }, select: { id: true, roomId: true, areaId: true, room: { select: { floorId: true, departmentId: true, floor: { select: { id: true, blockId: true, block: { select: { campusId: true } } } } } }, area: { select: { floorId: true, floor: { select: { id: true, blockId: true, block: { select: { campusId: true } } } } } } } }) : null,
     ]);
 
     if (input.campusId && !campus) throw new BadRequestException("Routing campus is not active in this college.");
@@ -55,10 +55,12 @@ export class RoutingAdminService {
     if (issueType && input.categoryId && issueType.categoryId !== input.categoryId) throw new BadRequestException("Routing issue type does not belong to the selected category.");
     if (asset) {
       if (input.roomId && asset.roomId !== input.roomId) throw new BadRequestException("Routing asset does not belong to the selected room.");
-      if (input.floorId && asset.room.floorId !== input.floorId) throw new BadRequestException("Routing asset does not belong to the selected floor.");
-      if (input.blockId && asset.room.floor.blockId !== input.blockId) throw new BadRequestException("Routing asset does not belong to the selected block.");
-      if (input.campusId && asset.room.floor.block.campusId !== input.campusId) throw new BadRequestException("Routing asset does not belong to the selected campus.");
-      if (input.departmentId && asset.room.departmentId !== input.departmentId) throw new BadRequestException("Routing asset does not belong to the selected department.");
+      const assetFloor = asset.room?.floor ?? asset.area?.floor;
+      if (!assetFloor) throw new BadRequestException("Routing asset has no active location.");
+      if (input.floorId && assetFloor.id !== input.floorId) throw new BadRequestException("Routing asset does not belong to the selected floor.");
+      if (input.blockId && assetFloor.blockId !== input.blockId) throw new BadRequestException("Routing asset does not belong to the selected block.");
+      if (input.campusId && assetFloor.block.campusId !== input.campusId) throw new BadRequestException("Routing asset does not belong to the selected campus.");
+      if (input.departmentId && asset.room?.departmentId !== input.departmentId) throw new BadRequestException("Routing asset does not belong to the selected department.");
     }
 
     if (input.primaryUserId) {

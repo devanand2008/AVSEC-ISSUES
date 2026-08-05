@@ -30,6 +30,17 @@ export class AccessService {
     return { ...base, OR: conditions.length ? conditions : [{ id: "00000000-0000-0000-0000-000000000000" }] };
   }
 
+  assignedIssueWhere(user: AuthPrincipal): Prisma.IssueWhereInput {
+    const conditions = this.assignedIssueConditions(user.id);
+    const mapped = this.mappedIssueCondition(user);
+    if (mapped) conditions.push(mapped);
+    return {
+      collegeId: user.collegeId,
+      archivedAt: null,
+      OR: conditions,
+    };
+  }
+
   private issueScopeWhere(user: AuthPrincipal): Prisma.IssueWhereInput | undefined {
     const collegeWide = this.isCollegeWide(user);
     const location: Prisma.IssueWhereInput[] = [];
@@ -42,6 +53,7 @@ export class AccessService {
       if (!collegeWide && scope.type === "BLOCK" && scope.id) location.push({ blockId: scope.id });
       if (!collegeWide && scope.type === "FLOOR" && scope.id) location.push({ floorId: scope.id });
       if (!collegeWide && scope.type === "ROOM" && scope.id) location.push({ roomId: scope.id });
+      if (!collegeWide && scope.type === "AREA" && scope.id) location.push({ areaId: scope.id });
 
       if (scope.type === "DEPARTMENT" && scope.id) academic.push({ departmentId: scope.id });
       if (scope.type === "PROGRAMME" && scope.id) academic.push({ reporter: { studentProfile: { programmeId: scope.id } } });
@@ -63,6 +75,25 @@ export class AccessService {
       { assignedToId: userId },
       { team: { members: { some: { userId, isActive: true } } } },
     ];
+  }
+
+  private mappedIssueCondition(user: AuthPrincipal): Prisma.IssueWhereInput | undefined {
+    const location: Prisma.IssueWhereInput[] = [];
+    const category: Prisma.IssueWhereInput[] = [];
+    for (const scope of user.scopes) {
+      if (scope.type === "CAMPUS" && scope.id) location.push({ campusId: scope.id });
+      if (scope.type === "BLOCK" && scope.id) location.push({ blockId: scope.id });
+      if (scope.type === "FLOOR" && scope.id) location.push({ floorId: scope.id });
+      if (scope.type === "ROOM" && scope.id) location.push({ roomId: scope.id });
+      if (scope.type === "AREA" && scope.id) location.push({ areaId: scope.id });
+      if (scope.type === "ISSUE_CATEGORY") {
+        const categoryId = scope.issueCategoryId ?? scope.id;
+        if (categoryId) category.push({ categoryId });
+      }
+    }
+    const dimensions = [location, category].filter((dimension) => dimension.length > 0);
+    if (!dimensions.length) return undefined;
+    return { AND: dimensions.map((dimension) => ({ OR: dimension })) };
   }
 
   canWorkIssue(user: AuthPrincipal, issue: { collegeId: string; assignedToId: string | null; teamId: string | null }, teamMember: boolean): boolean {

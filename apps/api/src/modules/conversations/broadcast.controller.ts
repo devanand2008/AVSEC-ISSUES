@@ -23,6 +23,21 @@ export class BroadcastController {
   }
 
   @Permissions("broadcasts.create")
+  @Get("broadcast/recipients")
+  recipients(
+    @CurrentUser() user: AuthPrincipal,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+    @Query("search") search?: string,
+    @Query("role") role?: string,
+    @Query("departmentId") departmentId?: string,
+    @Query("sectionId") sectionId?: string,
+    @Query("programmeId") programmeId?: string,
+    @Query("academicYearId") academicYearId?: string,
+    @Query("semesterId") semesterId?: string,
+  ) { return this.broadcasts.recipients(user, { page: page ? Number(page) : 1, pageSize: pageSize ? Number(pageSize) : 20, search, role, departmentId, sectionId, programmeId, academicYearId, semesterId }); }
+
+  @Permissions("broadcasts.create")
   @Get("broadcasts/:id")
   getOne(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string) {
     return this.broadcasts.getOne(user, id);

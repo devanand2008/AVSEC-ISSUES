@@ -5,27 +5,32 @@ import { AccessService } from "../../common/access/access.service";
 import { IdempotencyService } from "../../common/idempotency/idempotency.service";
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
-import { IssueStatus, Prisma } from "../../generated/prisma/client";
+import { IssueStatus, Prisma, type RoomType } from "../../generated/prisma/client";
 import type { AssignIssueDto, CreateIssueDto, FinishIssueDto, IssueCommentDto, IssueStatusDto, IssueTimelineDto, VerifyIssueDto } from "./dto/issue.dto";
 import { RoutingService } from "./routing.service";
 import { SlaService } from "./sla.service";
 import { DuplicateSubscriptionProofService } from "./duplicate-subscription-proof.service";
 
 interface RequestMetadata { requestId: string; ipAddress?: string; userAgent?: string }
-interface IssueRoomQrContext {
-  id: string;
-  qrToken: string;
+interface IssueLocationContext {
+  roomId: string | null;
+  areaId: string | null;
+  customAreaName: string | null;
+  departmentId: string | null;
+  roomType: RoomType | null;
+  qrToken?: string;
   floorId: string;
   floor: {
     id: string;
     blockId: string;
     block: {
       id: string;
+      campusId: string;
     };
   };
 }
 
-const ACTIVE_STATUSES: IssueStatus[] = ["NEW", "NEEDS_MANUAL_ASSIGNMENT", "ASSIGNED", "ACKNOWLEDGED", "IN_PROGRESS", "WAITING_FOR_MATERIAL", "WAITING_FOR_VENDOR", "ON_HOLD", "RESOLVED", "VERIFICATION_PENDING", "REOPENED"];
+const ACTIVE_STATUSES: IssueStatus[] = ["NEW", "NEEDS_MANUAL_ASSIGNMENT", "ASSIGNED", "ACKNOWLEDGED", "IN_PROGRESS", "WAITING_FOR_MATERIAL", "WAITING_FOR_PARTS", "WAITING_FOR_APPROVAL", "WAITING_FOR_VENDOR", "ON_HOLD", "OVERDUE", "RESOLVED", "VERIFICATION_PENDING", "REOPENED"];
 const GENERIC_ISSUE_QR_TOKEN = /^QR_[A-Za-z0-9_-]{24,160}$/;
 const UUID_REFERENCE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TRANSITIONS: Record<IssueStatus, IssueStatus[]> = {
@@ -33,10 +38,13 @@ const TRANSITIONS: Record<IssueStatus, IssueStatus[]> = {
   NEEDS_MANUAL_ASSIGNMENT: ["ASSIGNED", "CANCELLED", "REJECTED"],
   ASSIGNED: ["ACKNOWLEDGED", "CANCELLED", "REJECTED"],
   ACKNOWLEDGED: ["IN_PROGRESS", "ON_HOLD", "CANCELLED"],
-  IN_PROGRESS: ["WAITING_FOR_MATERIAL", "WAITING_FOR_VENDOR", "ON_HOLD"],
+  IN_PROGRESS: ["WAITING_FOR_MATERIAL", "WAITING_FOR_PARTS", "WAITING_FOR_APPROVAL", "WAITING_FOR_VENDOR", "ON_HOLD", "OVERDUE"],
   WAITING_FOR_MATERIAL: ["IN_PROGRESS", "ON_HOLD"],
+  WAITING_FOR_PARTS: ["IN_PROGRESS", "ON_HOLD"],
+  WAITING_FOR_APPROVAL: ["IN_PROGRESS", "ON_HOLD"],
   WAITING_FOR_VENDOR: ["IN_PROGRESS", "ON_HOLD"],
   ON_HOLD: ["IN_PROGRESS", "CANCELLED"],
+  OVERDUE: ["IN_PROGRESS", "ON_HOLD", "CANCELLED"],
   RESOLVED: ["VERIFICATION_PENDING", "VERIFIED", "REOPENED"],
   VERIFICATION_PENDING: ["VERIFIED", "REOPENED"],
   VERIFIED: ["CLOSED", "REOPENED"],
@@ -63,27 +71,108 @@ export class IssuesService {
     const replay = await this.idempotency.replay(user.id, "/issues", idempotencyKey, requestHash);
     if (replay) return replay;
 
-    const room = await this.prisma.room.findFirst({
-      where: { id: input.roomId, isActive: true, floor: { isActive: true, block: { isActive: true, campus: { collegeId: user.collegeId, isActive: true } } } },
-      include: { floor: { include: { block: { include: { campus: true } } } } },
-    });
-    if (!room) throw new BadRequestException("The selected location is not active.");
+    const locationType = input.locationType ?? (input.roomId ? "ROOM" : "AREA");
+    let location: IssueLocationContext;
+    if (locationType === "ROOM") {
+      if (!input.roomId) throw new BadRequestException("Please select a room.");
+      if (input.areaId || input.customAreaName) throw new BadRequestException("A room issue cannot also select an area.");
+      const room = await this.prisma.room.findFirst({
+        where: {
+          id: input.roomId,
+          isActive: true,
+          archivedAt: null,
+          floor: {
+            isActive: true,
+            archivedAt: null,
+            block: {
+              isActive: true,
+              archivedAt: null,
+              campus: { collegeId: user.collegeId, isActive: true, archivedAt: null },
+            },
+          },
+        },
+        include: { floor: { include: { block: { include: { campus: true } } } } },
+      });
+      if (!room) throw new BadRequestException("The selected room is not active in this college.");
+      if (input.floorId && input.floorId !== room.floorId) throw new BadRequestException("The selected room does not belong to this floor.");
+      location = {
+        roomId: room.id,
+        areaId: null,
+        customAreaName: null,
+        departmentId: room.departmentId,
+        roomType: room.roomType,
+        qrToken: room.qrToken,
+        floorId: room.floorId,
+        floor: room.floor,
+      };
+    } else {
+      if (!input.floorId) throw new BadRequestException("Please select a floor for this area.");
+      if (input.roomId) throw new BadRequestException("An area issue cannot also select a room.");
+      if (Boolean(input.areaId) === Boolean(input.customAreaName)) {
+        throw new BadRequestException("Select an existing area or enter a custom area name.");
+      }
+      const floor = await this.prisma.floor.findFirst({
+        where: {
+          id: input.floorId,
+          isActive: true,
+          archivedAt: null,
+          block: {
+            isActive: true,
+            archivedAt: null,
+            campus: { collegeId: user.collegeId, isActive: true, archivedAt: null },
+          },
+        },
+        include: { block: { include: { campus: true } } },
+      });
+      if (!floor) throw new BadRequestException("The selected floor is not active in this college.");
+      const area = input.areaId
+        ? await this.prisma.area.findFirst({ where: { id: input.areaId, floorId: floor.id, isActive: true, archivedAt: null } })
+        : null;
+      if (input.areaId && !area) throw new BadRequestException("The selected area is not active on this floor.");
+      location = {
+        roomId: null,
+        areaId: area?.id ?? null,
+        customAreaName: input.customAreaName?.trim() || null,
+        departmentId: null,
+        roomType: null,
+        floorId: floor.id,
+        floor,
+      };
+    }
     const category = await this.prisma.issueCategory.findFirst({ where: { id: input.categoryId, collegeId: user.collegeId, isActive: true } });
     if (!category) throw new BadRequestException("The selected issue category is not active.");
     const issueType = input.issueTypeId ? await this.prisma.issueType.findFirst({ where: { id: input.issueTypeId, categoryId: category.id, isActive: true } }) : null;
     if (input.issueTypeId && !issueType) throw new BadRequestException("The selected common problem is not active for this category.");
+    if (input.assetId && input.customAssetName) throw new BadRequestException("Choose a registered asset or enter a custom asset, not both.");
     if (input.assetId) {
-      const asset = await this.prisma.asset.findFirst({ where: { id: input.assetId, roomId: room.id, isActive: true } });
-      if (!asset) throw new BadRequestException("The selected asset is not active in this room.");
+      if (!location.roomId && !location.areaId) throw new BadRequestException("Registered assets cannot be selected for a custom area.");
+      const asset = await this.prisma.asset.findFirst({
+        where: {
+          id: input.assetId,
+          isActive: true,
+          ...(location.roomId ? { roomId: location.roomId } : { areaId: location.areaId }),
+        },
+      });
+      if (!asset) throw new BadRequestException("The selected asset is not active at this location.");
     }
     const submissionSource = input.submissionSource === "QR_SCAN" ? "QR_SCAN" : "MANUAL";
     const qrToken = input.qrToken?.trim();
     if (submissionSource === "QR_SCAN") {
       if (!qrToken) throw new BadRequestException("A scanned QR token is required for QR issue submissions.");
-      await this.validateIssueQrToken(user, qrToken, room);
+      await this.validateIssueQrToken(user, qrToken, location);
     }
     const duplicate = await this.prisma.issue.findFirst({
-      where: { collegeId: user.collegeId, roomId: room.id, categoryId: category.id, issueTypeId: input.issueTypeId ?? null, assetId: input.assetId ?? null, status: { in: ACTIVE_STATUSES } },
+      where: {
+        collegeId: user.collegeId,
+        roomId: location.roomId,
+        areaId: location.areaId,
+        customAreaName: location.customAreaName,
+        categoryId: category.id,
+        issueTypeId: input.issueTypeId ?? null,
+        assetId: input.assetId ?? null,
+        customAssetName: input.customAssetName?.trim() || null,
+        status: { in: ACTIVE_STATUSES },
+      },
       select: { id: true, issueNumber: true, title: true, status: true, affectedUserCount: true, occurrenceCount: true, reporterId: true, assignedToId: true, priority: true, teamId: true, acknowledgementDueAt: true, resolutionDueAt: true },
       orderBy: { createdAt: "desc" },
     });
@@ -116,8 +205,8 @@ export class IssuesService {
     }
     const priority = input.prioritySuggestion ?? issueType?.defaultPriority ?? "MEDIUM";
     const decision = await this.routing.route({
-      collegeId: user.collegeId, campusId: room.floor.block.campusId, blockId: room.floor.blockId, floorId: room.floorId,
-      roomId: room.id, roomType: room.roomType, departmentId: room.departmentId, categoryId: category.id,
+      collegeId: user.collegeId, campusId: location.floor.block.campusId, blockId: location.floor.blockId, floorId: location.floorId,
+      roomId: location.roomId, areaId: location.areaId, roomType: location.roomType, departmentId: location.departmentId, categoryId: category.id,
       issueTypeId: issueType?.id ?? null, assetId: input.assetId ?? null, priority,
     });
     const sla = await this.prisma.issueSlaPolicy.findFirst({ where: { collegeId: user.collegeId, priority, isActive: true } });
@@ -130,12 +219,13 @@ export class IssuesService {
       const issueNumber = `AVS-ISS-${now.getUTCFullYear()}-${sequence.toString().padStart(6, "0")}`;
       const issue = await tx.issue.create({
         data: {
-          issueNumber, collegeId: user.collegeId, campusId: room.floor.block.campusId, blockId: room.floor.blockId,
-          floorId: room.floorId, roomId: room.id, departmentId: room.departmentId, categoryId: category.id,
-          issueTypeId: issueType?.id, assetId: input.assetId, reporterId: user.id, title: input.title.trim(),
+          issueNumber, collegeId: user.collegeId, campusId: location.floor.block.campusId, blockId: location.floor.blockId,
+          floorId: location.floorId, locationType, roomId: location.roomId, areaId: location.areaId,
+          customAreaName: location.customAreaName, departmentId: location.departmentId, categoryId: category.id,
+          issueTypeId: issueType?.id, assetId: input.assetId, customAssetName: input.customAssetName?.trim() || null, reporterId: user.id, title: input.title.trim(),
           description: input.description.trim(), exactPosition: input.exactPosition?.trim(), submissionSource,
           qrToken: submissionSource === "QR_SCAN" ? qrToken : undefined,
-          scannedLocationId: submissionSource === "QR_SCAN" ? room.id : undefined,
+          scannedLocationId: submissionSource === "QR_SCAN" ? (location.roomId ?? location.areaId ?? location.floorId) : undefined,
           priority,
           status: decision.fallback ? "NEEDS_MANUAL_ASSIGNMENT" : "ASSIGNED", teamId: decision.teamId,
           assignedToId: decision.assignedToId, routingRuleId: decision.routingRuleId, routingSnapshot: decision.snapshot,
@@ -165,10 +255,24 @@ export class IssuesService {
 
   async list(user: AuthPrincipal, page: number, pageSize: number, filters: { status?: IssueStatus; search?: string; assigned?: boolean }) {
     const where: Prisma.IssueWhereInput = {
-      AND: [this.access.issueWhere(user), filters.status ? { status: filters.status } : {}, filters.assigned ? { assignedToId: user.id } : {}, filters.search ? { OR: [{ issueNumber: { contains: filters.search, mode: "insensitive" } }, { title: { contains: filters.search, mode: "insensitive" } }] } : {}],
+      AND: [filters.assigned ? this.access.assignedIssueWhere(user) : this.access.issueWhere(user), filters.status ? { status: filters.status } : {}, filters.search ? { OR: [{ issueNumber: { contains: filters.search, mode: "insensitive" } }, { title: { contains: filters.search, mode: "insensitive" } }] } : {}],
     };
     const [data, total] = await this.prisma.$transaction([
       this.prisma.issue.findMany({ where, skip: (page - 1) * pageSize, take: pageSize, orderBy: { createdAt: "desc" }, select: this.issueListSelect() }),
+      this.prisma.issue.count({ where }),
+    ]);
+    return { data, meta: { page, pageSize, total, pageCount: Math.ceil(total / pageSize) } };
+  }
+
+  async assigned(user: AuthPrincipal, page: number, pageSize: number, status?: IssueStatus) {
+    const where: Prisma.IssueWhereInput = {
+      AND: [
+        this.access.assignedIssueWhere(user),
+        status ? { status } : { status: { in: ACTIVE_STATUSES } },
+      ],
+    };
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.issue.findMany({ where, skip: (page - 1) * pageSize, take: pageSize, orderBy: [{ resolutionDueAt: "asc" }, { createdAt: "desc" }], select: this.issueListSelect() }),
       this.prisma.issue.count({ where }),
     ]);
     return { data, meta: { page, pageSize, total, pageCount: Math.ceil(total / pageSize) } };
@@ -204,7 +308,7 @@ export class IssuesService {
     id = await this.resolveIssueReference(user, id);
     const issue = await this.prisma.issue.findFirst({
       where: { AND: [{ id }, this.access.issueWhere(user)] },
-      include: { room: { include: { floor: { include: { block: { include: { campus: true } } } } } }, category: true, issueType: true, asset: true, reporter: { select: { publicId: true, fullName: true } }, assignedTo: { select: { publicId: true, fullName: true } }, team: { select: { id: true, name: true } }, comments: { where: { deletedAt: null, ...(user.permissions.includes("issues.update_work") ? {} : { isInternal: false }) }, include: { author: { select: { publicId: true, fullName: true } } }, orderBy: { createdAt: "asc" } }, statusHistory: { include: { changedBy: { select: { publicId: true, fullName: true } } }, orderBy: { createdAt: "asc" } }, timelines: { include: { createdBy: { select: { publicId: true, fullName: true } } }, orderBy: { createdAt: "desc" } }, resolution: { include: { completedBy: { select: { publicId: true, fullName: true } } } }, attachments: { where: { deletedAt: null }, select: { id: true, originalName: true, mimeType: true, sizeBytes: true, purpose: true, sha256: true, createdAt: true, uploadedBy: { select: { publicId: true, fullName: true } } } } },
+      include: { campus: { select: { name: true } }, block: { select: { name: true } }, floor: { select: { name: true } }, room: { include: { floor: { include: { block: { include: { campus: true } } } } } }, area: true, category: true, issueType: true, asset: true, reporter: { select: { publicId: true, fullName: true } }, assignedTo: { select: { publicId: true, fullName: true } }, team: { select: { id: true, name: true } }, comments: { where: { deletedAt: null, ...(user.permissions.includes("issues.update_work") ? {} : { isInternal: false }) }, include: { author: { select: { publicId: true, fullName: true } } }, orderBy: { createdAt: "asc" } }, statusHistory: { include: { changedBy: { select: { publicId: true, fullName: true } } }, orderBy: { createdAt: "asc" } }, timelines: { include: { createdBy: { select: { publicId: true, fullName: true } } }, orderBy: { createdAt: "desc" } }, resolution: { include: { completedBy: { select: { publicId: true, fullName: true } } } }, attachments: { where: { deletedAt: null }, select: { id: true, originalName: true, mimeType: true, sizeBytes: true, purpose: true, sha256: true, createdAt: true, uploadedBy: { select: { publicId: true, fullName: true } } } } },
     });
     if (!issue) throw new NotFoundException("Issue not found.");
     return issue;
@@ -230,7 +334,9 @@ export class IssuesService {
   async finish(user: AuthPrincipal, id: string, input: FinishIssueDto, metadata: RequestMetadata) {
     id = await this.resolveIssueReference(user, id);
     const issue = await this.requireWorkIssue(user, id);
-    if (!["IN_PROGRESS", "WAITING_FOR_MATERIAL", "WAITING_FOR_VENDOR"].includes(issue.status)) throw new ConflictException("Only active work can be finished.");
+    if (!["IN_PROGRESS", "WAITING_FOR_MATERIAL", "WAITING_FOR_PARTS", "WAITING_FOR_APPROVAL", "WAITING_FOR_VENDOR", "ON_HOLD", "OVERDUE"].includes(issue.status)) {
+      throw new ConflictException("Only active work can be finished.");
+    }
     const photo = await this.prisma.issueAttachment.findFirst({ where: {
       id: input.completionPhotoFileId, issueId: id, purpose: "ISSUE_RESOLUTION", deletedAt: null,
       mimeType: { in: ["image/jpeg", "image/png", "image/webp"] },
@@ -264,13 +370,14 @@ export class IssuesService {
     if (verificationAction && issue.reporterId !== user.id && !user.permissions.includes("issues.verify")) throw new ForbiddenException("You are not an authorized verifier for this issue.");
     const requiredPermission: Partial<Record<IssueStatus, string>> = {
       ASSIGNED: "issues.assign", NEEDS_MANUAL_ASSIGNMENT: "issues.assign", ACKNOWLEDGED: "issues.acknowledge",
-      IN_PROGRESS: "issues.start", WAITING_FOR_MATERIAL: "issues.update_work", WAITING_FOR_VENDOR: "issues.update_work",
+      IN_PROGRESS: "issues.start", WAITING_FOR_MATERIAL: "issues.update_work", WAITING_FOR_PARTS: "issues.update_work",
+      WAITING_FOR_APPROVAL: "issues.update_work", WAITING_FOR_VENDOR: "issues.update_work", OVERDUE: "issues.update_work",
       ON_HOLD: "issues.update_work", RESOLVED: "issues.resolve", REJECTED: "issues.reject", CANCELLED: "issues.cancel",
     };
     const required = requiredPermission[input.status];
     if (required && !user.permissions.includes(required)) throw new ForbiddenException(`The ${required} permission is required for this transition.`);
     if (input.status === "REOPENED" && issue.reporterId !== user.id && !user.permissions.includes("issues.reopen") && !(verificationAction && user.permissions.includes("issues.verify"))) throw new ForbiddenException("Only the reporter or an authorized verifier may reopen this issue.");
-    if (["REOPENED", "REJECTED", "CANCELLED", "ON_HOLD"].includes(input.status) && !input.comment?.trim()) throw new BadRequestException("A reason is required for this transition.");
+    if (["REOPENED", "REJECTED", "CANCELLED", "ON_HOLD", "WAITING_FOR_PARTS", "WAITING_FOR_APPROVAL"].includes(input.status) && !input.comment?.trim()) throw new BadRequestException("A reason is required for this transition.");
     const adminOnly = ["REJECTED", "CANCELLED"];
     if (adminOnly.includes(input.status) && !user.permissions.includes(input.status === "REJECTED" ? "issues.reject" : "issues.cancel")) throw new ForbiddenException("Only an authorized administrator may perform this transition.");
     if (adminOnly.includes(input.status) && !input.comment?.trim()) throw new BadRequestException("A reason is required.");
@@ -468,7 +575,7 @@ export class IssuesService {
   }
 
   private issueListSelect() {
-    return { id: true, issueNumber: true, title: true, status: true, priority: true, submissionSource: true, affectedUserCount: true, occurrenceCount: true, createdAt: true, acknowledgementDueAt: true, resolutionDueAt: true, expectedCompletionAt: true, room: { select: { name: true, code: true } }, category: { select: { name: true } }, assignedTo: { select: { publicId: true, fullName: true } }, team: { select: { id: true, name: true } } } as const;
+    return { id: true, issueNumber: true, title: true, status: true, priority: true, submissionSource: true, affectedUserCount: true, occurrenceCount: true, createdAt: true, acknowledgementDueAt: true, resolutionDueAt: true, expectedCompletionAt: true, customAreaName: true, room: { select: { name: true, code: true } }, area: { select: { name: true, code: true } }, category: { select: { name: true } }, assignedTo: { select: { publicId: true, fullName: true } }, team: { select: { id: true, name: true } } } as const;
   }
 
   private async resolveIssueReference(user: AuthPrincipal, reference: string): Promise<string> {
@@ -508,10 +615,10 @@ export class IssuesService {
     } });
   }
 
-  private async validateIssueQrToken(user: AuthPrincipal, qrToken: string, room: IssueRoomQrContext): Promise<void> {
-    if (qrToken === room.qrToken) return;
+  private async validateIssueQrToken(user: AuthPrincipal, qrToken: string, location: IssueLocationContext): Promise<void> {
+    if (location.qrToken && qrToken === location.qrToken) return;
     if (!GENERIC_ISSUE_QR_TOKEN.test(qrToken)) {
-      throw new BadRequestException("The scanned room QR token does not match the selected room.");
+      throw new BadRequestException("The scanned QR token does not match the selected location.");
     }
     const qr = await this.prisma.qrCode.findUnique({
       where: { secureTokenHash: this.hashQrToken(qrToken) },
@@ -521,10 +628,10 @@ export class IssuesService {
     if (qr.collegeId !== user.collegeId) throw new BadRequestException("The scanned QR token belongs to another college.");
     if (qr.status !== "ACTIVE") throw new BadRequestException(`The scanned QR token is ${qr.status.toLowerCase()}.`);
     if (qr.expiryDate && qr.expiryDate < new Date()) throw new BadRequestException("The scanned QR token has expired.");
-    const matchesBlock = qr.qrType === "BLOCK" && qr.entityId === room.floor.block.id;
-    const matchesFloor = qr.qrType === "FLOOR" && qr.entityId === room.floor.id;
+    const matchesBlock = qr.qrType === "BLOCK" && qr.entityId === location.floor.block.id;
+    const matchesFloor = qr.qrType === "FLOOR" && qr.entityId === location.floor.id;
     if (!matchesBlock && !matchesFloor) {
-      throw new BadRequestException("The scanned QR token does not match the selected room.");
+      throw new BadRequestException("The scanned QR token does not match the selected location.");
     }
   }
 

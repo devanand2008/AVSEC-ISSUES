@@ -14,13 +14,15 @@ interface AssetItem {
   isActive: boolean;
   installedOn: string | null;
   createdAt: string;
-  room: { id: string; name: string; code: string; floor: { name: string; block: { name: string; campus: { name: string } } } };
+  room: { id: string; name: string; code: string; floor: { name: string; block: { name: string; campus: { name: string } } } } | null;
+  area: { id: string; name: string; code: string; floor: { name: string; block: { name: string; campus: { name: string } } } } | null;
   category: { id: string; name: string };
   _count: { issues: number };
 }
 
 interface AssetCategory { id: string; name: string }
 interface Room { id: string; code: string; name: string }
+interface Area { id: string; code: string; name: string }
 
 export default function AssetsAdminPage() {
   const client = useQueryClient();
@@ -39,11 +41,12 @@ export default function AssetsAdminPage() {
   const blocks = useQuery({ queryKey: ["blocks", campusId], queryFn: () => api.get<{ id: string; name: string }[]>(`/locations/blocks?campusId=${campusId}`), enabled: Boolean(campusId) });
   const floors = useQuery({ queryKey: ["floors", blockId], queryFn: () => api.get<{ id: string; name: string }[]>(`/locations/floors?blockId=${blockId}`), enabled: Boolean(blockId) });
   const rooms = useQuery({ queryKey: ["rooms", floorId], queryFn: () => api.get<Room[]>(`/locations/rooms?floorId=${floorId}`), enabled: Boolean(floorId) });
+  const areas = useQuery({ queryKey: ["areas", floorId], queryFn: () => api.get<Area[]>(`/locations/areas?floorId=${floorId}`), enabled: Boolean(floorId) });
 
-  const [form, setForm] = useState({ roomId: "", categoryId: "", code: "", name: "", serialNumber: "" });
+  const [form, setForm] = useState({ locationType: "ROOM" as "ROOM" | "AREA", roomId: "", areaId: "", categoryId: "", code: "", name: "", serialNumber: "" });
   const createAsset = useMutation({
-    mutationFn: () => api.post("/assets", { roomId: form.roomId, categoryId: form.categoryId, code: form.code, name: form.name, serialNumber: form.serialNumber || undefined }),
-    onSuccess: () => { setForm({ roomId: "", categoryId: "", code: "", name: "", serialNumber: "" }); setCreating(false); setError(""); void client.invalidateQueries({ queryKey: ["admin", "assets"] }); },
+    mutationFn: () => api.post("/assets", { ...(form.locationType === "ROOM" ? { roomId: form.roomId } : { areaId: form.areaId }), categoryId: form.categoryId, code: form.code, name: form.name, serialNumber: form.serialNumber || undefined }),
+    onSuccess: () => { setForm({ locationType: "ROOM", roomId: "", areaId: "", categoryId: "", code: "", name: "", serialNumber: "" }); setCreating(false); setError(""); void client.invalidateQueries({ queryKey: ["admin", "assets"] }); },
     onError: (caught) => setError(caught instanceof ApiError ? caught.message : "Could not create asset."),
   });
 
@@ -57,7 +60,7 @@ export default function AssetsAdminPage() {
   if (assets.isLoading) return <LoadingState />;
   if (assets.isError) return <ErrorState message="Assets could not be loaded." />;
 
-  const data = (assets.data ?? []).filter((a) => !filter || a.name.toLowerCase().includes(filter.toLowerCase()) || a.code.toLowerCase().includes(filter.toLowerCase()) || a.room.name.toLowerCase().includes(filter.toLowerCase()));
+  const data = (assets.data ?? []).filter((a) => !filter || a.name.toLowerCase().includes(filter.toLowerCase()) || a.code.toLowerCase().includes(filter.toLowerCase()) || (a.room?.name ?? a.area?.name ?? "").toLowerCase().includes(filter.toLowerCase()));
   const activeCount = (assets.data ?? []).filter((a) => a.isActive).length;
   const totalIssues = (assets.data ?? []).reduce((sum, a) => sum + a._count.issues, 0);
 
@@ -74,14 +77,17 @@ export default function AssetsAdminPage() {
       <h3 style={{ margin: 0 }}>Register new asset</h3>
       {error && <div className="error-box">{error}</div>}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-        <div className="field"><label>Campus</label><select className="input" value={campusId} onChange={(e) => { setCampusId(e.target.value); setBlockId(""); setFloorId(""); setForm({ ...form, roomId: "" }); }}><option value="">Select…</option>{campuses.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-        <div className="field"><label>Block</label><select className="input" value={blockId} onChange={(e) => { setBlockId(e.target.value); setFloorId(""); setForm({ ...form, roomId: "" }); }} disabled={!campusId}><option value="">Select…</option>{blocks.data?.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
-        <div className="field"><label>Floor</label><select className="input" value={floorId} onChange={(e) => { setFloorId(e.target.value); setForm({ ...form, roomId: "" }); }} disabled={!blockId}><option value="">Select…</option>{floors.data?.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></div>
-      </div>
+         <div className="field"><label>Campus</label><select className="input" value={campusId} onChange={(e) => { setCampusId(e.target.value); setBlockId(""); setFloorId(""); setForm({ ...form, roomId: "", areaId: "" }); }}><option value="">Select…</option>{campuses.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+         <div className="field"><label>Block</label><select className="input" value={blockId} onChange={(e) => { setBlockId(e.target.value); setFloorId(""); setForm({ ...form, roomId: "", areaId: "" }); }} disabled={!campusId}><option value="">Select…</option>{blocks.data?.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
+         <div className="field"><label>Floor</label><select className="input" value={floorId} onChange={(e) => { setFloorId(e.target.value); setForm({ ...form, roomId: "", areaId: "" }); }} disabled={!blockId}><option value="">Select…</option>{floors.data?.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></div>
+       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-        <div className="field"><label>Room</label><select className="input" required value={form.roomId} onChange={(e) => setForm({ ...form, roomId: e.target.value })} disabled={!floorId}><option value="">Select…</option>{rooms.data?.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.code})</option>)}</select></div>
-        <div className="field"><label>Category</label><select className="input" required value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}><option value="">Select…</option>{categories.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-      </div>
+         <div className="field"><label>Location type</label><select className="input" value={form.locationType} onChange={(e) => setForm({ ...form, locationType: e.target.value as "ROOM" | "AREA", roomId: "", areaId: "" })}><option value="ROOM">Room</option><option value="AREA">Area</option></select></div>
+         {form.locationType === "ROOM" ? <div className="field"><label>Room</label><select className="input" required value={form.roomId} onChange={(e) => setForm({ ...form, roomId: e.target.value })} disabled={!floorId}><option value="">Select…</option>{rooms.data?.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.code})</option>)}</select></div> : <div className="field"><label>Area</label><select className="input" required value={form.areaId} onChange={(e) => setForm({ ...form, areaId: e.target.value })} disabled={!floorId}><option value="">Select…</option>{areas.data?.map((area) => <option key={area.id} value={area.id}>{area.name} ({area.code})</option>)}</select></div>}
+       </div>
+       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
+         <div className="field"><label>Category</label><select className="input" required value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}><option value="">Select…</option>{categories.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
         <div className="field"><label>Code</label><input className="input" required maxLength={60} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="AC-001" /></div>
         <div className="field"><label>Name</label><input className="input" required maxLength={160} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Split AC Unit" /></div>
@@ -97,7 +103,7 @@ export default function AssetsAdminPage() {
           <td><code>{a.code}</code></td>
           <td><strong>{a.name}</strong></td>
           <td>{a.category.name}</td>
-          <td><span className="muted">{a.room.floor.block.campus.name} › {a.room.floor.block.name} › {a.room.floor.name} ›</span> {a.room.name}</td>
+          <td>{a.room ? <><span className="muted">{a.room.floor.block.campus.name} › {a.room.floor.block.name} › {a.room.floor.name} ›</span> {a.room.name}</> : a.area ? <><span className="muted">{a.area.floor.block.campus.name} › {a.area.floor.block.name} › {a.area.floor.name} ›</span> {a.area.name}</> : "Unspecified"}</td>
           <td className="muted">{a.serialNumber || "—"}</td>
           <td>{a._count.issues}</td>
           <td className="muted">{new Date(a.createdAt).toLocaleDateString()}</td>

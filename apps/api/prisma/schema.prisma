@@ -93,6 +93,7 @@ enum ScopeType {
   BLOCK
   FLOOR
   ROOM
+  AREA
   ISSUE_CATEGORY
   ASSIGNED_ISSUES
 }
@@ -118,6 +119,20 @@ enum RoomType {
   OTHER
 }
 
+enum LocationType {
+  ROOM
+  AREA
+}
+
+enum SessionType {
+  LECTURE
+  LAB
+  TUTORIAL
+  SEMINAR
+  ACTIVITY
+  OTHER
+}
+
 enum AttendanceSessionStatus {
   DRAFT
   SUBMITTED
@@ -132,6 +147,13 @@ enum AttendanceCode {
   ON_DUTY
   MEDICAL_LEAVE
   AUTHORIZED_LEAVE
+  HALF_DAY_PRESENT
+  HALF_DAY_ABSENT
+}
+
+enum AttendancePartStatus {
+  PRESENT
+  ABSENT
 }
 
 enum CorrectionStatus {
@@ -187,8 +209,11 @@ enum IssueStatus {
   ACKNOWLEDGED
   IN_PROGRESS
   WAITING_FOR_MATERIAL
+  WAITING_FOR_PARTS
   WAITING_FOR_VENDOR
+  WAITING_FOR_APPROVAL
   ON_HOLD
+  OVERDUE
   RESOLVED
   VERIFICATION_PENDING
   VERIFIED
@@ -196,6 +221,19 @@ enum IssueStatus {
   REOPENED
   REJECTED
   CANCELLED
+}
+
+enum CompilerExecutionStatus {
+  QUEUED
+  COMPILING
+  RUNNING
+  ACCEPTED
+  WRONG_ANSWER
+  COMPILATION_ERROR
+  RUNTIME_ERROR
+  TIME_LIMIT_EXCEEDED
+  MEMORY_LIMIT_EXCEEDED
+  INTERNAL_ERROR
 }
 
 enum AttachmentPurpose {
@@ -1265,6 +1303,7 @@ model AttendanceSession {
   facultyId      String                        @map("faculty_id") @db.Uuid
   sessionDate    DateTime                      @map("session_date") @db.Date
   periodNumber   Int                           @map("period_number")
+  sessionType    SessionType                   @default(LECTURE) @map("session_type")
   startsAt       DateTime?                     @map("starts_at") @db.Timestamptz(3)
   endsAt         DateTime?                     @map("ends_at") @db.Timestamptz(3)
   status         AttendanceSessionStatus       @default(DRAFT)
@@ -1292,6 +1331,12 @@ model AttendanceRecord {
   sessionId     String                        @map("session_id") @db.Uuid
   studentUserId String                        @map("student_user_id") @db.Uuid
   status        AttendanceCode
+  morningStatus AttendancePartStatus?          @map("morning_status")
+  afternoonStatus AttendancePartStatus?        @map("afternoon_status")
+  effectiveAttendanceValue Decimal             @default(1.0) @map("effective_attendance_value") @db.Decimal(3, 2)
+  correctionReason String?                     @map("correction_reason") @db.VarChar(1000)
+  correctedById String?                        @map("corrected_by_id") @db.Uuid
+  correctedAt DateTime?                        @map("corrected_at") @db.Timestamptz(3)
   note          String?                       @db.VarChar(500)
   markedAt      DateTime                      @default(now()) @map("marked_at") @db.Timestamptz(3)
   version       Int                           @default(1)
@@ -1390,6 +1435,12 @@ model AttendanceChangeHistory {
   recordId       String           @map("record_id") @db.Uuid
   previousStatus AttendanceCode?  @map("previous_status")
   newStatus      AttendanceCode   @map("new_status")
+  previousMorningStatus AttendancePartStatus? @map("previous_morning_status")
+  previousAfternoonStatus AttendancePartStatus? @map("previous_afternoon_status")
+  morningStatus  AttendancePartStatus? @map("morning_status")
+  afternoonStatus AttendancePartStatus? @map("afternoon_status")
+  previousEffectiveAttendanceValue Decimal? @map("previous_effective_attendance_value") @db.Decimal(3, 2)
+  newEffectiveAttendanceValue Decimal? @map("new_effective_attendance_value") @db.Decimal(3, 2)
   previousNote   String?          @map("previous_note") @db.VarChar(500)
   newNote        String?          @map("new_note") @db.VarChar(500)
   changedById    String           @map("changed_by_id") @db.Uuid
@@ -1491,6 +1542,7 @@ model Floor {
   updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
   block           Block            @relation(fields: [blockId], references: [id], onDelete: Restrict)
   rooms           Room[]
+  areas           Area[]
   issues          Issue[]
   feedbackTargets FeedbackTarget[]
 
@@ -1532,6 +1584,28 @@ model Room {
   @@map("rooms")
 }
 
+model Area {
+  id          String    @id @default(uuid()) @db.Uuid
+  floorId     String    @map("floor_id") @db.Uuid
+  code        String    @db.VarChar(40)
+  name        String    @db.VarChar(150)
+  description String?   @db.VarChar(500)
+  isActive    Boolean   @default(true) @map("is_active")
+  archivedAt  DateTime? @map("archived_at") @db.Timestamptz(3)
+  sortOrder   Int       @default(0) @map("sort_order")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  floor       Floor     @relation(fields: [floorId], references: [id], onDelete: Restrict)
+  assets      Asset[]
+  issues      Issue[]
+  assignmentRules IssueAssignmentRule[]
+
+  @@unique([floorId, code])
+  @@index([floorId, isActive, sortOrder])
+  @@index([floorId, archivedAt])
+  @@map("areas")
+}
+
 model AssetCategory {
   id       String  @id @default(uuid()) @db.Uuid
   name     String  @unique @db.VarChar(120)
@@ -1543,7 +1617,8 @@ model AssetCategory {
 
 model Asset {
   id           String        @id @default(uuid()) @db.Uuid
-  roomId       String        @map("room_id") @db.Uuid
+  roomId       String?       @map("room_id") @db.Uuid
+  areaId       String?       @map("area_id") @db.Uuid
   categoryId   String        @map("category_id") @db.Uuid
   code         String        @unique @db.VarChar(60)
   name         String        @db.VarChar(160)
@@ -1552,11 +1627,13 @@ model Asset {
   isActive     Boolean       @default(true) @map("is_active")
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
-  room         Room          @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  room         Room?         @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  area         Area?         @relation(fields: [areaId], references: [id], onDelete: Restrict)
   category     AssetCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   issues       Issue[]
 
   @@index([roomId, isActive])
+  @@index([areaId, isActive])
   @@map("assets")
 }
 
@@ -1669,6 +1746,7 @@ model IssueAssignmentRule {
   blockId           String?         @map("block_id") @db.Uuid
   floorId           String?         @map("floor_id") @db.Uuid
   roomId            String?         @map("room_id") @db.Uuid
+  areaId            String?         @map("area_id") @db.Uuid
   roomType          RoomType?       @map("room_type")
   departmentId      String?         @map("department_id") @db.Uuid
   categoryId        String?         @map("category_id") @db.Uuid
@@ -1688,11 +1766,13 @@ model IssueAssignmentRule {
   updatedAt         DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
   category          IssueCategory?  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   issueType         IssueType?      @relation(fields: [issueTypeId], references: [id], onDelete: Restrict)
+  area              Area?           @relation(fields: [areaId], references: [id], onDelete: Restrict)
   team              ResponsibleTeam @relation(fields: [teamId], references: [id], onDelete: Restrict)
   routedIssues      Issue[]
 
   @@index([collegeId, isActive, rulePriority])
   @@index([roomId, categoryId, issueTypeId])
+  @@index([areaId, categoryId, issueTypeId])
   @@map("issue_assignment_rules")
 }
 
@@ -1719,11 +1799,15 @@ model Issue {
   campusId             String                   @map("campus_id") @db.Uuid
   blockId              String                   @map("block_id") @db.Uuid
   floorId              String                   @map("floor_id") @db.Uuid
-  roomId               String                   @map("room_id") @db.Uuid
+  locationType         LocationType             @default(ROOM) @map("location_type")
+  roomId               String?                  @map("room_id") @db.Uuid
+  areaId               String?                  @map("area_id") @db.Uuid
+  customAreaName       String?                  @map("custom_area_name") @db.VarChar(150)
   departmentId         String?                  @map("department_id") @db.Uuid
   categoryId           String                   @map("category_id") @db.Uuid
   issueTypeId          String?                  @map("issue_type_id") @db.Uuid
   assetId              String?                  @map("asset_id") @db.Uuid
+  customAssetName      String?                  @map("custom_asset_name") @db.VarChar(150)
   reporterId           String                   @map("reporter_id") @db.Uuid
   title                String                   @db.VarChar(160)
   description          String
@@ -1759,7 +1843,8 @@ model Issue {
   campus               Campus                   @relation(fields: [campusId], references: [id], onDelete: Restrict)
   block                Block                    @relation(fields: [blockId], references: [id], onDelete: Restrict)
   floor                Floor                    @relation(fields: [floorId], references: [id], onDelete: Restrict)
-  room                 Room                     @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  room                 Room?                    @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  area                 Area?                    @relation(fields: [areaId], references: [id], onDelete: Restrict)
   department           Department?              @relation(fields: [departmentId], references: [id], onDelete: Restrict)
   category             IssueCategory            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   issueType            IssueType?               @relation(fields: [issueTypeId], references: [id], onDelete: Restrict)
@@ -1785,6 +1870,7 @@ model Issue {
   @@index([collegeId, archivedAt, closedAt])
   @@index([assignedToId, status, resolutionDueAt])
   @@index([roomId, categoryId, issueTypeId, assetId, status])
+  @@index([areaId, categoryId, issueTypeId, assetId, status])
   @@index([submissionSource, scannedLocationId, createdAt])
   @@map("issues")
 }
@@ -2830,6 +2916,9 @@ enum BroadcastAudienceType {
   ALL
   ROLE
   DEPARTMENT
+  PROGRAMME
+  ACADEMIC_YEAR
+  SEMESTER
   SECTION
   INDIVIDUAL
 }
@@ -2909,6 +2998,7 @@ model Course {
   assessments       CourseAssessment[]
   studentProgress   StudentProgress[]
   assessmentResults AssessmentResult[]
+  assessmentAttempts AssessmentAttempt[]
   certificates      LearningCertificate[]
 
   @@unique([collegeId, code])
@@ -2985,18 +3075,52 @@ model CourseAssessment {
   legacyLearningId String?        @unique @map("legacy_learning_id") @db.VarChar(120)
   title            String         @db.VarChar(180)
   description      String?        @db.Text
+  instructions     String?        @db.Text
   type             AssessmentType @default(QUIZ)
   maxScore         Int            @default(100) @map("max_score")
   passingScore     Int            @default(50) @map("passing_score")
+  questionCount    Int            @default(5) @map("question_count")
+  passPercentage   Int            @default(50) @map("pass_percentage")
+  timeLimitMinutes Int?           @map("time_limit_minutes")
+  maximumAttempts  Int            @default(3) @map("maximum_attempts")
+  shuffleQuestions Boolean        @default(false) @map("shuffle_questions")
+  shuffleOptions   Boolean        @default(false) @map("shuffle_options")
+  showCorrectAnswers Boolean      @default(false) @map("show_correct_answers")
+  showExplanations Boolean        @default(true) @map("show_explanations")
+  status           String         @default("DRAFT") @db.VarChar(30)
   questionsJson    Json?          @map("questions_json")
   createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   course  Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
   results AssessmentResult[]
+  attempts AssessmentAttempt[]
 
   @@index([courseId])
   @@map("course_assessments")
+}
+
+model AssessmentAttempt {
+  id             String           @id @default(uuid()) @db.Uuid
+  studentId      String           @map("student_id") @db.Uuid
+  courseId       String           @map("course_id") @db.Uuid
+  assessmentId   String           @map("assessment_id") @db.Uuid
+  attemptNumber  Int              @map("attempt_number")
+  status         String           @default("IN_PROGRESS") @db.VarChar(30)
+  questionOrder  Json?            @map("question_order")
+  answersJson    Json?            @map("answers_json")
+  startedAt      DateTime         @default(now()) @map("started_at") @db.Timestamptz(3)
+  expiresAt      DateTime?        @map("expires_at") @db.Timestamptz(3)
+  submittedAt    DateTime?        @map("submitted_at") @db.Timestamptz(3)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+  course         Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  assessment     CourseAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  result         AssessmentResult?
+
+  @@unique([studentId, assessmentId, attemptNumber])
+  @@index([studentId, assessmentId, status])
+  @@map("assessment_attempts")
 }
 
 model StudentProgress {
@@ -3019,6 +3143,7 @@ model AssessmentResult {
   studentId    String   @map("student_id") @db.Uuid
   courseId     String   @map("course_id") @db.Uuid
   assessmentId String   @map("assessment_id") @db.Uuid
+  attemptId    String?  @unique @map("attempt_id") @db.Uuid
   score        Int
   passed       Boolean
   completedAt  DateTime @default(now()) @map("completed_at") @db.Timestamptz(3)
@@ -3026,10 +3151,34 @@ model AssessmentResult {
 
   course     Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
   assessment CourseAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  attempt    AssessmentAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
 
   @@index([studentId, assessmentId])
   @@index([courseId])
   @@map("assessment_results")
+}
+
+model CompilerExecution {
+  id              String                  @id @default(uuid()) @db.Uuid
+  collegeId       String                  @map("college_id") @db.Uuid
+  userId          String                  @map("user_id") @db.Uuid
+  language        String                  @db.VarChar(30)
+  sourceHash      String                  @map("source_hash") @db.VarChar(64)
+  sourceLength    Int                     @map("source_length")
+  stdinLength     Int                     @default(0) @map("stdin_length")
+  status          CompilerExecutionStatus @default(QUEUED)
+  stdout          String?                 @db.Text
+  stderr          String?                 @db.Text
+  compileOutput   String?                 @map("compile_output") @db.Text
+  executionTimeMs Int?                    @map("execution_time_ms")
+  memoryKb        Int?                    @map("memory_kb")
+  provider        String?                 @db.VarChar(40)
+  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  completedAt     DateTime?               @map("completed_at") @db.Timestamptz(3)
+
+  @@index([userId, createdAt])
+  @@index([collegeId, status, createdAt])
+  @@map("compiler_executions")
 }
 
 model LearningBookmark {

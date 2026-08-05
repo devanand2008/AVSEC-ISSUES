@@ -37,7 +37,13 @@ interface IssueDetail {
   expectedCompletionAt: string | null;
   occurrenceCount: number;
   affectedUserCount: number;
-  room: { name: string; code: string; floor: { name: string; block: { name: string; campus: { name: string } } } };
+  campus: { name: string };
+  block: { name: string };
+  floor: { name: string };
+  room: { name: string; code: string; floor: { name: string; block: { name: string; campus: { name: string } } } } | null;
+  area: { name: string; code: string } | null;
+  customAreaName: string | null;
+  customAssetName: string | null;
   category: { name: string };
   issueType: { name: string } | null;
   asset: { name: string } | null;
@@ -180,7 +186,7 @@ export default function IssueDetailPage() {
   const issue = query.data;
   const canAcknowledge = user?.permissions.includes("issues.acknowledge") && issue.status === "ASSIGNED";
   const canStart = user?.permissions.includes("issues.start") && ["ACKNOWLEDGED", "REOPENED"].includes(issue.status);
-  const canResolve = user?.permissions.includes("issues.resolve") && ["IN_PROGRESS", "WAITING_FOR_MATERIAL", "WAITING_FOR_VENDOR"].includes(issue.status);
+  const canResolve = user?.permissions.includes("issues.resolve") && ["IN_PROGRESS", "WAITING_FOR_MATERIAL", "WAITING_FOR_PARTS", "WAITING_FOR_APPROVAL", "WAITING_FOR_VENDOR", "ON_HOLD", "OVERDUE"].includes(issue.status);
   const canVerify = (user?.permissions.includes("issues.verify") || user?.id === issue.reporter.publicId) && ["RESOLVED", "VERIFICATION_PENDING"].includes(issue.status);
   const canAssign = Boolean(user?.permissions.includes("issues.assign") && ["NEW", "NEEDS_MANUAL_ASSIGNMENT", "ASSIGNED", "REOPENED"].includes(issue.status));
   const canUpload = Boolean(user && (user.id === issue.reporter.publicId || user.permissions.includes("issues.update_work") || user.permissions.includes("issues.assign")));
@@ -216,7 +222,7 @@ export default function IssueDetailPage() {
             <p style={{ whiteSpace: "pre-wrap", lineHeight: 1.7 }}>{issue.description}</p>
             {issue.exactPosition && <p className="muted"><MapPin size={16} /> Exact position: {issue.exactPosition}</p>}
             <div className="detail-meta">
-              <div><MapPin /><span><small>Location</small><strong>{issue.room.floor.block.campus.name} / {issue.room.floor.block.name} / {issue.room.floor.name} / {issue.room.name}</strong></span></div>
+              <div><MapPin /><span><small>Location</small><strong>{issue.campus.name} / {issue.block.name} / {issue.floor.name} / {issue.room?.name ?? issue.area?.name ?? issue.customAreaName ?? "Unspecified"}</strong></span></div>
               <div><UserRound /><span><small>Responsible</small><strong>{issue.assignedTo?.fullName ?? issue.team?.name ?? "Awaiting assignment"}</strong></span></div>
               <div><Clock3 /><span><small>Resolution due</small><strong>{issue.resolutionDueAt ? new Date(issue.resolutionDueAt).toLocaleString() : "No active SLA"}</strong></span></div>
               <div><Clock3 /><span><small>Expected completion</small><strong>{issue.expectedCompletionAt ? new Date(issue.expectedCompletionAt).toLocaleString() : "Timeline not added"}</strong></span></div>
