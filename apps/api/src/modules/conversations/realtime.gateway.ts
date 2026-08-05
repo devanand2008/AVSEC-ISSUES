@@ -22,9 +22,12 @@ interface SocketData {
   userId?: string;
 }
 
-const webUrl = process.env.WEB_URL ?? "http://localhost:3000";
+const webUrl =
+  process.env.WEB_URL ??
+  process.env.RENDER_EXTERNAL_URL?.replace(/\/$/u, "") ??
+  "http://localhost:3000";
 const allowedOrigins = parseAllowedOrigins(
-  process.env.CORS_ALLOWED_ORIGINS,
+  process.env.CORS_ALLOWED_ORIGINS ?? process.env.RENDER_EXTERNAL_URL,
   webUrl,
 );
 
@@ -41,7 +44,9 @@ const allowedOrigins = parseAllowedOrigins(
     credentials: true,
   },
 })
-export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class RealtimeGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer() server!: Server;
   private readonly logger = new Logger(RealtimeGateway.name);
   private readonly typingThrottle = new Map<string, number>();
@@ -89,15 +94,34 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       if (!user) throw new Error("Session is inactive");
       (client.data as SocketData).userId = user.id;
       await client.join(`user:${user.id}`);
-      const memberships = await this.prisma.conversationParticipant.findMany({ where: { userId: user.id, leftAt: null, archivedAt: null }, select: { conversationId: true } });
-      await Promise.all(memberships.map((membership) => client.join(`conversation:${membership.conversationId}`)));
+      const memberships = await this.prisma.conversationParticipant.findMany({
+        where: { userId: user.id, leftAt: null, archivedAt: null },
+        select: { conversationId: true },
+      });
+      await Promise.all(
+        memberships.map((membership) =>
+          client.join(`conversation:${membership.conversationId}`),
+        ),
+      );
       if (memberships.length) {
         await this.prisma.messageDelivery.updateMany({
-          where: { userId: user.id, status: { in: ["PENDING", "QUEUED", "SENT", "RETRYING"] }, message: { conversationId: { in: memberships.map((membership) => membership.conversationId) } } },
+          where: {
+            userId: user.id,
+            status: { in: ["PENDING", "QUEUED", "SENT", "RETRYING"] },
+            message: {
+              conversationId: {
+                in: memberships.map((membership) => membership.conversationId),
+              },
+            },
+          },
           data: { status: "DELIVERED", lastError: null },
         });
       }
-      await this.prisma.userPresence.upsert({ where: { userId: user.id }, create: { userId: user.id, isOnline: true }, update: { isOnline: true, lastSeenAt: new Date() } });
+      await this.prisma.userPresence.upsert({
+        where: { userId: user.id },
+        create: { userId: user.id, isOnline: true },
+        update: { isOnline: true, lastSeenAt: new Date() },
+      });
       await this.emitPresence(user.id, true);
     } catch (error) {
       this.logger.warn(
@@ -113,7 +137,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const sockets = await this.server.in(`user:${userId}`).fetchSockets();
     if (sockets.length > 0) return;
     const lastSeenAt = new Date();
-    await this.prisma.userPresence.upsert({ where: { userId }, create: { userId, isOnline: false, lastSeenAt }, update: { isOnline: false, lastSeenAt } });
+    await this.prisma.userPresence.upsert({
+      where: { userId },
+      create: { userId, isOnline: false, lastSeenAt },
+      update: { isOnline: false, lastSeenAt },
+    });
     await this.emitPresence(userId, false, lastSeenAt);
   }
 
@@ -147,7 +175,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (!participant) return { accepted: false };
     const throttleKey = `${client.id}:${body.conversationId}`;
     const now = Date.now();
-    if (body.typing && now - (this.typingThrottle.get(throttleKey) ?? 0) < 1500) return { accepted: true, throttled: true };
+    if (body.typing && now - (this.typingThrottle.get(throttleKey) ?? 0) < 1500)
+      return { accepted: true, throttled: true };
     this.typingThrottle.set(throttleKey, now);
     client.to(`conversation:${body.conversationId}`).emit("typing.changed", {
       conversationId: body.conversationId,
@@ -175,10 +204,19 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       .emit("message.read", serializeForTransport(receipt));
   }
 
-  private async emitPresence(userId: string, isOnline: boolean, lastSeenAt = new Date()): Promise<void> {
-    const conversations = await this.prisma.conversationParticipant.findMany({ where: { userId, leftAt: null }, select: { conversationId: true } });
+  private async emitPresence(
+    userId: string,
+    isOnline: boolean,
+    lastSeenAt = new Date(),
+  ): Promise<void> {
+    const conversations = await this.prisma.conversationParticipant.findMany({
+      where: { userId, leftAt: null },
+      select: { conversationId: true },
+    });
     for (const conversation of conversations) {
-      this.server.to(`conversation:${conversation.conversationId}`).emit("presence.changed", { userId, isOnline, lastSeenAt });
+      this.server
+        .to(`conversation:${conversation.conversationId}`)
+        .emit("presence.changed", { userId, isOnline, lastSeenAt });
     }
   }
 }

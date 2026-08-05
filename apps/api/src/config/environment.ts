@@ -165,8 +165,18 @@ export const environmentSchema = z
     BACKUP_SCHEDULE_ENABLED: booleanString(),
     BACKUP_SCHEDULE_HOUR: z.coerce.number().int().min(0).max(23).default(2),
     BACKUP_DAILY_RETENTION: z.coerce.number().int().min(1).max(365).default(14),
-    BACKUP_WEEKLY_RETENTION: z.coerce.number().int().min(1).max(260).default(12),
-    BACKUP_MONTHLY_RETENTION: z.coerce.number().int().min(1).max(120).default(24),
+    BACKUP_WEEKLY_RETENTION: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(260)
+      .default(12),
+    BACKUP_MONTHLY_RETENTION: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(120)
+      .default(24),
     WHATSAPP_ENABLED: booleanString(),
     WHATSAPP_PHONE_NUMBER_ID: optionalString,
     WHATSAPP_BUSINESS_ACCOUNT_ID: optionalString,
@@ -194,10 +204,7 @@ export const environmentSchema = z
       .min(1)
       .default("AVS Engineering College"),
     EMAIL_FROM_ADDRESS: optionalString,
-    OFFICIAL_EMAIL_DOMAINS: z
-      .string()
-      .trim()
-      .default("avsenggcollege.ac.in"),
+    OFFICIAL_EMAIL_DOMAINS: z.string().trim().default("avsenggcollege.ac.in"),
     FIREBASE_PROJECT_ID: optionalString,
     FIREBASE_CLIENT_EMAIL: optionalString,
     FIREBASE_PRIVATE_KEY: optionalString,
@@ -222,7 +229,12 @@ export const environmentSchema = z
     ),
     OPENAI_MODEL: z.preprocess(
       (value) => (value === "" ? undefined : value),
-      z.string().trim().regex(/^[a-zA-Z0-9._-]+$/).max(100).optional(),
+      z
+        .string()
+        .trim()
+        .regex(/^[a-zA-Z0-9._-]+$/)
+        .max(100)
+        .optional(),
     ),
     OPENAI_VECTOR_STORE_ID: z.preprocess(
       (value) => (value === "" ? undefined : value),
@@ -345,7 +357,10 @@ export const environmentSchema = z
       }
     }
 
-    if (environment.BACKUP_SCHEDULE_ENABLED && !environment.BACKUP_ENCRYPTION_KEY) {
+    if (
+      environment.BACKUP_SCHEDULE_ENABLED &&
+      !environment.BACKUP_ENCRYPTION_KEY
+    ) {
       context.addIssue({
         code: "custom",
         path: ["BACKUP_ENCRYPTION_KEY"],
@@ -360,8 +375,7 @@ export const environmentSchema = z
       context.addIssue({
         code: "custom",
         path: ["OPENAI_VECTOR_STORE_ID"],
-        message:
-          "is required when AI_KNOWLEDGE_PROVIDER=openai_file_search",
+        message: "is required when AI_KNOWLEDGE_PROVIDER=openai_file_search",
       });
     }
 
@@ -481,10 +495,35 @@ export const environmentSchema = z
 
 export type Environment = z.infer<typeof environmentSchema>;
 
+function applyRenderDefaults(
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  const environment = { ...input };
+  const renderUrl =
+    typeof environment.RENDER_EXTERNAL_URL === "string"
+      ? environment.RENDER_EXTERNAL_URL.trim().replace(/\/$/u, "")
+      : "";
+  if (!renderUrl) return environment;
+
+  for (const name of [
+    "WEB_URL",
+    "PUBLIC_APP_URL",
+    "CORS_ALLOWED_ORIGINS",
+  ] as const) {
+    if (
+      typeof environment[name] !== "string" ||
+      environment[name].trim() === ""
+    ) {
+      environment[name] = renderUrl;
+    }
+  }
+  return environment;
+}
+
 export function validateEnvironment(
   input: Record<string, unknown>,
 ): Environment {
-  const result = environmentSchema.safeParse(input);
+  const result = environmentSchema.safeParse(applyRenderDefaults(input));
   if (!result.success) {
     const message = result.error.issues
       .map((issue) => `${issue.path.join(".")}: ${issue.message}`)

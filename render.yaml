@@ -1,4 +1,11 @@
 services:
+  - type: keyvalue
+    name: avs-college-redis
+    plan: free
+    region: singapore
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+
   - type: web
     name: avs-college-portal
     runtime: docker
@@ -7,7 +14,7 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /health
-    autoDeploy: true
+    autoDeployTrigger: commit
     envVars:
       # ── Application identity ──────────────────────────────────────────────────
       - key: NODE_ENV
@@ -22,15 +29,8 @@ services:
         value: info
 
       # ── Network and routing ───────────────────────────────────────────────────
-      # Set PUBLIC_APP_URL, WEB_URL, and CORS_ALLOWED_ORIGINS to the actual
-      # Render HTTPS service URL after the service is first created.
-      # Example: https://avs-college-portal.onrender.com
-      - key: PUBLIC_APP_URL
-        sync: false
-      - key: WEB_URL
-        sync: false
-      - key: CORS_ALLOWED_ORIGINS
-        sync: false
+      # WEB_URL, PUBLIC_APP_URL, and CORS_ALLOWED_ORIGINS automatically use
+      # Render's RENDER_EXTERNAL_URL for this same-origin deployment.
       - key: API_PREFIX
         value: /api/v1
       - key: TRUST_PROXY
@@ -64,39 +64,37 @@ services:
         value: EXTERNAL_PERSISTENT
       - key: DATABASE_URL
         sync: false
-      - key: DIRECT_DATABASE_URL
-        sync: false
       - key: DATABASE_POOL_MAX
         value: "5"
       - key: MIGRATION_BACKUP_REQUIRED
         value: "true"
 
-      # ── JWT and auth secrets (set in Render dashboard) ────────────────────────
+      # ── JWT and auth secrets (generated and retained by Render) ───────────────
       - key: JWT_ACCESS_SECRET
-        sync: false
+        generateValue: true
       - key: JWT_REFRESH_SECRET
-        sync: false
+        generateValue: true
       - key: JWT_ACCESS_EXPIRY
         value: 15m
       - key: JWT_REFRESH_EXPIRY
         value: 7d
       - key: CSRF_SECRET
-        sync: false
+        generateValue: true
       - key: QR_TOKEN_SECRET
-        sync: false
+        generateValue: true
       - key: FEEDBACK_SUBMISSION_SECRET
-        sync: false
+        generateValue: true
       - key: BACKUP_TRIGGER_SECRET
-        sync: false
+        generateValue: true
       - key: PASSWORD_PEPPER
-        sync: false
+        generateValue: true
 
-      # ── Redis (optional — falls back to single-instance Socket.IO) ───────────
-      # Set REDIS_URL for durable BullMQ queues and multi-process messaging.
-      # Without Redis, queued imports and delivery tasks may not persist
-      # across sleep/wake cycles on the free tier.
+      # ── Redis-compatible queue/cache ──────────────────────────────────────────
       - key: REDIS_URL
-        sync: false
+        fromService:
+          type: keyvalue
+          name: avs-college-redis
+          property: connectionString
 
       # ── S3-compatible object storage ─────────────────────────────────────────
       # Required for profile photos, announcements, issue attachments, etc.
@@ -104,7 +102,7 @@ services:
       - key: S3_ENDPOINT
         sync: false
       - key: S3_REGION
-        value: us-east-1
+        sync: false
       - key: S3_BUCKET
         sync: false
       - key: S3_ACCESS_KEY
@@ -114,32 +112,17 @@ services:
       - key: S3_FORCE_PATH_STYLE
         value: "true"
 
-      # ── Google Drive (private backup and file storage) ────────────────────────
+      # ── Optional integrations ─────────────────────────────────────────────────
       - key: GOOGLE_DRIVE_ENABLED
-        value: "true"
-      - key: GOOGLE_DRIVE_OWNER_EMAIL
-        value: devanand.s2008@gmail.com
-      - key: GOOGLE_OAUTH_CLIENT_ID
-        sync: false
-      - key: GOOGLE_OAUTH_CLIENT_SECRET
-        sync: false
-      - key: GOOGLE_OAUTH_REFRESH_TOKEN
-        sync: false
-      - key: GOOGLE_OAUTH_REDIRECT_URI
-        sync: false
-      - key: GOOGLE_DRIVE_ROOT_FOLDER_ID
-        sync: false
-      - key: GOOGLE_DRIVE_BACKUP_FOLDER_ID
-        sync: false
-      - key: GOOGLE_DRIVE_FILES_FOLDER_ID
-        sync: false
-      - key: GOOGLE_DRIVE_ENCRYPTION_KEY
-        sync: false
+        value: "false"
+      - key: EMAIL_ENABLED
+        value: "false"
+      - key: WHATSAPP_ENABLED
+        value: "false"
+      - key: MALWARE_SCAN_ENABLED
+        value: "false"
 
       # ── Backup encryption ─────────────────────────────────────────────────────
-      # Generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
-      - key: BACKUP_ENCRYPTION_KEY
-        sync: false
       - key: BACKUP_ENCRYPTION_KEY_VERSION
         value: "1"
       - key: BACKUP_SCHEDULE_ENABLED
@@ -154,7 +137,18 @@ services:
       # ── AVS Bot (optional) ────────────────────────────────────────────────────
       - key: AVS_BOT_ENABLED
         value: "false"
-      - key: OPENAI_API_KEY
+
+      # First production administrator. The password is used only if no Main
+      # Admin exists yet, and the user must change it on first login.
+      - key: DEVELOPMENT_COLLEGE_CODE
+        value: "6201"
+      - key: PRODUCTION_COLLEGE_NAME
+        value: AVS Engineering College
+      - key: PRODUCTION_ADMIN_IDENTITY_ID
+        value: ADM001
+      - key: DEVELOPMENT_ADMIN_NAME
+        value: Main Administrator
+      - key: DEVELOPMENT_ADMIN_EMAIL
         sync: false
-      - key: OPENAI_MODEL
+      - key: DEVELOPMENT_ADMIN_PASSWORD
         sync: false

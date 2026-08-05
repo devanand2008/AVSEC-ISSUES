@@ -13,6 +13,9 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_API_URL=/api/v1
 ENV NEXT_PUBLIC_SOCKET_URL=/realtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
 COPY . .
 RUN npm run build -w @college/shared-types \
     && npm run build -w @college/validation \
@@ -27,7 +30,7 @@ ENV WEB_INTERNAL_PORT=3000
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates postgresql-client tini \
+    && apt-get install -y --no-install-recommends ca-certificates openssl postgresql-client tini \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /app/backups \
     && chown -R node:node /app

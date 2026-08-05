@@ -78,7 +78,9 @@ Read `DEPLOYMENT.md`, `BACKUP_RESTORE.md`, `MOBILE_LAN_ACCESS.md`, and `FINAL_DE
 
 [Deploy the production Docker stack to Render](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fdevanand2008%2FAVSEC-ISSUES)
 
-The Blueprint builds the tested API and web Dockerfiles, provisions PostgreSQL 17 and persistent Redis-compatible Key Value storage in Singapore, and deploys only after GitHub verification passes. During initial provisioning, supply the Main Admin email and a unique temporary password plus the private S3-compatible object-storage endpoint, region, bucket, access key, and secret key. Render displays the selected paid plans for approval before creating resources. The first API start applies migrations and creates only the college, RBAC catalog, and Main Admin account; it never loads development/demo records. The Main Admin must change the temporary password at first login.
+Step-by-step instructions: [Render + Supabase quick start](docs/render-supabase-quickstart.md).
+
+The Blueprint builds the API and web app into one Docker service and provisions a free Redis-compatible Key Value service in Singapore. Use one Supabase project for persistent PostgreSQL and S3-compatible file storage; during initial provisioning, supply its database/storage values plus the Main Admin email and a unique temporary password. Render generates the JWT, CSRF, QR, and password-pepper secrets automatically. The first start applies migrations and idempotently creates only the college, RBAC catalog, and Main Admin account; it never loads development/demo records. The Main Admin must change the temporary password at first login.
 
 Published container images are also available from GitHub Container Registry:
 

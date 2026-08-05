@@ -29,6 +29,21 @@ describe("environment policy", () => {
     expect(environment.GLOBAL_RATE_LIMIT_MAX).toBe(120);
   });
 
+  it("uses Render's public URL for same-origin production defaults", () => {
+    const environment = validateEnvironment({
+      ...base,
+      WEB_URL: undefined,
+      RENDER_EXTERNAL_URL: "https://avs-college-portal.onrender.com/",
+    });
+    expect(environment.WEB_URL).toBe("https://avs-college-portal.onrender.com");
+    expect(environment.PUBLIC_APP_URL).toBe(
+      "https://avs-college-portal.onrender.com",
+    );
+    expect(environment.CORS_ALLOWED_ORIGINS).toBe(
+      "https://avs-college-portal.onrender.com",
+    );
+  });
+
   it("rejects insecure production defaults", () => {
     expect(() =>
       validateEnvironment({
@@ -90,8 +105,7 @@ describe("environment policy", () => {
         "https://college.example/api/v1/admin/storage/google-drive/callback",
       GOOGLE_DRIVE_ENCRYPTION_KEY:
         "ci-drive-token-key-with-at-least-32-random-characters",
-      BACKUP_ENCRYPTION_KEY:
-        "ci-backup-key-with-at-least-32-random-characters",
+      BACKUP_ENCRYPTION_KEY: "ci-backup-key-with-at-least-32-random-characters",
       BACKUP_SCHEDULE_ENABLED: "true",
     });
     expect(environment.GOOGLE_DRIVE_ENABLED).toBe(true);
