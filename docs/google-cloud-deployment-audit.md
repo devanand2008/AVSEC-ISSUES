@@ -8,7 +8,7 @@ Audited commit: `00210910af38c66d298095b86c85d166169ecf51` (`main`, synchronized
 
 ## Deployment gate status
 
-Repository audit and the complete local quality gate pass. Google Cloud provisioning is blocked by the required approval/authentication gate: the Google Cloud CLI is not installed on this workstation, so no authenticated account, selected project, project number, billing state, or configured Google Cloud region can currently be verified. No Google Cloud resource has been created or changed.
+Repository audit and the complete local quality gate pass. Google Cloud CLI 577.0.0 is installed from Google's checksum-verified bundled Windows archive. Authentication is verified for `devanand.s2008@gmail.com`, Application Default Credentials are available, project `project-bc57d790-0e7e-4ced-b86` (number `1049586243`) is selected, and the Cloud Run region is `asia-south1`. Provisioning remains blocked because project billing is disabled and the only visible billing account, `My Billing Account` (`015180-353718-35E40B`), is closed. No Google Cloud resource has been created or changed.
 
 Unrelated untracked directories in the workspace were not inspected as application source and were not modified: `learn language/`, `legacy/`, `logo/`, `mkcert-master/`, and `worker management system2/`.
 
@@ -73,8 +73,8 @@ Still requires deployed-environment verification: real OpenAI calls, approved co
 
 ## Current deployment problems
 
-1. **Google Cloud authentication is unavailable.** `gcloud` is neither on `PATH` nor present in standard Windows installation locations. The primary account stated in the deployment request, `devanand.s2008@gmail.com`, has not been independently authenticated.
-2. **There is no verified Google Cloud project or billing status.** Project ID, project number, billing account, and active region are unknown. Provisioning paid resources is prohibited until they are displayed and approved.
+1. **Google Cloud billing is unavailable.** Authentication is verified for `devanand.s2008@gmail.com`, but project billing is disabled and the visible billing account `015180-353718-35E40B` is closed. The billing account must be reopened and its linkage explicitly approved before paid services can be provisioned.
+2. **The project and region are verified but cost approval is pending.** Project `project-bc57d790-0e7e-4ced-b86` (number `1049586243`) is active and `asia-south1` is configured. Provisioning remains prohibited until the cost-bearing resource plan and billing linkage are explicitly approved.
 3. **The requested frontend cannot be copied as static files only.** The Next.js build uses `output: "standalone"` and includes dynamic SSR routes. Converting it to a static export would break unknown-token/ID deep links unless the application were substantially redesigned.
 4. **No single-service production container exists.** The current API and frontend images are separate.
 5. **Required public health routing differs from the implementation.** Nest applies the global `api/v1` prefix, so health is currently `/api/v1/health`, `/api/v1/health/live`, and `/api/v1/health/ready/dependencies`; `/health`, `/health/live`, and `/health/ready` are not available at the public root. The existing `/api/v1/health/ready` also requires the `system.health` permission.
@@ -128,4 +128,4 @@ The 39 migrations validate and have previously been applied from zero to a dispo
 
 ## Audit conclusion
 
-The repository is locally buildable and testable, but it is not yet Google Cloud deployable under the requested architecture. The immediate blockers are Google Cloud CLI/authentication, verified project and billing selection, explicit approval of the cost-bearing resource plan, and implementation of the architecture changes above. Production readiness cannot be claimed until the real Cloud Run URL and every required infrastructure-dependent test pass.
+The repository is locally buildable and testable, but it is not yet Google Cloud deployable under the requested architecture. The immediate blockers are reopening the closed billing account, explicit approval to link it to the selected project, explicit approval of the cost-bearing resource plan, and implementation of the architecture changes above. Production readiness cannot be claimed until the real Cloud Run URL and every required infrastructure-dependent test pass.

@@ -14,17 +14,18 @@ No Google Cloud resources may be created from this plan until the authenticated 
 
 | Required identity/project field | Current verified value |
 | --- | --- |
-| Google account | Unavailable; Google Cloud CLI is not installed |
-| Authenticated identities | None verifiable |
-| Project ID | Not selected |
-| Project number | Unknown |
-| Billing status | Unknown |
-| Region | Proposed `asia-south1`; not configured in gcloud |
-| Primary requested identity | `devanand.s2008@gmail.com` (user-provided, not yet authenticated) |
+| Google account | `devanand.s2008@gmail.com` (authenticated and active) |
+| Authenticated identities | `devanand.s2008@gmail.com` |
+| Project ID | `project-bc57d790-0e7e-4ced-b86` (selected from the user's supplied project ID) |
+| Project number | `1049586243` |
+| Project display name | `My First Project` |
+| Project lifecycle | Active |
+| Billing status | Disabled |
+| Visible billing account | `My Billing Account` (`015180-353718-35E40B`), closed |
+| Region | `asia-south1` configured for Cloud Run |
+| Application Default Credentials | Available |
 
-Suggested project display name: `AVS College Management System`
-
-Suggested project ID pattern: `avs-college-management-<unique-suffix>`
+The existing selected project will be used. Its display name can be changed from `My First Project` to `AVS College Management System` only if separately desired; the immutable project ID remains `project-bc57d790-0e7e-4ced-b86`.
 
 ## Proposed production resources requiring approval
 
@@ -52,7 +53,7 @@ If Memorystore cost is not approved, deployment must pause for an application re
 
 ## Proposed resource names
 
-Values containing `<PROJECT_ID>` remain unresolved until project approval.
+`<PROJECT_ID>` resolves to `project-bc57d790-0e7e-4ced-b86` after the user's project selection.
 
 - Cloud Run service: `avs-college-portal`
 - Artifact Registry repository: `avs-portal`
@@ -160,8 +161,8 @@ No secret value will be printed, stored in repository files, passed as a fronten
 
 ## Decisions required before provisioning
 
-1. Authenticate the intended Google identity and verify that it is `devanand.s2008@gmail.com` or explicitly approve another identity.
-2. Select an existing billed project or approve creation/linking of a new project matching the suggested name/ID pattern.
+1. Reopen `My Billing Account` (`015180-353718-35E40B`) in Google Cloud Billing; it is currently closed.
+2. Explicitly approve linking that billing account to `project-bc57d790-0e7e-4ced-b86`.
 3. Approve the cost-bearing resource list, especially Cloud SQL and the continuously billed Memorystore instance.
 4. Approve the zonal pilot database choice or request regional high availability.
 5. Confirm whether optional Google Drive secondary backup remains disabled (recommended for the initial deployment).
