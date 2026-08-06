@@ -13,6 +13,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { PrismaService } from "../../database/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import type { LoginDto } from "./dto/login.dto";
+import { verifyStoredPassword } from "./password-verification";
 import { durationSeconds } from "./token-time";
 
 interface RequestMetadata {
@@ -95,13 +96,20 @@ export class AuthService {
     const currentlyLocked = Boolean(
       user?.credential?.lockedUntil && user.credential.lockedUntil > new Date(),
     );
-    const valid = user?.credential
-      ? !currentlyLocked &&
-        (await argon2.verify(
-          user.credential.passwordHash,
-          input.password + this.config.get<string>("PASSWORD_PEPPER", ""),
-        ))
-      : false;
+    const pepper = this.config.get<string>("PASSWORD_PEPPER", "");
+    const passwordVerification =
+      user?.credential && !currentlyLocked
+        ? await verifyStoredPassword(
+            user.credential.passwordHash,
+            input.password,
+            pepper,
+            this.config.get<boolean>(
+              "LEGACY_UNPEPPERED_PASSWORD_MIGRATION_ENABLED",
+              false,
+            ),
+          )
+        : { valid: false, needsPepperUpgrade: false };
+    const valid = passwordVerification.valid;
 
     if (!user || !valid) {
       const nextAttemptCount = (user?.credential?.failedAttemptCount ?? 0) + 1;
@@ -146,6 +154,10 @@ export class AuthService {
         `This account is ${user.status.toLowerCase()}.`,
       );
 
+    const upgradedPasswordHash = passwordVerification.needsPepperUpgrade
+      ? await argon2.hash(input.password + pepper, { type: argon2.argon2id })
+      : undefined;
+
     // Create session and generate tokens in parallel
     const session = await this.prisma.session.create({
       data: {
@@ -173,7 +185,16 @@ export class AuthService {
       }),
       this.prisma.userCredential.update({
         where: { userId: user.id },
-        data: { failedAttemptCount: 0, lockedUntil: null },
+        data: {
+          failedAttemptCount: 0,
+          lockedUntil: null,
+          ...(upgradedPasswordHash
+            ? {
+                passwordHash: upgradedPasswordHash,
+                passwordChangedAt: new Date(),
+              }
+            : {}),
+        },
       }),
       this.prisma.loginAttempt.create({
         data: {

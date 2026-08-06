@@ -62,7 +62,7 @@ describe("automatic session refresh", () => {
     );
 
     const assertion = expect(api.get("/slow")).rejects.toThrow("Aborted");
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(90_000);
 
     await assertion;
   });

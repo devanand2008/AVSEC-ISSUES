@@ -88,6 +88,11 @@ services:
         generateValue: true
       - key: PASSWORD_PEPPER
         generateValue: true
+      # Temporary compatibility gate for credentials imported from the local
+      # pre-pepper database. Successful logins are immediately re-hashed with
+      # PASSWORD_PEPPER; leave disabled unless performing that controlled import.
+      - key: LEGACY_UNPEPPERED_PASSWORD_MIGRATION_ENABLED
+        value: "false"
 
       # ── Redis-compatible queue/cache ──────────────────────────────────────────
       - key: REDIS_URL

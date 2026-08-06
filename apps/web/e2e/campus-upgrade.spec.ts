@@ -36,12 +36,14 @@ test("admin upgrade pages render without horizontal overflow", async ({ page }, 
   await expect(page.getByRole("button", { name: "Add staff" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
 
-  await page.goto("/admin/users");
-  const historyButton = page.getByRole("button", { name: "History" }).first();
-  await expect(historyButton).toBeVisible();
-  await historyButton.click();
-  await expect(page.getByRole("heading", { name: /Role history for/ })).toBeVisible();
-  await page.getByRole("button", { name: "Close role history" }).click();
+  await page.goto("/admin/people");
+  const addPerson = page.getByRole("link", { name: "Add Person" }).first();
+  await expect(addPerson).toHaveAttribute("href", "/admin/people/new");
+  await addPerson.click();
+  await expect(page).toHaveURL(/\/admin\/people\/new$/);
+  await expect(page.getByRole("heading", { name: "Add Person" }).first()).toBeVisible();
+  await expect(page.getByLabel("College ID")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create account" })).toBeVisible();
 
   await page.goto("/admin/announcements/create");
   await page.getByLabel("Recipient group").selectOption("DEPARTMENT");

@@ -5,6 +5,20 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
+const avsProductionApiBaseUrl =
+    'https://avs-college-portal.onrender.com/api/v1';
+
+String resolveAvsApiBaseUrl({
+  required bool isWeb,
+  required Uri pageUri,
+  String configured = '',
+}) {
+  final override = configured.trim().replaceFirst(RegExp(r'/+$'), '');
+  if (override.isNotEmpty) return override;
+  if (isWeb) return '${pageUri.origin}/api/v1';
+  return avsProductionApiBaseUrl;
+}
+
 class AvsApiClient {
   AvsApiClient({
     http.Client? httpClient,
@@ -23,12 +37,11 @@ class AvsApiClient {
 
   static String _defaultBaseUrl() {
     const configured = String.fromEnvironment('AVS_API_BASE_URL');
-    if (configured.isNotEmpty) return configured;
-    if (kIsWeb) {
-      final scheme = Uri.base.scheme == 'https' ? 'https' : 'http';
-      return '$scheme://${Uri.base.host}:4000/api/v1';
-    }
-    return 'http://localhost:4000/api/v1';
+    return resolveAvsApiBaseUrl(
+      isWeb: kIsWeb,
+      pageUri: Uri.base,
+      configured: configured,
+    );
   }
 
   Future<Map<String, String>> _headers({bool authenticated = true}) async {

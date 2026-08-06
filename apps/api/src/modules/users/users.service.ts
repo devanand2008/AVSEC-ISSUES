@@ -351,6 +351,7 @@ export class UsersService {
         mobile: true,
         whatsappNumber: true,
         status: true,
+        archivedAt: true,
         mustChangePassword: true,
         profileCompletionStatus: true,
         profileCompletionPercentage: true,

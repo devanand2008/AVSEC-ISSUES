@@ -113,6 +113,7 @@ export const environmentSchema = z
     CSRF_SECRET: z.string().min(32),
     FEEDBACK_SUBMISSION_SECRET: optionalSecret,
     PASSWORD_PEPPER: z.string().default(""),
+    LEGACY_UNPEPPERED_PASSWORD_MIGRATION_ENABLED: booleanString(),
     LOG_LEVEL: z.string().default("info"),
     SWAGGER_ENABLED: booleanString(true),
     S3_ENDPOINT: z.url().default("http://localhost:9000"),

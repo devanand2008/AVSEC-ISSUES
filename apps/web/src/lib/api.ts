@@ -5,7 +5,10 @@ const CONFIGURED_API_URL =
   process.env.VITE_API_BASE_URL ??
   process.env.API_URL ??
   "/api/v1";
-const REQUEST_TIMEOUT_MS = 30_000;
+// A cached installed PWA can reach the API while Render is still waking the
+// service. Give that cold start enough time to complete before surfacing a
+// connection failure to the user.
+const REQUEST_TIMEOUT_MS = 90_000;
 const BLOB_REQUEST_TIMEOUT_MS = 60_000;
 let refreshPromise: Promise<void> | null = null;
 

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Archive, ChevronLeft, ChevronRight, Download, Eye,
+  Archive, ChevronLeft, ChevronRight, Eye,
   RefreshCw, RotateCcw, Search, Shield, Trash2, Upload, UserPlus,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -151,7 +151,7 @@ export default function PeopleManagementPage() {
   // ── Dependency Query ──
   const deps = useQuery({
     queryKey: ["people", depTarget?.publicId, "dependencies"],
-    queryFn: () => api.get<DependencyReportResponse>(`/users/${depTarget!.publicId}/dependency-report`),
+    queryFn: () => api.get<DependencyReportResponse>(`/admin/people/${depTarget!.publicId}/dependencies`),
     enabled: !!depTarget,
   });
 
@@ -168,7 +168,7 @@ export default function PeopleManagementPage() {
   // ── Permanent Delete Mutation ──
   const deleteMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: { reason: string; confirmationPhrase: string; backupReference: string } }) =>
-      api.delete(`/users/${id}/permanent`, { body: JSON.stringify(data) }),
+      api.delete(`/admin/people/${id}/permanent`, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["people"] });
       setDeleteTarget(null);
@@ -326,17 +326,14 @@ export default function PeopleManagementPage() {
         actions={
           <>
             {canCreate && (
-              <a href="/admin/users" className="avs-btn avs-btn-primary">
+              <a href="/admin/people/new" className="avs-btn avs-btn-primary">
                 <UserPlus size={16} />
                 <span className="hide-mobile">Add Person</span>
               </a>
             )}
-            <button className="avs-btn avs-btn-secondary hide-mobile" type="button">
+            <a href="/admin/imports" className="avs-btn avs-btn-secondary hide-mobile">
               <Upload size={16} /> Import
-            </button>
-            <button className="avs-btn avs-btn-secondary hide-mobile" type="button">
-              <Download size={16} /> Export
-            </button>
+            </a>
           </>
         }
       />
@@ -426,7 +423,7 @@ export default function PeopleManagementPage() {
           description={search ? `No results for "${search}". Try a different search.` : "Add students and staff to get started."}
           action={
             !search && canCreate ? (
-              <a href="/admin/users" className="avs-btn avs-btn-primary">
+              <a href="/admin/people/new" className="avs-btn avs-btn-primary">
                 <UserPlus size={16} /> Add Person
               </a>
             ) : undefined

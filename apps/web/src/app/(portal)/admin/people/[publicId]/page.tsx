@@ -93,12 +93,12 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
 
   const person = useQuery({
     queryKey: ["person", publicId],
-    queryFn: () => api.get<PersonDetail>(`/users/${publicId}`),
+    queryFn: () => api.get<PersonDetail>(`/admin/people/${publicId}`),
   });
 
   const deps = useQuery({
     queryKey: ["people", publicId, "dependencies"],
-    queryFn: () => api.get<DependencyReportResponse>(`/users/${publicId}/dependency-report`),
+    queryFn: () => api.get<DependencyReportResponse>(`/admin/people/${publicId}/dependencies`),
     enabled: depOpen || deleteOpen,
   });
 
@@ -125,7 +125,7 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
 
   const deleteMutation = useMutation({
     mutationFn: (data: { reason: string; confirmationPhrase: string; backupReference: string }) =>
-      api.delete(`/users/${publicId}/permanent`, { body: JSON.stringify(data) }),
+      api.delete(`/admin/people/${publicId}/permanent`, data),
     onSuccess: () => {
       window.location.href = "/admin/people";
     },
