@@ -90,9 +90,11 @@ services:
         generateValue: true
       # Temporary compatibility gate for credentials imported from the local
       # pre-pepper database. Successful logins are immediately re-hashed with
-      # PASSWORD_PEPPER; leave disabled unless performing that controlled import.
+      # PASSWORD_PEPPER. This stays enabled during the controlled 2026-08-07
+      # Supabase import and can be disabled after every migrated credential has
+      # either logged in once or been reset.
       - key: LEGACY_UNPEPPERED_PASSWORD_MIGRATION_ENABLED
-        value: "false"
+        value: "true"
 
       # ── Redis-compatible queue/cache ──────────────────────────────────────────
       - key: REDIS_URL

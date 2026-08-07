@@ -4,6 +4,44 @@ import '../../core/network/avs_api_client.dart';
 import 'auth_repository.dart';
 import 'auth_user.dart';
 
+String mobileLoginErrorMessage(Object error) {
+  if (error is! AvsApiException) {
+    return 'An unexpected sign-in error occurred. Close and reopen the app, then try again.';
+  }
+  String message;
+  if (error.statusCode == 0) {
+    message = error.message;
+  } else if (error.statusCode == 401) {
+    message = 'Incorrect college ID, email, password, or college code.';
+  } else if (error.statusCode == 403) {
+    final reason = error.message.toLowerCase();
+    message = reason.contains('suspend')
+        ? 'This account is suspended. Contact the college administrator for access.'
+        : reason.contains('archiv') || reason.contains('inactive')
+        ? 'This account is archived or inactive. Contact the college administrator for access.'
+        : 'This account is not permitted to sign in. Contact the college administrator for access.';
+  } else if (error.statusCode == 409) {
+    message =
+        'Your account requires a password or profile action before sign-in can continue. Complete the required action or contact the college administrator.';
+  } else if (error.statusCode == 404) {
+    message =
+        'The sign-in service is unavailable in this app version. Update the app and try again.';
+  } else if (error.statusCode == 429) {
+    message = 'Too many sign-in attempts. Please wait before trying again.';
+  } else if (const {502, 503, 504}.contains(error.statusCode)) {
+    message =
+        'The AVS server is starting or temporarily unavailable. Please wait a moment and try again.';
+  } else if (error.statusCode >= 500) {
+    message =
+        'The AVS server could not complete sign-in. Please try again shortly.';
+  } else {
+    message = error.message;
+  }
+  return error.requestId == null || error.requestId!.isEmpty
+      ? message
+      : '$message Reference: ${error.requestId}.';
+}
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
     super.key,
@@ -48,11 +86,9 @@ class _LoginScreenState extends State<LoginScreen> {
         collegeCode: _collegeCode.text.trim(),
       );
       widget.onAuthenticated(user);
-    } on AvsApiException catch (error) {
-      if (mounted) setState(() => _error = error.message);
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
-        setState(() => _error = 'Sign-in failed. Check your connection and try again.');
+        setState(() => _error = mobileLoginErrorMessage(error));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -93,7 +129,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         labelText: 'Official college email',
                         prefixIcon: Icon(Icons.alternate_email),
                       ),
-                      validator: (value) => value == null || value.trim().isEmpty
+                      validator: (value) =>
+                          value == null || value.trim().isEmpty
                           ? 'Enter your official college email.'
                           : null,
                     ),

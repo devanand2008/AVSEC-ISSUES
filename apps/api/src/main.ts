@@ -22,6 +22,25 @@ async function bootstrap(): Promise<void> {
   const config = app.get(ConfigService);
   const prefix = config.get<string>("API_PREFIX", "api/v1");
   const trustedProxyHops = config.get<number | false>("TRUST_PROXY", false);
+  let databaseUrl: URL;
+  try {
+    databaseUrl = new URL(config.getOrThrow<string>("DATABASE_URL"));
+  } catch {
+    // URL parsing errors can include the credential-bearing input. Replace
+    // them with a fixed message so a bad production setting never leaks it.
+    throw new Error("DATABASE_URL is not a valid URL.");
+  }
+
+  logger.log(
+    {
+      databaseProvider: databaseUrl.hostname.includes("supabase")
+        ? "Supabase PostgreSQL"
+        : "PostgreSQL",
+      databaseHost: databaseUrl.hostname,
+      databaseMode: config.get<string>("DATABASE_MODE", "EXTERNAL_PERSISTENT"),
+    },
+    "Database runtime configuration",
+  );
 
   if (trustedProxyHops !== false) {
     app.getHttpAdapter().getInstance().set("trust proxy", trustedProxyHops);

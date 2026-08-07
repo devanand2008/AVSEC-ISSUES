@@ -39,6 +39,10 @@ test("admin upgrade pages render without horizontal overflow", async ({ page }, 
   await page.goto("/admin/people");
   const addPerson = page.getByRole("link", { name: "Add Person" }).first();
   await expect(addPerson).toHaveAttribute("href", "/admin/people/new");
+  await expect(page.getByRole("link", { name: "Import" }).first()).toHaveAttribute(
+    "href",
+    "/admin/imports",
+  );
   await addPerson.click();
   await expect(page).toHaveURL(/\/admin\/people\/new$/);
   await expect(page.getByRole("heading", { name: "Add Person" }).first()).toBeVisible();

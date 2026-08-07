@@ -19,11 +19,13 @@ import {
   SCOPE_TYPES,
   buildCreatePersonPayload,
   createBlankPersonForm,
+  createPersonErrorField,
   generateTemporaryPassword,
   isStrongTemporaryPassword,
   scopeRequiresTarget,
   validateCreatePersonForm,
   type CreatePersonFormState,
+  type CreatePersonField,
   type ProfileType,
   type ScopeRow,
   type ScopeType,
@@ -110,6 +112,10 @@ export default function CreatePersonPage() {
   );
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [fieldError, setFieldError] = useState<{
+    field: CreatePersonField;
+    message: string;
+  } | null>(null);
   const [created, setCreated] = useState<CreationResult | null>(null);
   const canCreate = user?.permissions.includes("users.create") ?? false;
 
@@ -168,24 +174,34 @@ export default function CreatePersonPage() {
     onSuccess: (person) => {
       setCreated({ ...person, temporaryPassword: form.temporaryPassword });
       setError("");
+      setFieldError(null);
       void queryClient.invalidateQueries({ queryKey: ["people"] });
       void queryClient.invalidateQueries({ queryKey: ["users"] });
     },
     onError: (caught) => {
-      setError(
+      const message =
         caught instanceof ApiError
           ? caught.message
-          : "The account could not be created. Please try again.",
+          : "The account could not be created. Please try again.";
+      setError(
+        caught instanceof ApiError && caught.requestId
+          ? `${message} Reference: ${caught.requestId}.`
+          : message,
       );
+      const field = createPersonErrorField(message);
+      setFieldError(field ? { field, message } : null);
     },
   });
 
   function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
+    setFieldError(null);
     const validationError = validateCreatePersonForm(form);
     if (validationError) {
       setError(validationError);
+      const field = createPersonErrorField(validationError);
+      setFieldError(field ? { field, message: validationError } : null);
       return;
     }
     create.mutate();
@@ -210,6 +226,7 @@ export default function CreatePersonPage() {
     setForm({ ...blank, temporaryPassword: generateTemporaryPassword() });
     setCreated(null);
     setError("");
+    setFieldError(null);
     setShowPassword(false);
   }
 
@@ -326,6 +343,11 @@ export default function CreatePersonPage() {
                 minLength={2}
                 maxLength={60}
                 autoComplete="off"
+                error={
+                  fieldError?.field === "collegeIdentityId"
+                    ? fieldError.message
+                    : undefined
+                }
                 onChange={(collegeIdentityId) =>
                   setForm({ ...form, collegeIdentityId })
                 }
@@ -336,6 +358,11 @@ export default function CreatePersonPage() {
                 minLength={2}
                 maxLength={180}
                 autoComplete="name"
+                error={
+                  fieldError?.field === "fullName"
+                    ? fieldError.message
+                    : undefined
+                }
                 onChange={(fullName) => setForm({ ...form, fullName })}
               />
               <TextField
@@ -345,6 +372,9 @@ export default function CreatePersonPage() {
                 optional
                 maxLength={254}
                 autoComplete="email"
+                error={
+                  fieldError?.field === "email" ? fieldError.message : undefined
+                }
                 onChange={(email) => setForm({ ...form, email })}
               />
               <TextField
@@ -403,6 +433,9 @@ export default function CreatePersonPage() {
                   maxLength={200}
                   autoComplete="new-password"
                   value={form.temporaryPassword}
+                  aria-invalid={
+                    fieldError?.field === "temporaryPassword" || undefined
+                  }
                   onChange={(event) =>
                     setForm({
                       ...form,
@@ -438,8 +471,9 @@ export default function CreatePersonPage() {
                     : "var(--avs-text-muted)",
                 }}
               >
-                Use 12+ characters with uppercase, lowercase, number, and
-                special characters.
+                {fieldError?.field === "temporaryPassword"
+                  ? fieldError.message
+                  : "Use 12+ characters with uppercase, lowercase, number, and special characters."}
               </small>
             </label>
           </FormSection>
@@ -494,6 +528,11 @@ export default function CreatePersonPage() {
                   </label>
                 ))}
               </div>
+              {fieldError?.field === "roleCodes" && (
+                <small className="error-box" role="alert">
+                  {fieldError.message}
+                </small>
+              )}
             </fieldset>
 
             <div style={{ marginTop: 20 }}>
@@ -609,6 +648,11 @@ export default function CreatePersonPage() {
                   );
                 })}
               </div>
+              {fieldError?.field === "scopes" && (
+                <small className="error-box" role="alert">
+                  {fieldError.message}
+                </small>
+              )}
             </div>
           </FormSection>
 
@@ -643,6 +687,11 @@ export default function CreatePersonPage() {
                   label="Department"
                   value={form.departmentId}
                   options={options.data.departments}
+                  error={
+                    fieldError?.field === "departmentId"
+                      ? fieldError.message
+                      : undefined
+                  }
                   onChange={(departmentId) =>
                     setForm({
                       ...form,
@@ -656,6 +705,11 @@ export default function CreatePersonPage() {
                   label="Programme"
                   value={form.programmeId}
                   options={programmes}
+                  error={
+                    fieldError?.field === "programmeId"
+                      ? fieldError.message
+                      : undefined
+                  }
                   onChange={(programmeId) =>
                     setForm({ ...form, programmeId, sectionId: "" })
                   }
@@ -664,6 +718,11 @@ export default function CreatePersonPage() {
                   label="Section"
                   value={form.sectionId}
                   options={sections}
+                  error={
+                    fieldError?.field === "sectionId"
+                      ? fieldError.message
+                      : undefined
+                  }
                   onChange={(sectionId) =>
                     setForm({
                       ...form,
@@ -682,6 +741,11 @@ export default function CreatePersonPage() {
                   optional
                   placeholder="Defaults to college ID"
                   maxLength={60}
+                  error={
+                    fieldError?.field === "studentId"
+                      ? fieldError.message
+                      : undefined
+                  }
                   onChange={(studentId) => setForm({ ...form, studentId })}
                 />
                 <TextField
@@ -690,6 +754,11 @@ export default function CreatePersonPage() {
                   type="number"
                   min={1990}
                   max={2200}
+                  error={
+                    fieldError?.field === "admissionYear"
+                      ? fieldError.message
+                      : undefined
+                  }
                   onChange={(admissionYear) =>
                     setForm({ ...form, admissionYear })
                   }
@@ -699,6 +768,11 @@ export default function CreatePersonPage() {
                   value={form.rollNumber}
                   optional
                   maxLength={60}
+                  error={
+                    fieldError?.field === "employeeId"
+                      ? fieldError.message
+                      : undefined
+                  }
                   onChange={(rollNumber) => setForm({ ...form, rollNumber })}
                 />
               </div>
@@ -800,6 +874,7 @@ function TextField({
   onChange,
   optional = false,
   type = "text",
+  error,
   ...inputProps
 }: {
   label: string;
@@ -807,6 +882,7 @@ function TextField({
   onChange: (value: string) => void;
   optional?: boolean;
   type?: string;
+  error?: string;
 } & Omit<
   React.InputHTMLAttributes<HTMLInputElement>,
   "value" | "onChange" | "type"
@@ -821,10 +897,16 @@ function TextField({
         className="input"
         type={type}
         required={!optional}
+        aria-invalid={Boolean(error) || undefined}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         {...inputProps}
       />
+      {error && (
+        <small className="error-box" role="alert">
+          {error}
+        </small>
+      )}
     </label>
   );
 }
@@ -835,12 +917,14 @@ function OptionField({
   options,
   onChange,
   optional = false,
+  error,
 }: {
   label: string;
   value: string;
   options: Option[];
   onChange: (value: string) => void;
   optional?: boolean;
+  error?: string;
 }) {
   return (
     <label className="field">
@@ -851,6 +935,7 @@ function OptionField({
       <select
         className="input"
         required={!optional}
+        aria-invalid={Boolean(error) || undefined}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
@@ -861,6 +946,11 @@ function OptionField({
           </option>
         ))}
       </select>
+      {error && (
+        <small className="error-box" role="alert">
+          {error}
+        </small>
+      )}
       {!options.length && (
         <small className="muted">
           No active {label.toLowerCase()} options.

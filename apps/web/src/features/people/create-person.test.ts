@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCreatePersonPayload,
   createBlankPersonForm,
+  createPersonErrorField,
   generateTemporaryPassword,
   isStrongTemporaryPassword,
   validateCreatePersonForm,
@@ -85,5 +86,13 @@ describe("person creation helpers", () => {
         scopes: [{ type: "SECTION", targetId: "" }],
       }),
     ).toMatch(/select a target/i);
+  });
+
+  it("maps server validation and duplicate errors back to form fields", () => {
+    expect(createPersonErrorField("A user with this college ID exists")).toBe(
+      "collegeIdentityId",
+    );
+    expect(createPersonErrorField("email must be an email")).toBe("email");
+    expect(createPersonErrorField("Unrelated server error")).toBeNull();
   });
 });

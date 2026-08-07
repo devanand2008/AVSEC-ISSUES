@@ -9,13 +9,21 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import {
   CollegeBranding,
   collegeBranding,
 } from "@/components/college-branding";
-import { ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
+import { loginErrorMessage } from "./login-error";
+import { probeLoginReadiness, type LoginReadiness } from "./login-readiness";
 
 type LoginHint = {
   identifier: string;
@@ -55,33 +63,64 @@ export default function LoginPage() {
   const [visible, setVisible] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [readiness, setReadiness] = useState<LoginReadiness | "checking">(
+    "checking",
+  );
+  const readinessRunning = useRef(false);
+  const readinessRun = useRef(0);
+  const checkConnection = useCallback(async () => {
+    if (readinessRunning.current) return;
+    readinessRunning.current = true;
+    const run = ++readinessRun.current;
+    setReadiness("checking");
+    const result = await probeLoginReadiness(() => api.warmup());
+    if (readinessRun.current === run) setReadiness(result);
+    readinessRunning.current = false;
+  }, []);
   // Prefetch the dashboard and change-password pages so navigation is instant after login
   useEffect(() => {
     router.prefetch("/");
     router.prefetch("/change-password");
-  }, [router]);
+    const warmServer = () => {
+      if (document.visibilityState === "visible") {
+        void checkConnection();
+      }
+    };
+    warmServer();
+    window.addEventListener("online", warmServer);
+    document.addEventListener("visibilitychange", warmServer);
+    return () => {
+      readinessRun.current += 1;
+      window.removeEventListener("online", warmServer);
+      document.removeEventListener("visibilitychange", warmServer);
+    };
+  }, [checkConnection, router]);
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (readiness !== "ready") {
+      void checkConnection();
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      const user = await login(identifier, password, collegeCode || undefined);
+      const user = await login(
+        identifier.trim(),
+        password,
+        collegeCode.trim() || undefined,
+      );
       if (remember)
         window.localStorage.setItem(
           "avs_login_hint",
           JSON.stringify({ identifier, collegeCode }),
         );
       else window.localStorage.removeItem("avs_login_hint");
-      router.push(user.allowedNextRoute ?? (user.mustChangePassword ? "/change-password" : "/"));
+      router.push(
+        user.allowedNextRoute ??
+          (user.mustChangePassword ? "/change-password" : "/"),
+      );
     } catch (caught: unknown) {
-      const status = caught instanceof ApiError ? caught.status : undefined;
-      if (status === 401 || status === 404) {
-        setError("Invalid college ID, email, or password.");
-      } else if (caught instanceof ApiError && status !== undefined && status >= 400) {
-        setError(caught.message);
-      } else {
-        setError("Sign-in failed. Check your connection and try again.");
-      }
+      setError(loginErrorMessage(caught));
       setBusy(false);
     }
   }
@@ -143,8 +182,38 @@ export default function LoginPage() {
             administrator.
           </p>
           {error && (
-            <div className="error-box" style={{ marginBottom: 18 }}>
+            <div
+              className="error-box"
+              role="alert"
+              style={{ marginBottom: 18 }}
+            >
               {error}
+            </div>
+          )}
+          {readiness !== "ready" && (
+            <div
+              className="error-box"
+              role="status"
+              style={{ marginBottom: 18 }}
+            >
+              <span>
+                {readiness === "checking"
+                  ? "Connecting to the AVS server. Sign-in will be available when it is ready."
+                  : readiness === "offline"
+                    ? "This device is offline. Reconnect to continue."
+                    : "The AVS server has not responded yet. Retry the connection before signing in."}
+              </span>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                disabled={readiness === "checking"}
+                onClick={() => void checkConnection()}
+                style={{ marginTop: 10 }}
+              >
+                {readiness === "checking"
+                  ? "Connecting..."
+                  : "Retry Connection"}
+              </button>
             </div>
           )}
           <div className="auth-fields">
@@ -223,7 +292,7 @@ export default function LoginPage() {
             </label>
             <button
               className="btn btn-primary"
-              disabled={busy}
+              disabled={busy || readiness !== "ready"}
               style={{ width: "100%", marginTop: 5 }}
             >
               {busy ? (

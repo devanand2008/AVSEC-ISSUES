@@ -20,9 +20,7 @@ export function PwaRegistration() {
   useEffect(() => {
     const standalone =
       window.matchMedia("(display-mode: standalone)").matches ||
-      Boolean(
-        (navigator as Navigator & { standalone?: boolean }).standalone,
-      );
+      Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
     const initialStateFrame = window.requestAnimationFrame(() => {
       setInstalled(standalone);
       setSecureContext(window.isSecureContext);
@@ -48,39 +46,62 @@ export function PwaRegistration() {
     if (!("serviceWorker" in navigator)) {
       return () => {
         window.cancelAnimationFrame(initialStateFrame);
-        window.removeEventListener(
-          "beforeinstallprompt",
-          captureInstallPrompt,
-        );
+        window.removeEventListener("beforeinstallprompt", captureInstallPrompt);
         window.removeEventListener("appinstalled", markInstalled);
       };
     }
     let disposed = false;
+    let reloadAfterActivation = false;
+    let reloadStarted = false;
     let registrationPromise: Promise<ServiceWorkerRegistration> | null = null;
     const activateWaitingWorker = (registration: ServiceWorkerRegistration) => {
-      registration.waiting?.postMessage({ type: "SKIP_WAITING" });
+      if (!registration.waiting) return;
+      reloadAfterActivation = Boolean(navigator.serviceWorker.controller);
+      registration.waiting.postMessage({ type: "SKIP_WAITING" });
     };
+    const reloadForActivatedUpdate = () => {
+      if (disposed || !reloadAfterActivation || reloadStarted) return;
+      reloadStarted = true;
+      window.location.reload();
+    };
+    navigator.serviceWorker.addEventListener(
+      "controllerchange",
+      reloadForActivatedUpdate,
+    );
     const register = () => {
       if (registrationPromise) return;
-      registrationPromise = navigator.serviceWorker.register("/sw.js").then((registration) => {
-        if (disposed) return registration;
-        activateWaitingWorker(registration);
-        registration.addEventListener("updatefound", () => {
-          const worker = registration.installing;
-          worker?.addEventListener("statechange", () => {
-            if (worker.state === "installed" && navigator.serviceWorker.controller) activateWaitingWorker(registration);
+      registrationPromise = navigator.serviceWorker
+        .register("/sw.js", { scope: "/", updateViaCache: "none" })
+        .then((registration) => {
+          if (disposed) return registration;
+          activateWaitingWorker(registration);
+          registration.addEventListener("updatefound", () => {
+            const worker = registration.installing;
+            worker?.addEventListener("statechange", () => {
+              if (
+                worker.state === "installed" &&
+                navigator.serviceWorker.controller
+              ) {
+                activateWaitingWorker(registration);
+              }
+            });
           });
+          void registration.update().catch(() => undefined);
+          return registration;
+        })
+        .catch(() => {
+          // Offline support must not prevent the authenticated app from loading.
+          registrationPromise = null;
+          throw new Error("Service worker registration failed.");
         });
-        return registration;
-      }).catch(() => {
-        // Offline support must not prevent the authenticated app from loading.
-        registrationPromise = null;
-        throw new Error("Service worker registration failed.");
-      });
       void registrationPromise.catch(() => undefined);
     };
     const update = () => {
-      if (document.visibilityState === "visible") void registrationPromise?.then((registration) => registration.update()).catch(() => undefined);
+      if (document.visibilityState !== "visible") return;
+      register();
+      void registrationPromise
+        ?.then((registration) => registration.update())
+        .catch(() => undefined);
     };
     window.addEventListener("load", register, { once: true });
     window.addEventListener("online", update);
@@ -92,10 +113,11 @@ export function PwaRegistration() {
       window.removeEventListener("load", register);
       window.removeEventListener("online", update);
       document.removeEventListener("visibilitychange", update);
-      window.removeEventListener(
-        "beforeinstallprompt",
-        captureInstallPrompt,
+      navigator.serviceWorker.removeEventListener(
+        "controllerchange",
+        reloadForActivatedUpdate,
       );
+      window.removeEventListener("beforeinstallprompt", captureInstallPrompt);
       window.removeEventListener("appinstalled", markInstalled);
     };
   }, []);

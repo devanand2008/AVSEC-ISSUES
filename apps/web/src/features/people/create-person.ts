@@ -15,6 +15,19 @@ export const SCOPE_TYPES = [
 
 export type ScopeType = (typeof SCOPE_TYPES)[number];
 export type ProfileType = "student" | "staff" | "none";
+export type CreatePersonField =
+  | "collegeIdentityId"
+  | "fullName"
+  | "email"
+  | "temporaryPassword"
+  | "roleCodes"
+  | "scopes"
+  | "departmentId"
+  | "programmeId"
+  | "sectionId"
+  | "studentId"
+  | "admissionYear"
+  | "employeeId";
 
 export interface ScopeRow {
   type: ScopeType;
@@ -212,6 +225,40 @@ export function validateCreatePersonForm(
     (form.employeeId || form.collegeIdentityId).trim().length < 2
   ) {
     return "Employee ID must contain at least 2 characters.";
+  }
+  return null;
+}
+
+export function createPersonErrorField(
+  message: string,
+): CreatePersonField | null {
+  const value = message.toLowerCase();
+  if (value.includes("collegeidentityid") || value.includes("college id")) {
+    return "collegeIdentityId";
+  }
+  if (value.includes("full name") || value.includes("fullname")) {
+    return "fullName";
+  }
+  if (value.includes("email")) return "email";
+  if (
+    value.includes("temporarypassword") ||
+    value.includes("temporary password")
+  ) {
+    return "temporaryPassword";
+  }
+  if (value.includes("role")) return "roleCodes";
+  if (value.includes("scope")) return "scopes";
+  if (value.includes("department")) return "departmentId";
+  if (value.includes("programme")) return "programmeId";
+  if (value.includes("section")) return "sectionId";
+  if (value.includes("student id") || value.includes("studentid")) {
+    return "studentId";
+  }
+  if (value.includes("admission year") || value.includes("admissionyear")) {
+    return "admissionYear";
+  }
+  if (value.includes("employee id") || value.includes("employeeid")) {
+    return "employeeId";
   }
   return null;
 }

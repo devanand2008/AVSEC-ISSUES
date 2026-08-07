@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -7,6 +8,7 @@ import 'package:http_parser/http_parser.dart';
 
 const avsProductionApiBaseUrl =
     'https://avs-college-portal.onrender.com/api/v1';
+const avsApiRequestTimeout = Duration(seconds: 90);
 
 String resolveAvsApiBaseUrl({
   required bool isWeb,
@@ -24,6 +26,7 @@ class AvsApiClient {
     http.Client? httpClient,
     FlutterSecureStorage? storage,
     String? baseUrl,
+    this.requestTimeout = avsApiRequestTimeout,
   }) : _httpClient = httpClient ?? http.Client(),
        _storage = storage ?? const FlutterSecureStorage(),
        baseUrl = baseUrl ?? _defaultBaseUrl();
@@ -31,6 +34,7 @@ class AvsApiClient {
   final http.Client _httpClient;
   final FlutterSecureStorage _storage;
   final String baseUrl;
+  final Duration requestTimeout;
   static String? _memoryAccessToken;
   static String? _memoryRefreshToken;
   static bool _secureStorageUnavailable = false;
@@ -268,15 +272,17 @@ class AvsApiClient {
     required String password,
     String? collegeCode,
   }) async {
-    final response = await _httpClient.post(
-      Uri.parse('$baseUrl/auth/login'),
-      headers: await _headers(authenticated: false),
-      body: jsonEncode({
-        'identifier': identifier,
-        'password': password,
-        if (collegeCode != null && collegeCode.trim().isNotEmpty)
-          'collegeCode': collegeCode.trim(),
-      }),
+    final response = await _withinTimeout(
+      _httpClient.post(
+        Uri.parse('$baseUrl/auth/login'),
+        headers: await _headers(authenticated: false),
+        body: jsonEncode({
+          'identifier': identifier,
+          'password': password,
+          if (collegeCode != null && collegeCode.trim().isNotEmpty)
+            'collegeCode': collegeCode.trim(),
+        }),
+      ),
     );
     final payload = _decode(response) as Map<String, dynamic>;
     await _storeTokens(payload['tokens']);
@@ -286,10 +292,12 @@ class AvsApiClient {
   Future<void> logout() async {
     final refreshToken = await _readToken('avs_refresh_token');
     try {
-      await _httpClient.post(
-        Uri.parse('$baseUrl/auth/logout'),
-        headers: await _headers(),
-        body: jsonEncode({'refreshToken': refreshToken}),
+      await _withinTimeout(
+        _httpClient.post(
+          Uri.parse('$baseUrl/auth/logout'),
+          headers: await _headers(),
+          body: jsonEncode({'refreshToken': refreshToken}),
+        ),
       );
     } finally {
       await clearSession();
@@ -311,9 +319,9 @@ class AvsApiClient {
   Future<dynamic> _sendWithRefresh(
     Future<http.Response> Function() request,
   ) async {
-    var response = await request();
+    var response = await _withinTimeout(request());
     if (response.statusCode == 401 && await _refresh()) {
-      response = await request();
+      response = await _withinTimeout(request());
     }
     final payload = _decode(response);
     if (payload is Map<String, dynamic> && payload['tokens'] != null) {
@@ -325,9 +333,9 @@ class AvsApiClient {
   Future<http.Response> _responseWithRefresh(
     Future<http.Response> Function() request,
   ) async {
-    var response = await request();
+    var response = await _withinTimeout(request());
     if (response.statusCode == 401 && await _refresh()) {
-      response = await request();
+      response = await _withinTimeout(request());
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       _decode(response);
@@ -338,10 +346,12 @@ class AvsApiClient {
   Future<bool> _refresh() async {
     final refreshToken = await _readToken('avs_refresh_token');
     if (refreshToken == null || refreshToken.isEmpty) return false;
-    final response = await _httpClient.post(
-      Uri.parse('$baseUrl/auth/refresh'),
-      headers: await _headers(authenticated: false),
-      body: jsonEncode({'refreshToken': refreshToken}),
+    final response = await _withinTimeout(
+      _httpClient.post(
+        Uri.parse('$baseUrl/auth/refresh'),
+        headers: await _headers(authenticated: false),
+        body: jsonEncode({'refreshToken': refreshToken}),
+      ),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       await clearSession();
@@ -388,14 +398,46 @@ class AvsApiClient {
     }
   }
 
+  Future<T> _withinTimeout<T>(Future<T> request) async {
+    try {
+      return await request.timeout(requestTimeout);
+    } on TimeoutException {
+      throw AvsApiException(
+        0,
+        'The AVS server is taking longer than expected to start. Please wait a moment and try again.',
+      );
+    } on http.ClientException {
+      throw AvsApiException(
+        0,
+        'The AVS server could not be reached. Check your internet connection and try again.',
+      );
+    }
+  }
+
   dynamic _decode(http.Response response) {
-    final payload = response.body.isEmpty ? null : jsonDecode(response.body);
+    dynamic payload;
+    try {
+      payload = response.body.isEmpty ? null : jsonDecode(response.body);
+    } on FormatException {
+      payload = null;
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final rawMessage = payload is Map<String, dynamic>
-          ? payload['message'] ?? payload['error']
-          : response.reasonPhrase;
+      dynamic rawMessage;
+      if (payload is Map<String, dynamic>) {
+        rawMessage = payload['message'] ?? payload['error'];
+        if (rawMessage is Map<String, dynamic>) {
+          rawMessage = rawMessage['message'] ?? rawMessage['error'];
+        }
+      }
+      rawMessage ??= response.reasonPhrase;
       final message = rawMessage is List ? rawMessage.join(' ') : rawMessage;
-      throw AvsApiException(response.statusCode, '$message');
+      throw AvsApiException(
+        response.statusCode,
+        message == null || '$message'.trim().isEmpty
+            ? 'The AVS server returned an unexpected response.'
+            : '$message',
+        requestId: response.headers['x-request-id'],
+      );
     }
     return payload;
   }
@@ -426,10 +468,11 @@ class AvsDownload {
 }
 
 class AvsApiException implements Exception {
-  AvsApiException(this.statusCode, this.message);
+  AvsApiException(this.statusCode, this.message, {this.requestId});
 
   final int statusCode;
   final String message;
+  final String? requestId;
 
   @override
   String toString() => 'AVS API $statusCode: $message';

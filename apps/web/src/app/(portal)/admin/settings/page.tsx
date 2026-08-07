@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Cloud, Database, HardDrive, MessageCircle, Save, XCircle } from "lucide-react";
 import { useState } from "react";
 import { ErrorState, LoadingState } from "@/components/query-state";
+import { PwaCacheControls } from "@/components/pwa-cache-controls";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -22,6 +23,7 @@ export default function SettingsPage() {
   ] : [];
   return <><div className="page-heading"><div><span className="eyebrow">Administration</span><h1 className="page-title" style={{ marginTop: 6 }}>System & integrations</h1><p className="page-subtitle">Credential-safe deployment status and versioned application settings.</p></div></div>
     {integrations.isLoading && <LoadingState />}{integrations.isError && <ErrorState message="Integration status is restricted or unavailable." />}{items.length > 0 && <><div className="integration-grid">{items.map(({ title, detail, ready, icon: Icon }) => <article className="card integration-card" key={title}><span><Icon /></span><div><h2>{title}</h2><p>{detail}</p></div><strong className={ready ? "ready" : "not-ready"}>{ready ? <CheckCircle2 /> : <XCircle />}{ready ? "Ready" : "Setup required"}</strong></article>)}</div><section className="card" style={{ marginTop: 18, padding: 20 }}><h2 style={{ marginTop: 0 }}>Delivery guarantees</h2><p className="muted" style={{ marginBottom: 0 }}>{integrations.data?.automaticDelivery} Provider failures do not delete or roll back issue records.</p></section></>}
+    <PwaCacheControls />
     {user?.permissions.includes("settings.read") && <section className="card" style={{ marginTop: 18, padding: 20 }}><div className="section-head" style={{ margin: "-20px -20px 18px" }}><div><h2>Application settings</h2><p>Values are JSON, versioned and audit logged. Secrets are never returned here.</p></div></div>{settings.isLoading ? <LoadingState /> : settings.isError ? <ErrorState /> : settings.data?.length ? <div style={{ display: "grid", gap: 12 }}>{settings.data.map((setting) => <SettingEditor setting={setting} canManage={Boolean(user.permissions.includes("settings.manage"))} key={setting.key} />)}</div> : <div className="empty">No public application settings are configured.</div>}</section>}
   </>;
 }
@@ -32,4 +34,3 @@ function SettingEditor({ setting, canManage }: { setting: Setting; canManage: bo
   const save = useMutation({ mutationFn: async () => api.put(`/settings/${encodeURIComponent(setting.key)}`, { value: JSON.parse(value) as unknown }), onSuccess: () => void client.invalidateQueries({ queryKey: ["app-settings"] }) });
   return <article style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}><div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}><div><strong>{setting.key}</strong><small className="muted" style={{ display: "block", marginTop: 3 }}>Version {setting.version} · updated {new Date(setting.updatedAt).toLocaleString()}</small></div>{canManage && <button className="btn" disabled={save.isPending} onClick={() => save.mutate()}><Save size={16} />{save.isPending ? "Saving…" : "Save"}</button>}</div><textarea className="input" rows={Math.min(8, Math.max(2, value.split("\n").length))} value={value} readOnly={!canManage} onChange={(event) => setValue(event.target.value)} />{save.error && <div className="error-box" style={{ marginTop: 8 }}>{save.error instanceof ApiError ? save.error.message : save.error instanceof SyntaxError ? "Enter valid JSON before saving." : "Setting could not be saved."}</div>}</article>;
 }
-

@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "college-shell-";
-const CACHE = `${CACHE_PREFIX}v4`;
+const CACHE = `${CACHE_PREFIX}v5`;
 const SHELL = ["/offline", "/manifest.webmanifest", "/icons/avs-icon-192.png", "/icons/avs-icon-512.png"];
 
 function isCacheablePublicAsset(url) {
@@ -35,7 +35,14 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
+  if (
+    url.origin !== self.location.origin
+    || url.pathname.startsWith("/api/")
+    || url.pathname.startsWith("/health")
+    || url.pathname.startsWith("/socket.io")
+    || url.pathname === "/sw.js"
+    || url.pathname === "/firebase-messaging-sw.js"
+  ) return;
 
   if (request.mode === "navigate") {
     event.respondWith((async () => {
@@ -51,10 +58,10 @@ self.addEventListener("fetch", (event) => {
   // Route payloads and private page data are deliberately left to the network.
   if (!isCacheablePublicAsset(url)) return;
   event.respondWith((async () => {
-    const cached = await caches.match(request);
+    const cache = await caches.open(CACHE);
+    const cached = await cache.match(request);
     const refresh = fetch(request).then(async (response) => {
       if (canStore(response)) {
-        const cache = await caches.open(CACHE);
         await cache.put(request, response.clone());
       }
       return response;

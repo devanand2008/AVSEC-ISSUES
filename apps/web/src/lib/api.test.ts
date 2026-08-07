@@ -1,4 +1,4 @@
-import { api, idempotencyKey } from "./api";
+import { ApiNetworkError, api, idempotencyKey } from "./api";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
@@ -61,9 +61,64 @@ describe("automatic session refresh", () => {
       }),
     );
 
-    const assertion = expect(api.get("/slow")).rejects.toThrow("Aborted");
+    const assertion = expect(api.get("/slow")).rejects.toMatchObject({
+      kind: "timeout",
+    });
     await vi.advanceTimersByTimeAsync(90_000);
 
     await assertion;
+  });
+
+  it("preserves a caller abort so query cancellation is not reported as a network failure", async () => {
+    const parent = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        });
+      }),
+    );
+
+    const request = api.get("/cancelled", { signal: parent.signal });
+    parent.abort();
+
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    await expect(request).rejects.not.toBeInstanceOf(ApiNetworkError);
+  });
+
+  it("shares one cold-start readiness request across simultaneous callers", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = api.warmup();
+    const second = api.warmup();
+    await Promise.all([first, second]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      "/health/live",
+      "/health/ready",
+    ]);
+  });
+
+  it("retains the server request ID on API errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json(
+          { error: { message: "This account is suspended." } },
+          { status: 403, headers: { "x-request-id": "request-403" } },
+        ),
+      ),
+    );
+
+    await expect(api.post("/auth/login", {})).rejects.toMatchObject({
+      requestId: "request-403",
+      status: 403,
+    });
   });
 });

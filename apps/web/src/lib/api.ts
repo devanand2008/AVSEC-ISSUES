@@ -10,7 +10,9 @@ const CONFIGURED_API_URL =
 // connection failure to the user.
 const REQUEST_TIMEOUT_MS = 90_000;
 const BLOB_REQUEST_TIMEOUT_MS = 60_000;
+const READINESS_TIMEOUT_MS = 20_000;
 let refreshPromise: Promise<void> | null = null;
+let readinessPromise: Promise<void> | null = null;
 
 function apiUrl(): string {
   return resolveRuntimeUrl(CONFIGURED_API_URL);
@@ -46,8 +48,24 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code?: string,
     readonly details?: unknown,
+    readonly requestId?: string,
   ) {
     super(message);
+  }
+}
+
+export type ApiNetworkErrorKind = "offline" | "timeout" | "unreachable";
+
+export class ApiNetworkError extends Error {
+  constructor(readonly kind: ApiNetworkErrorKind) {
+    super(
+      kind === "offline"
+        ? "The device is offline."
+        : kind === "timeout"
+          ? "The AVS server did not respond before the request timed out."
+          : "The AVS server could not be reached.",
+    );
+    this.name = "ApiNetworkError";
   }
 }
 
@@ -67,7 +85,11 @@ async function fetchWithTimeout(
   ms: number,
 ): Promise<Response> {
   const controller = new AbortController();
-  const timeout = globalThis.setTimeout(() => controller.abort(), ms);
+  let timedOut = false;
+  const timeout = globalThis.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, ms);
   const abort = () => controller.abort();
   const parent = init.signal;
   if (parent) {
@@ -76,10 +98,59 @@ async function fetchWithTimeout(
   }
   try {
     return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (parent?.aborted) throw error;
+    if (timedOut) throw new ApiNetworkError("timeout");
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      throw new ApiNetworkError("offline");
+    }
+    throw new ApiNetworkError("unreachable");
   } finally {
     globalThis.clearTimeout(timeout);
     parent?.removeEventListener("abort", abort);
   }
+}
+
+function healthUrl(check: "live" | "ready"): string {
+  const base = apiUrl();
+  if (base.startsWith("/")) return `/health/${check}`;
+  try {
+    const url = new URL(base);
+    url.pathname = `/health/${check}`;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return `/health/${check}`;
+  }
+}
+
+async function warmApi(): Promise<void> {
+  readinessPromise ??= (async () => {
+    for (const check of ["live", "ready"] as const) {
+      const response = await fetchWithTimeout(
+        healthUrl(check),
+        {
+          cache: "no-store",
+          credentials: "include",
+          headers: { accept: "application/json" },
+        },
+        READINESS_TIMEOUT_MS,
+      );
+      if (!response.ok) {
+        throw new ApiError(
+          "The AVS server is not ready yet.",
+          response.status,
+          undefined,
+          undefined,
+          response.headers.get("x-request-id") ?? undefined,
+        );
+      }
+    }
+  })().finally(() => {
+    readinessPromise = null;
+  });
+  return readinessPromise;
 }
 
 async function request<T>(
@@ -143,6 +214,7 @@ async function request<T>(
       response.status,
       body?.error?.code,
       body?.error?.details ?? body?.duplicate,
+      response.headers.get("x-request-id") ?? undefined,
     );
   }
   if (response.status === 204) return undefined as T;
@@ -181,12 +253,16 @@ async function requestBlob(path: string, retry = true): Promise<Blob> {
     throw new ApiError(
       body?.error?.message ?? "The file could not be generated.",
       response.status,
+      undefined,
+      undefined,
+      response.headers.get("x-request-id") ?? undefined,
     );
   }
   return response.blob();
 }
 
 export const api = {
+  warmup: warmApi,
   get: <T>(path: string, init?: RequestInit) => request<T>(path, init),
   post: <T>(
     path: string,
@@ -230,7 +306,13 @@ export const api = {
   upload: async (url: string, file: File, headers: HeadersInit = {}) => {
     const response = await fetch(url, { method: "PUT", body: file, headers });
     if (!response.ok)
-      throw new ApiError("Attachment upload failed.", response.status);
+      throw new ApiError(
+        "Attachment upload failed.",
+        response.status,
+        undefined,
+        undefined,
+        response.headers.get("x-request-id") ?? undefined,
+      );
   },
 };
 

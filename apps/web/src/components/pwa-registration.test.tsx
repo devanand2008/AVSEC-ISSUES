@@ -41,4 +41,44 @@ describe("PwaRegistration install instructions", () => {
     );
     expect(installButton).toHaveFocus();
   });
+
+  it("bypasses HTTP caches when checking for a service-worker update", async () => {
+    const update = vi.fn().mockResolvedValue(undefined);
+    const registration = {
+      addEventListener: vi.fn(),
+      installing: null,
+      update,
+      waiting: null,
+    } as unknown as ServiceWorkerRegistration;
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    const register = vi.fn().mockResolvedValue(registration);
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: {
+        addEventListener,
+        controller: {},
+        register,
+        removeEventListener,
+      },
+    });
+    Object.defineProperty(document, "readyState", {
+      configurable: true,
+      value: "complete",
+    });
+
+    render(<PwaRegistration />);
+
+    await waitFor(() =>
+      expect(register).toHaveBeenCalledWith("/sw.js", {
+        scope: "/",
+        updateViaCache: "none",
+      }),
+    );
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(addEventListener).toHaveBeenCalledWith(
+      "controllerchange",
+      expect.any(Function),
+    );
+  });
 });

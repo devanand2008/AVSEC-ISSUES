@@ -37,11 +37,8 @@ function websocketOrigin(value: string | undefined): string | undefined {
 }
 
 const configuredApiUrl =
-  process.env.NEXT_PUBLIC_API_URL ??
-  process.env.VITE_API_BASE_URL ??
-  "/api/v1";
-const configuredSocketUrl =
-  process.env.NEXT_PUBLIC_SOCKET_URL ?? "/realtime";
+  process.env.NEXT_PUBLIC_API_URL ?? process.env.VITE_API_BASE_URL ?? "/api/v1";
+const configuredSocketUrl = process.env.NEXT_PUBLIC_SOCKET_URL ?? "/realtime";
 
 const apiOrigin = origin(configuredApiUrl);
 const socketOrigin = origin(configuredSocketUrl);
@@ -73,8 +70,9 @@ const connectSources = [
       socketPeerOrigin,
       websocketOrigin(lanSocketOrigin),
       storageOrigin,
-      "http://localhost:9000",
-      "http://127.0.0.1:9000",
+      ...(process.env.NODE_ENV === "production"
+        ? []
+        : ["http://localhost:9000", "http://127.0.0.1:9000"]),
       "https:",
     ].filter((value): value is string => Boolean(value)),
   ),
@@ -115,7 +113,37 @@ const nextConfig: NextConfig = {
     ? { experimental: { cpus: buildCpus } }
     : {}),
   async headers() {
-    return [{ source: "/(.*)", headers: securityHeaders }];
+    return [
+      { source: "/(.*)", headers: securityHeaders },
+      {
+        source: "/sw.js",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-cache, no-store, must-revalidate",
+          },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
+      {
+        source: "/",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-store, max-age=0, must-revalidate",
+          },
+        ],
+      },
+      {
+        source: "/login",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-store, max-age=0, must-revalidate",
+          },
+        ],
+      },
+    ];
   },
 };
 

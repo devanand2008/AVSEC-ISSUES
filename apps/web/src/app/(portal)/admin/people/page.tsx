@@ -5,6 +5,7 @@ import {
   Archive, ChevronLeft, ChevronRight, Eye,
   RefreshCw, RotateCcw, Search, Shield, Trash2, Upload, UserPlus,
 } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { SearchBar } from "@/components/ui/search-bar";
@@ -326,14 +327,14 @@ export default function PeopleManagementPage() {
         actions={
           <>
             {canCreate && (
-              <a href="/admin/people/new" className="avs-btn avs-btn-primary">
+              <Link href="/admin/people/new" className="avs-btn avs-btn-primary">
                 <UserPlus size={16} />
                 <span className="hide-mobile">Add Person</span>
-              </a>
+              </Link>
             )}
-            <a href="/admin/imports" className="avs-btn avs-btn-secondary hide-mobile">
+            <Link href="/admin/imports" className="avs-btn avs-btn-secondary hide-mobile">
               <Upload size={16} /> Import
-            </a>
+            </Link>
           </>
         }
       />
@@ -423,9 +424,9 @@ export default function PeopleManagementPage() {
           description={search ? `No results for "${search}". Try a different search.` : "Add students and staff to get started."}
           action={
             !search && canCreate ? (
-              <a href="/admin/people/new" className="avs-btn avs-btn-primary">
+              <Link href="/admin/people/new" className="avs-btn avs-btn-primary">
                 <UserPlus size={16} /> Add Person
-              </a>
+              </Link>
             ) : undefined
           }
         />
