@@ -115,6 +115,7 @@ logs
 !Dockerfile
 !scripts/render-start.sh
 !scripts/unified-server.mjs
+!scripts/assert-secure-dependency-tree.mjs
 !scripts/assert-migration-safety.mjs
 !scripts/backup-crypto.mjs
 !scripts/build-backup-manifest.mjs

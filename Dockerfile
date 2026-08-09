@@ -5,9 +5,11 @@ COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared-types/package.json packages/shared-types/package.json
 COPY packages/validation/package.json packages/validation/package.json
+COPY scripts/assert-secure-dependency-tree.mjs scripts/assert-secure-dependency-tree.mjs
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --include=dev --no-audit --no-fund \
-    && npm ls --all
+    && npm run security:dependencies \
+    && npm ls @nestjs/swagger js-yaml nanoid --all
 
 FROM dependencies AS build
 WORKDIR /app

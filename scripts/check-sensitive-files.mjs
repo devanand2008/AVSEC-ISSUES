@@ -18,11 +18,19 @@ function getTrackedAndStagedFiles() {
   const trackedFiles = new Set();
   let insideGitRepo = false;
   try {
-    insideGitRepo = execSync("git rev-parse --is-inside-work-tree", { encoding: "utf8", cwd: rootDir }).trim() === "true";
+    insideGitRepo =
+      execSync("git rev-parse --is-inside-work-tree", {
+        encoding: "utf8",
+        cwd: rootDir,
+      }).trim() === "true";
   } catch {
     console.error("SECURITY CHECK FAILED\n");
-    console.error("This folder is not a Git repository, so tracked/staged files cannot be audited.");
-    console.error("Run git init and configure the private remote before using the safe push workflow.");
+    console.error(
+      "This folder is not a Git repository, so tracked/staged files cannot be audited.",
+    );
+    console.error(
+      "Run git init and configure the private remote before using the safe push workflow.",
+    );
     process.exit(1);
   }
   if (!insideGitRepo) {
@@ -31,7 +39,10 @@ function getTrackedAndStagedFiles() {
     process.exit(1);
   }
   try {
-    const lsFiles = execSync("git ls-files", { encoding: "utf8", cwd: rootDir });
+    const lsFiles = execSync("git ls-files", {
+      encoding: "utf8",
+      cwd: rootDir,
+    });
     lsFiles.split(/\r?\n/).forEach((f) => {
       if (!f) return;
       const normalized = f.trim().replace(/\\/g, "/");
@@ -42,7 +53,10 @@ function getTrackedAndStagedFiles() {
     // If git ls-files fails, fall back or continue
   }
   try {
-    const stagedFiles = execSync("git diff --cached --name-only", { encoding: "utf8", cwd: rootDir });
+    const stagedFiles = execSync("git diff --cached --name-only", {
+      encoding: "utf8",
+      cwd: rootDir,
+    });
     stagedFiles.split(/\r?\n/).forEach((f) => {
       if (!f) return;
       const normalized = f.trim().replace(/\\/g, "/");
@@ -98,6 +112,14 @@ function checkSensitiveFiles() {
     /^user_data\/templates\/avs-user-import-template\.xlsx$/i,
   ];
 
+  // `exports` is also the name of a real Next.js route. Only executable/style
+  // source files in that exact route may bypass the directory-name check. They
+  // are still scanned for embedded secrets below, and generated data extensions
+  // such as CSV, JSON and XLSX remain forbidden.
+  const allowedForbiddenPathExceptions = [
+    /^apps\/web\/src\/app\/\(portal\)\/admin\/exports\/.+\.(?:[cm]?[jt]sx?|css|scss|sass)$/i,
+  ];
+
   const secretPatterns = [
     /(mongodb(?:\+srv)?:\/\/(?!\$\{)(?![^:\s]+:(?:build|validation|test|password|strong-password|example|placeholder|ci-[^@\s]+)@)[^:\s]+:[^@\s]+@)/i,
     /(postgres(?:ql)?:\/\/(?!\$\{)(?![^:\s]+:(?:build|validation|test|password|strong-password|example|placeholder|ci-[^@\s]+)@)[^:\s]+:[^@\s]+@)/i,
@@ -111,12 +133,19 @@ function checkSensitiveFiles() {
 
   for (const file of files) {
     const normalizedPath = file.replace(/\\/g, "/");
-    const isAllowed = allowedExceptions.some((regex) => regex.test(normalizedPath));
+    const isAllowed = allowedExceptions.some((regex) =>
+      regex.test(normalizedPath),
+    );
     if (isAllowed) continue;
+
+    const isAllowedForbiddenPathException = allowedForbiddenPathExceptions.some(
+      (regex) => regex.test(normalizedPath),
+    );
 
     if (
       trackedFiles.has(normalizedPath) &&
-      forbiddenPathPatterns.some((regex) => regex.test(normalizedPath))
+      forbiddenPathPatterns.some((regex) => regex.test(normalizedPath)) &&
+      !isAllowedForbiddenPathException
     ) {
       violations.add(normalizedPath);
       continue;
@@ -132,7 +161,9 @@ function checkSensitiveFiles() {
         const content = fs.readFileSync(fullPath, "utf8");
         for (const pattern of secretPatterns) {
           if (pattern.test(content)) {
-            violations.add(`${normalizedPath} (contains embedded secret or private key material)`);
+            violations.add(
+              `${normalizedPath} (contains embedded secret or private key material)`,
+            );
             break;
           }
         }
@@ -153,7 +184,9 @@ function checkSensitiveFiles() {
   }
 
   console.log("Security preflight passed.");
-  console.log("No sensitive student data, secrets or private keys are tracked.");
+  console.log(
+    "No sensitive student data, secrets or private keys are tracked.",
+  );
 }
 
 checkSensitiveFiles();
