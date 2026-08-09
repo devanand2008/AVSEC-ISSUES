@@ -20,6 +20,7 @@ import { ArchiveDialog } from "@/components/ui/confirmation-dialog";
 import { DependencyDialog, depIcon, type DependencyReport } from "@/components/ui/dependency-dialog";
 import { PermanentDeleteDialog } from "@/components/ui/permanent-delete-dialog";
 import { StatusBadge } from "@/components/status-badge";
+import { PEOPLE_BACKUPS_ENDPOINT } from "@/features/people/people-api";
 import { api } from "@/lib/api";
 import type { PageResponse } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
@@ -114,13 +115,14 @@ export default function PeopleManagementPage() {
 
   // ── Permissions ──
   const canCreate = user?.permissions.includes("users.create") ?? false;
+  const canImportUsers = user?.permissions.includes("users.import") ?? false;
   const canSuspend = user?.permissions.includes("users.suspend") ?? false;
   const canDeletePermanently = user?.permissions.includes("users.delete_permanent") ?? false;
   const canManageBackups = user?.permissions.includes("backups.manage") ?? false;
 
   const backups = useQuery({
     queryKey: ["backups", "people-deletion"],
-    queryFn: () => api.get<BackupListResponse>("/backups"),
+    queryFn: () => api.get<BackupListResponse>(PEOPLE_BACKUPS_ENDPOINT),
     enabled: canDeletePermanently && canManageBackups,
   });
 
@@ -323,7 +325,7 @@ export default function PeopleManagementPage() {
       <PageHeader
         title="People Management"
         description="Manage Students, Faculty, Administrators and Maintenance Staff."
-        breadcrumbs={[{ label: "Admin", href: "/admin" }, { label: "People" }]}
+        breadcrumbs={[{ label: "Dashboard", href: "/" }, { label: "People" }]}
         actions={
           <>
             {canCreate && (
@@ -332,9 +334,11 @@ export default function PeopleManagementPage() {
                 <span className="hide-mobile">Add Person</span>
               </Link>
             )}
-            <Link href="/admin/imports" className="avs-btn avs-btn-secondary hide-mobile">
-              <Upload size={16} /> Import
-            </Link>
+            {canImportUsers && (
+              <Link href="/admin/imports" className="avs-btn avs-btn-secondary hide-mobile">
+                <Upload size={16} /> Import
+              </Link>
+            )}
           </>
         }
       />

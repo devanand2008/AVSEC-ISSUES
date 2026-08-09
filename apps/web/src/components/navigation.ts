@@ -39,6 +39,35 @@ export interface NavigationItem {
   roles?: string[];
 }
 
+export const BULK_IMPORT_PERMISSIONS = [
+  "users.import",
+  "locations.import",
+  "assets.import",
+  "academic.manage",
+  "attendance.import",
+  "routing.manage",
+];
+
+const ADMIN_MOBILE_ROLES = new Set([
+  "SUPER_ADMIN",
+  "MAIN_ADMIN",
+  "PRINCIPAL",
+  "VICE_PRINCIPAL",
+]);
+
+const MAINTENANCE_MOBILE_ROLES = new Set([
+  "MAINTENANCE_ADMIN",
+  "MAINTENANCE_SUPERVISOR",
+  "MAINTENANCE_STAFF",
+  "ELECTRICIAN",
+  "PLUMBER",
+  "IT_SUPPORT",
+  "LAB_TECHNICIAN",
+  "HOUSEKEEPING",
+  "SECURITY",
+  "OTHER_RESPONSIBLE",
+]);
+
 export const navigation: NavigationItem[] = [
   { href: "/", label: "Overview", icon: Gauge },
   { href: "/avs-bot", label: "AVS Bot", icon: Bot, any: ["ai.use"] },
@@ -283,13 +312,7 @@ export const navigation: NavigationItem[] = [
     href: "/admin/imports",
     label: "Bulk imports",
     icon: FileUp,
-    any: [
-      "users.import",
-      "locations.import",
-      "assets.import",
-      "academic.manage",
-      "routing.manage",
-    ],
+    any: BULK_IMPORT_PERMISSIONS,
   },
   {
     href: "/admin/locations",
@@ -383,7 +406,7 @@ export const navigation: NavigationItem[] = [
     href: "/admin/exports",
     label: "Data exports",
     icon: Download,
-    any: ["attendance.export", "issues.export", "users.export"],
+    any: ["attendance.export", "issues.export"],
   },
   {
     href: "/admin/operations",
@@ -448,18 +471,94 @@ export interface BottomNavItem {
   iconName: "home" | "attendance" | "learn" | "messages" | "people" | "issues" | "reports" | "profile" | "assigned" | "more";
 }
 
-export function getMobileBottomNav(roles: readonly string[] = []): BottomNavItem[] {
-  const isAdmin = roles.some((r) => ["SUPER_ADMIN", "MAIN_ADMIN", "PRINCIPAL", "VICE_PRINCIPAL"].includes(r));
-  const isMaintenance = roles.some((r) => r.startsWith("MAINTENANCE_") || ["ELECTRICIAN", "PLUMBER", "IT_SUPPORT", "HOUSEKEEPING"].includes(r));
+function normalizedNavigationPath(value: string): string {
+  const path = value.split(/[?#]/, 1)[0] || "/";
+  return path.length > 1 ? path.replace(/\/+$/, "") : path;
+}
+
+export function navigationPathMatches(pathname: string, href: string): boolean {
+  const currentPath = normalizedNavigationPath(pathname);
+  const targetPath = normalizedNavigationPath(href);
+  return (
+    currentPath === targetPath ||
+    (targetPath !== "/" && currentPath.startsWith(`${targetPath}/`))
+  );
+}
+
+export function getActiveNavigationHref(
+  pathname: string,
+  items: readonly Pick<NavigationItem, "href">[],
+): string | null {
+  return items.reduce<string | null>((best, item) => {
+    if (!navigationPathMatches(pathname, item.href)) return best;
+    if (!best) return item.href;
+    return normalizedNavigationPath(item.href).length >
+      normalizedNavigationPath(best).length
+      ? item.href
+      : best;
+  }, null);
+}
+
+type SearchParamReader = Pick<URLSearchParams, "get">;
+
+export function isMobileNavigationItemActive(
+  itemHref: string,
+  pathname: string,
+  currentSearchParams: SearchParamReader | string = "",
+): boolean {
+  const requiredSearchParams = new URL(
+    itemHref,
+    "https://avs-navigation.invalid",
+  ).searchParams;
+  if (!requiredSearchParams.size) {
+    return navigationPathMatches(pathname, itemHref);
+  }
+  if (normalizedNavigationPath(pathname) !== normalizedNavigationPath(itemHref)) {
+    return false;
+  }
+  const current =
+    typeof currentSearchParams === "string"
+      ? new URLSearchParams(currentSearchParams)
+      : currentSearchParams;
+  return [...requiredSearchParams.entries()].every(
+    ([key, value]) => current.get(key) === value,
+  );
+}
+
+export function getMobileBottomNav(
+  roles: readonly string[] = [],
+  permissions: readonly string[] = [],
+): BottomNavItem[] {
+  const normalizedRoles = new Set(roles.map((role) => role.toUpperCase()));
+  const granted = new Set(permissions);
+  const isAdmin = [...ADMIN_MOBILE_ROLES].some((role) =>
+    normalizedRoles.has(role),
+  );
+  const isMaintenance = [...MAINTENANCE_MOBILE_ROLES].some((role) =>
+    normalizedRoles.has(role),
+  );
 
   if (isAdmin) {
-    return [
+    const items: BottomNavItem[] = [
       { href: "/", label: "Dashboard", iconName: "home" },
-      { href: "/admin/people", label: "People", iconName: "people" },
       { href: "/issues", label: "Issues", iconName: "issues" },
-      { href: "/admin/exports", label: "Reports", iconName: "reports" },
-      { href: "/profile/me", label: "Profile", iconName: "profile" },
+      { href: "/profile", label: "Profile", iconName: "profile" },
     ];
+    if (granted.has("users.read")) {
+      items.splice(1, 0, {
+        href: "/admin/people",
+        label: "People",
+        iconName: "people",
+      });
+    }
+    if (granted.has("attendance.export") || granted.has("issues.export")) {
+      items.splice(items.length - 1, 0, {
+        href: "/admin/exports",
+        label: "Reports",
+        iconName: "reports",
+      });
+    }
+    return items;
   }
 
   if (isMaintenance) {
@@ -468,7 +567,7 @@ export function getMobileBottomNav(roles: readonly string[] = []): BottomNavItem
       { href: "/issues?status=IN_PROGRESS", label: "Progress", iconName: "issues" },
       { href: "/issues?status=OVERDUE", label: "Overdue", iconName: "reports" },
       { href: "/messages", label: "Messages", iconName: "messages" },
-      { href: "/profile/me", label: "Profile", iconName: "profile" },
+      { href: "/profile", label: "Profile", iconName: "profile" },
     ];
   }
 
@@ -478,6 +577,6 @@ export function getMobileBottomNav(roles: readonly string[] = []): BottomNavItem
     { href: "/attendance", label: "Attendance", iconName: "attendance" },
     { href: "/academic-learn", label: "Learn", iconName: "learn" },
     { href: "/messages", label: "Messages", iconName: "messages" },
-    { href: "/profile/me", label: "Profile", iconName: "profile" },
+    { href: "/profile", label: "Profile", iconName: "profile" },
   ];
 }

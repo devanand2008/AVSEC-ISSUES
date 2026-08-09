@@ -1,4 +1,4 @@
-FROM node:24-alpine AS dependencies
+FROM node:22-alpine AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
@@ -9,7 +9,8 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --no-audit --no-fund \
     --fetch-retries=5 \
     --fetch-retry-mintimeout=20000 \
-    --fetch-retry-maxtimeout=120000
+    --fetch-retry-maxtimeout=120000 \
+    && npm ls --all
 
 FROM dependencies AS build
 ARG NEXT_PUBLIC_API_URL
@@ -33,7 +34,7 @@ ENV NEXT_PUBLIC_FIREBASE_VAPID_KEY=$NEXT_PUBLIC_FIREBASE_VAPID_KEY
 COPY . .
 RUN npm run build -w @college/shared-types && npm run build -w @college/validation && npm run build -w @college/web
 
-FROM node:24-alpine AS runtime
+FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
 # Next.js standalone server must bind to 0.0.0.0 inside Docker
 ENV HOSTNAME=0.0.0.0

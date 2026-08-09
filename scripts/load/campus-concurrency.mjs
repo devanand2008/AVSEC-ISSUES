@@ -10,6 +10,12 @@ const full = profile === "full";
 const isolated = process.env.LOAD_TEST_ISOLATED === "true";
 const writesEnabled = process.env.LOAD_ENABLE_WRITES === "true";
 
+function requiredEnvironment(name) {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required unless LOAD_USERS_FILE is set.`);
+  return value;
+}
+
 if (full && !isolated) {
   throw new Error("The full profile requires LOAD_TEST_ISOLATED=true.");
 }
@@ -45,8 +51,8 @@ const configuredUsers = process.env.LOAD_USERS_FILE
   ? JSON.parse(await readFile(process.env.LOAD_USERS_FILE, "utf8"))
   : [
       {
-        identifier: process.env.LOAD_IDENTIFIER ?? "deva1253@college.com",
-        password: process.env.LOAD_PASSWORD ?? "deva1253",
+        identifier: requiredEnvironment("LOAD_IDENTIFIER"),
+        password: requiredEnvironment("LOAD_PASSWORD"),
         collegeCode: process.env.LOAD_COLLEGE_CODE ?? "6201",
       },
     ];

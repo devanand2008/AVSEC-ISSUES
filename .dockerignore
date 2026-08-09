@@ -23,7 +23,7 @@ user_data
 import-results
 credential-exports
 failed-imports
-exports
+/exports
 uploads
 private_uploads
 certs

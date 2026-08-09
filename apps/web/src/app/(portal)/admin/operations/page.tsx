@@ -26,7 +26,7 @@ export default function OperationsPage() {
   const [reportStatus, setReportStatus] = useState("OPEN");
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const queryString = new URLSearchParams({ page: String(auditPage), pageSize: "25", ...(filters.action ? { action: filters.action } : {}), ...(filters.entityType ? { entityType: filters.entityType } : {}), ...(filters.actor ? { actor: filters.actor } : {}) }).toString();
-  const health = useQuery({ queryKey: ["system-health"], queryFn: () => api.get<Health>("/health/ready"), enabled: canHealth, retry: false });
+  const health = useQuery({ queryKey: ["system-health"], queryFn: () => api.health<Health>("ready"), enabled: canHealth, retry: false });
   const audit = useQuery({ queryKey: ["audit-logs", auditPage, filters], queryFn: () => api.get<Page<AuditLog>>(`/audit-logs?${queryString}`), enabled: canAudit });
   const jobs = useQuery({ queryKey: ["background-jobs"], queryFn: () => api.get<Page<Failure>>("/background-jobs?resolved=false&pageSize=50"), enabled: canJobs, refetchInterval: 10_000 });
   const reports = useQuery({ queryKey: ["message-reports", reportStatus], queryFn: () => api.get<MessageReport[]>(`/message-reports?status=${reportStatus}`), enabled: canModerate });

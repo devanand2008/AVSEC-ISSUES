@@ -141,7 +141,7 @@ if ($LASTEXITCODE -ne 0) {
   throw "Docker Compose failed to start the application."
 }
 
-$apiReadyUrl = "http://localhost:4000/api/v1/health/ready/dependencies"
+$apiReadyUrl = "http://localhost:4000/health/ready/dependencies"
 $learnHealthUrl = "http://localhost:4000/api/v1/learn/health"
 $webUrl = "http://localhost:3000/login"
 $mobileWebUrl = "http://${lanIp}:3000/login"

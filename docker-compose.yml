@@ -109,7 +109,7 @@ services:
           "CMD",
           "node",
           "-e",
-          "const p=(process.env.API_PREFIX||'api/v1').split('/').filter(Boolean).join('/');fetch('http://127.0.0.1:4000/'+p+'/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:4000/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
         ]
       interval: 10s
       timeout: 8s

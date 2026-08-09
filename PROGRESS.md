@@ -9,7 +9,7 @@ Updated: 16 July 2026
 - Created and verified fresh database and project backups.
 - Added and executed transactional demo-data cleanup tooling.
 - Removed duplicate non-admin Devanand account.
-- Verified the only remaining user is `ADM001 / Devanand / deva1253@college.com`.
+- Verified the configured Main Admin was the only remaining user; its identity is omitted.
 - Fixed repeated password-change behavior by keeping Main Admin `must_change_password=false`.
 - Consolidated Windows startup into `START_AVS_APP.bat` with LAN/mobile URL output.
 - Added Compose variables for web/API LAN binding while keeping PostgreSQL/Redis/MinIO local-only.

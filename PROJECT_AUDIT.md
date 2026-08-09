@@ -91,7 +91,7 @@ Current database counts after cleanup:
 | conversations       |    10 |
 | messages            |     1 |
 
-The only user is `ADM001 / Devanand / deva1253@college.com`, status `ACTIVE`, `must_change_password=false`. The remaining conversations are official department/class/team channels, plus one admin-created direct welcome message; they were not part of the confirmed demo signature. Master campus/academic rows were retained because they are operational structure, not disposable fake records.
+The configured Main Admin was the only user, with status `ACTIVE` and `must_change_password=false`; its identity is intentionally omitted. The remaining conversations are official department/class/team channels, plus one admin-created direct welcome message; they were not part of the confirmed demo signature. Master campus/academic rows were retained because they are operational structure, not disposable fake records.
 
 ## Security Findings
 

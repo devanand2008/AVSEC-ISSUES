@@ -42,7 +42,7 @@ Date: 16 July 2026
 
 ## Current Admin State
 
-`ADM001 / Devanand / deva1253@college.com` is the only user after cleanup. The account is active and `must_change_password=false`, so the password-change page should not repeat on every login.
+The configured Main Admin was the only user after cleanup. Its identity is intentionally omitted; the account was active with `must_change_password=false`.
 
 ## Required Production Hardening
 

@@ -46,7 +46,7 @@ npm run cleanup:data -- --confirm --backup-file "D:\COLLEGE MANAGEMENT SITE\back
 
 - defaults to dry-run mode;
 - requires `--confirm` and `--backup-file` for deletion;
-- preserves `ADM001 / deva1253@college.com`;
+- preserves the configured Main Admin account;
 - runs inside one PostgreSQL transaction;
 - refuses cleanup if the Main Admin is missing;
 - creates an audit entry with action `data_cleanup.demo_data`;
@@ -91,7 +91,7 @@ Current database state:
 
 Main Admin preserved:
 
-`ADM001 | Devanand | deva1253@college.com | ACTIVE | must_change_password=false`
+The configured Main Admin was `ACTIVE` with `must_change_password=false`; its identity is intentionally omitted.
 
 API and browser login were both verified after cleanup. The returned user is Devanand with role `MAIN_ADMIN` and `mustChangePassword=false`.
 

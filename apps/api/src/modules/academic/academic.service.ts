@@ -583,7 +583,7 @@ export class AcademicService {
   async assignStudent(user: AuthPrincipal, sectionId: string, input: AssignSectionStudentDto, requestId: string) {
     const startsOn = this.assignmentDate(input.startsOn, "membership start date");
     const result = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${sectionId}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sectionId}))`;
       const section = await tx.section.findFirst({
         where: { id: sectionId, isActive: true, archivedAt: null, semester: { programme: { collegeId: user.collegeId, isActive: true } } },
         select: { id: true, capacity: true, semesterId: true, semester: { select: { academicYearId: true, programme: { select: { id: true, departmentId: true } } } } },

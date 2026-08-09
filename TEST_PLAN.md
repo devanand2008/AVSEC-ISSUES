@@ -4,7 +4,7 @@
 
 - Run `cmd.exe /c START_AVS_APP.bat --check`.
 - Run `START_AVS_APP.bat --no-open` after Docker Desktop is responsive.
-- Verify API health at `http://localhost:4000/api/v1/health/live`.
+- Verify API health at `http://localhost:4000/health/live`.
 - Verify web login at `http://localhost:3000/login`.
 - Confirm only `START_AVS_APP.bat` exists.
 - Confirm the displayed LAN IP is not hardcoded.

@@ -14,14 +14,16 @@ const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: databaseUrl }),
 });
 const developmentCollegeCode = process.env.DEVELOPMENT_COLLEGE_CODE ?? "6201";
-const developmentAdminEmail =
-  process.env.DEVELOPMENT_ADMIN_EMAIL ?? "deva1253@college.com";
 function requiredEnv(name: string, purpose: string) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is required for ${purpose}.`);
   return value;
 }
 
+const developmentAdminEmail = requiredEnv(
+  "DEVELOPMENT_ADMIN_EMAIL",
+  "the Main Admin email",
+);
 const developmentAdminPassword = requiredEnv(
   "DEVELOPMENT_ADMIN_PASSWORD",
   "the temporary Main Admin password",

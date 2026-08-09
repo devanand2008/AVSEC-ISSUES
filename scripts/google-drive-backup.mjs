@@ -22,18 +22,30 @@ for (const name of required) {
 const accessToken = await refreshAccessToken();
 await verifyOwner(accessToken);
 const rootId = safeId(process.env.GOOGLE_DRIVE_BACKUP_FOLDER_ID);
-const [dailyId, schemaId, manifestsId] = await Promise.all([
-  ensureFolder(accessToken, rootId, "daily"),
+const backupType = allowedValue(
+  process.env.BACKUP_TYPE ?? "DAILY",
+  ["DAILY", "PRE_MIGRATION"],
+  "BACKUP_TYPE",
+);
+const backupStatus = allowedValue(
+  process.env.BACKUP_STATUS ?? "COMPLETED",
+  ["COMPLETED", "RESTORE_TESTED"],
+  "BACKUP_STATUS",
+);
+const backupTier = backupType.toLowerCase().replaceAll("_", "-");
+const backupStatusTag = backupStatus.toLowerCase().replaceAll("_", "-");
+const [tierId, schemaId, manifestsId] = await Promise.all([
+  ensureFolder(accessToken, rootId, backupTier),
   ensureFolder(accessToken, rootId, "schema"),
   ensureFolder(accessToken, rootId, "manifests"),
 ]);
 const backupId = process.env.BACKUP_ID ?? "unknown";
 const commonProperties = {
   avsBackupId: backupId,
-  avsBackupTier: "daily",
-  avsBackupStatus: "completed",
+  avsBackupTier: backupTier,
+  avsBackupStatus: backupStatusTag,
 };
-const destinations = [dailyId, schemaId, manifestsId];
+const destinations = [tierId, schemaId, manifestsId];
 const kinds = ["encrypted-full", "schema", "checksum"];
 
 for (let index = 0; index < 3; index += 1) {
@@ -46,6 +58,10 @@ for (let index = 0; index < 3; index += 1) {
 }
 
 const manifest = JSON.parse(await readFile(paths[3], "utf8"));
+manifest.backupType = backupType;
+manifest.backupStatus = backupStatus;
+manifest.restoreTestStatus =
+  backupStatus === "RESTORE_TESTED" ? "PASSED" : "NOT_TESTED";
 manifest.uploadStatus = "COMPLETED";
 manifest.driveMetadataVerified = true;
 manifest.uploadedAt = new Date().toISOString();
@@ -197,4 +213,9 @@ function safeId(value) {
   const id = String(value ?? "").trim();
   if (!/^[A-Za-z0-9_-]{3,256}$/.test(id)) throw new Error("Google Drive id is invalid.");
   return id;
+}
+
+function allowedValue(value, allowed, name) {
+  if (!allowed.includes(value)) throw new Error(`${name} is invalid.`);
+  return value;
 }

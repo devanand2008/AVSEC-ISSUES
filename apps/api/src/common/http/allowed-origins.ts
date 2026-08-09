@@ -1,4 +1,5 @@
 import { ConfigService } from "@nestjs/config";
+import type { NextFunction, Request, RequestHandler, Response } from "express";
 
 export function parseAllowedOrigins(
   allowedOrigins?: string,
@@ -58,4 +59,28 @@ export function isAllowedOriginFromConfig(
 ): boolean {
   const webUrl = config.getOrThrow<string>("WEB_URL");
   return isAllowedOrigin(origin, allowedOriginsFromConfig(config), webUrl);
+}
+
+/**
+ * Reject cross-origin requests before the CORS package runs. Passing an Error
+ * to the CORS origin callback reaches Express' default error handler and turns
+ * an expected policy denial into HTTP 500. A direct 403 also prevents unsafe
+ * requests from reaching a controller; Vary prevents a denial for one Origin
+ * from being reused for a different Origin by an intermediary cache.
+ */
+export function createCorsOriginGuard(config: ConfigService): RequestHandler {
+  return (request: Request, response: Response, next: NextFunction): void => {
+    const origin = request.get("origin");
+    if (!origin || isAllowedOriginFromConfig(config, origin)) {
+      next();
+      return;
+    }
+
+    response.vary("Origin");
+    response.status(403).json({
+      statusCode: 403,
+      error: "Forbidden",
+      message: "Request origin is not allowed.",
+    });
+  };
 }

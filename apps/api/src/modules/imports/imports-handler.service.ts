@@ -305,7 +305,7 @@ export class ImportsHandlerService {
   }
 
   private async assertSectionCapacity(tx: Prisma.TransactionClient, sectionId: string, excludeUserId?: string): Promise<void> {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${sectionId}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sectionId}))`;
     const section = await tx.section.findFirst({ where: { id: sectionId, isActive: true, archivedAt: null }, select: { capacity: true } });
     if (!section) throw new BadRequestException("The selected section is not active.");
     const currentStudentCount = await tx.studentProfile.count({

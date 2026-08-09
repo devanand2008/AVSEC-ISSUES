@@ -101,6 +101,18 @@ describe("QrService", () => {
     expect(prisma.feedbackQrCode.findUnique).not.toHaveBeenCalled();
   });
 
+  it("rejects the stale room QR page path that has no web route", async () => {
+    await expect(
+      service.validate(
+        principal(),
+        `https://app.avs.example.edu/locations/rooms/qr/${roomToken}`,
+        { requestId: "request-stale-room-route" },
+        "CAMERA",
+      ),
+    ).rejects.toThrow("This QR destination is not approved");
+    expect(prisma.room.findFirst).not.toHaveBeenCalled();
+  });
+
   it("validates feedback QR tokens without returning private staff details", async () => {
     prisma.feedbackQrCode.findUnique.mockResolvedValue({
       id: "qr-1",

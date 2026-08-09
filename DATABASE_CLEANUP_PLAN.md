@@ -25,7 +25,7 @@ was created manually and hashed.
 | Data Area | Count | Cleanup Position |
 | --- | ---: | --- |
 | College | 1 | Keep: `6201`, AVS Engineering College |
-| Main Admin | 1 | Keep: Devanand / `deva1253@college.com` |
+| Main Admin | 1 | Keep the configured Main Admin; identity removed from documentation |
 | Other seed users | 12 | Replace with real AVS users before rollout |
 | Roles | 18 | Keep as baseline, review names/permissions |
 | Departments | 3 | Replace or update from AVS master data |

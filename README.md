@@ -27,7 +27,7 @@ Replace every example secret before starting. Local defaults use PostgreSQL port
 
 On Windows, use `START_AVS_APP.bat` for the main local/LAN startup. It checks Node.js/npm/Docker, starts the Docker web/API stack, detects the computer's LAN IPv4 address, prints the desktop URL, prints the mobile URL, and shows a QR code when possible. The default desktop URL is `http://localhost:3000`; phones on the same Wi-Fi use the displayed `http://LAN-IP:3000` URL. Run `START_AVS_APP.bat --check` for a non-destructive preflight.
 
-The local Main Admin login is `deva1253@college.com` with college code `6201` and password `deva1253`; the account is named Devanand. The current cleaned local database keeps this account active with `must_change_password=false`, so the password-change page should not repeat on every login. Seed accounts use `DEVELOPMENT_ADMIN_PASSWORD`. Set `DEVELOPMENT_RESET_ADMIN_PASSWORD=true` only when you want seeding to overwrite the existing admin password, and set `DEVELOPMENT_ADMIN_MUST_CHANGE_PASSWORD=true` only when you want to force the change-password screen. Development seeding is blocked in production unless explicitly allowed.
+Local Main Admin credentials must be supplied through `DEVELOPMENT_ADMIN_EMAIL` and `DEVELOPMENT_ADMIN_PASSWORD`; they are never documented in source control. Set `DEVELOPMENT_RESET_ADMIN_PASSWORD=true` only when you intentionally want development seeding to overwrite an existing admin password, and set `DEVELOPMENT_ADMIN_MUST_CHANGE_PASSWORD=true` only when you want to force the change-password screen. Development seeding is blocked in production unless explicitly allowed.
 
 ## Data cleanup
 

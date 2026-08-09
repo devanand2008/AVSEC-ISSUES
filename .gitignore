@@ -64,7 +64,7 @@ user_data/*.csv
 import-results/
 credential-exports/
 failed-imports/
-exports/
+/exports/
 temp/
 tmp/
 

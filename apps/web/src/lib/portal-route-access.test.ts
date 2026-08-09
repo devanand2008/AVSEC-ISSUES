@@ -118,4 +118,25 @@ describe("canAccessPortalPath", () => {
     expect(canAccessPortalPath("/issues/issue-1", [], [])).toBe(true);
     expect(canAccessPortalPath("/attendance/session-1", [], [])).toBe(true);
   });
+
+  it("gates people, imports, and exports by their page permissions", () => {
+    expect(canAccessPortalPath("/admin/people", [], ["PRINCIPAL"])).toBe(
+      false,
+    );
+    expect(
+      canAccessPortalPath("/admin/people/person-1", ["users.read"], []),
+    ).toBe(true);
+    expect(canAccessPortalPath("/admin/imports", ["users.read"], [])).toBe(
+      false,
+    );
+    expect(
+      canAccessPortalPath("/admin/imports", ["attendance.import"], []),
+    ).toBe(true);
+    expect(canAccessPortalPath("/admin/exports", ["issues.read"], [])).toBe(
+      false,
+    );
+    expect(
+      canAccessPortalPath("/admin/exports", ["issues.export"], []),
+    ).toBe(true);
+  });
 });

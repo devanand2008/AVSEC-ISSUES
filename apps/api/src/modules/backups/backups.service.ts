@@ -1,9 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import {
-  createReadStream,
-  createWriteStream,
-} from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import {
   mkdir,
   open,
@@ -27,7 +24,12 @@ import { BackupCryptoService } from "./backup-crypto.service";
 import { decodeBackupKey } from "./backup-key";
 import { BackupManifestService } from "./backup-manifest.service";
 import { BackupRetentionService } from "./backup-retention.service";
-import { BACKUP_ID_PATTERN, type BackupManifest, type BackupRecord, type RetentionPolicy } from "./backup.types";
+import {
+  BACKUP_ID_PATTERN,
+  type BackupManifest,
+  type BackupRecord,
+  type RetentionPolicy,
+} from "./backup.types";
 import { PostgresToolsService } from "./postgres-tools.service";
 
 const UUID_PATTERN =
@@ -49,6 +51,27 @@ function positiveInteger(value: unknown, fallback: number): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function verifiedRecordCounts(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Backup table-count metadata is incomplete.");
+  }
+  const entries = Object.entries(value);
+  if (
+    entries.length === 0 ||
+    !("_prisma_migrations" in value) ||
+    entries.some(
+      ([table, count]) =>
+        !table ||
+        typeof count !== "number" ||
+        !Number.isSafeInteger(count) ||
+        count < 0,
+    )
+  ) {
+    throw new Error("Backup table-count metadata is incomplete.");
+  }
+  return Object.fromEntries(entries);
+}
+
 function publicLocalBackup(record: BackupRecord) {
   return {
     id: record.manifest.id,
@@ -68,6 +91,8 @@ type DatabaseBackupView = {
   status: string;
   backupType: string;
   fileName: string;
+  storageConnectionId?: string | null;
+  providerFileId?: string | null;
   encryptedSizeBytes: bigint | null;
   encryptedChecksumSha256: string | null;
   createdAt: Date;
@@ -86,6 +111,9 @@ type DatabaseBackupView = {
 
 function publicDatabaseBackup(record: DatabaseBackupView) {
   const restore = record.restoreTests[0];
+  const inAppRecoveryAvailable = Boolean(
+    record.storageConnectionId && record.providerFileId,
+  );
   return {
     id: record.id,
     status: record.status,
@@ -107,7 +135,13 @@ function publicDatabaseBackup(record: DatabaseBackupView) {
     sqlFormat: record.fileName.endsWith(".sql.gz.enc") ? "PLAIN" : "CUSTOM",
     encrypted: true,
     checksumStatus: record.encryptedChecksumSha256 ? "RECORDED" : "PENDING",
-    googleDriveStatus: record.completedAt ? "UPLOADED" : "PENDING",
+    googleDriveStatus: record.completedAt
+      ? inAppRecoveryAvailable
+        ? "UPLOADED"
+        : "EXTERNAL"
+      : "PENDING",
+    recoveryMode: inAppRecoveryAvailable ? "IN_APP" : "EXTERNAL_MANUAL",
+    inAppRecoveryAvailable,
     ...(record.failureCode
       ? {
           failure: {
@@ -192,10 +226,7 @@ export class BackupsService {
       invalid: inventory.invalid,
       database: {
         status: "CONNECTED",
-        mode: this.config.get<string>(
-          "DATABASE_MODE",
-          "EXTERNAL_PERSISTENT",
-        ),
+        mode: this.config.get<string>("DATABASE_MODE", "EXTERNAL_PERSISTENT"),
         warning:
           this.config.get<string>("DATABASE_MODE") === "RENDER_FREE_PILOT"
             ? "Pilot Database: This free database is temporary and must not be treated as permanent college storage. Verify daily external SQL backups and migrate to a persistent PostgreSQL service before expiry."
@@ -222,10 +253,7 @@ export class BackupsService {
   async createScheduled(
     user: BackupActor,
     requestId: string,
-    backupType: Extract<
-      BackupCreationType,
-      "DAILY" | "WEEKLY" | "MONTHLY"
-    >,
+    backupType: Extract<BackupCreationType, "DAILY" | "WEEKLY" | "MONTHLY">,
   ) {
     return this.createPlainSqlBackup(user, requestId, backupType);
   }
@@ -307,7 +335,11 @@ export class BackupsService {
       );
       const gzipStat = await stat(gzipPath);
       const gzipChecksum = await this.crypto.sha256File(gzipPath);
-      const encrypted = await this.crypto.encryptFile(gzipPath, artifactPath, key);
+      const encrypted = await this.crypto.encryptFile(
+        gzipPath,
+        artifactPath,
+        key,
+      );
       await this.crypto.decryptFile(
         artifactPath,
         verificationGzipPath,
@@ -320,12 +352,16 @@ export class BackupsService {
         createWriteStream(verificationSqlPath, { flags: "wx", mode: 0o600 }),
       );
       await this.postgres.inspectSql(verificationSqlPath);
-      if ((await this.crypto.sha256File(verificationSqlPath)) !== fullChecksum) {
-        throw new Error("Backup encryption round-trip checksum verification failed.");
+      if (
+        (await this.crypto.sha256File(verificationSqlPath)) !== fullChecksum
+      ) {
+        throw new Error(
+          "Backup encryption round-trip checksum verification failed.",
+        );
       }
 
       const [recordCounts, schemaVersion] = await Promise.all([
-        this.recordCounts(),
+        this.recordCounts(databaseUrl),
         this.schemaVersion(),
       ]);
       const databaseIdentity = safeDatabaseIdentity(databaseUrl);
@@ -357,9 +393,10 @@ export class BackupsService {
             sha256: schemaChecksum,
           },
           database: {
-            mode: this.config.get<
-              "EXTERNAL_PERSISTENT" | "RENDER_FREE_PILOT"
-            >("DATABASE_MODE", "EXTERNAL_PERSISTENT"),
+            mode: this.config.get<"EXTERNAL_PERSISTENT" | "RENDER_FREE_PILOT">(
+              "DATABASE_MODE",
+              "EXTERNAL_PERSISTENT",
+            ),
             ...databaseIdentity,
           },
           application: {
@@ -402,8 +439,7 @@ export class BackupsService {
         key,
       );
       await this.manifests.write(manifestPath, manifest);
-      const manifestChecksumSha256 =
-        await this.crypto.sha256File(manifestPath);
+      const manifestChecksumSha256 = await this.crypto.sha256File(manifestPath);
 
       let storageConnectionId: string | null = null;
       let providerFileId: string | null = null;
@@ -774,7 +810,9 @@ export class BackupsService {
     if (!UUID_PATTERN.test(id)) throw new Error("Backup id is invalid.");
     const normalizedReason = reason.trim();
     if (normalizedReason.length < 10 || normalizedReason.length > 500) {
-      throw new Error("A deletion reason between 10 and 500 characters is required.");
+      throw new Error(
+        "A deletion reason between 10 and 500 characters is required.",
+      );
     }
     const record = await this.prisma.databaseBackup.findFirst({
       where: { id, collegeId: user.collegeId, deletedAt: null },
@@ -898,14 +936,8 @@ export class BackupsService {
     requestId: string,
     backupType: BackupCreationType,
   ) {
-    const {
-      directory,
-      key,
-      keyVersion,
-      databaseUrl,
-      driveEnabled,
-      retention,
-    } = await this.settings();
+    const { directory, key, keyVersion, databaseUrl, driveEnabled, retention } =
+      await this.settings();
     const localId = this.newId();
     const artifactFileName = `${localId}.avsbak`;
     const manifestFileName = `${localId}.manifest.json`;
@@ -937,17 +969,27 @@ export class BackupsService {
       await handle.close();
       await this.postgres.dump(databaseUrl, dumpPath);
       const dumpStat = await stat(dumpPath);
-      if (dumpStat.size === 0) throw new Error("pg_dump produced an empty backup.");
+      if (dumpStat.size === 0)
+        throw new Error("pg_dump produced an empty backup.");
 
       await this.prisma.databaseBackup.update({
         where: { id: databaseRecord.id },
         data: { status: "ENCRYPTING" },
       });
-      const encrypted = await this.crypto.encryptFile(dumpPath, artifactPath, key);
-      const decrypted = await this.crypto.decryptFile(artifactPath, verificationPath, key, encrypted.artifactSha256);
+      const encrypted = await this.crypto.encryptFile(
+        dumpPath,
+        artifactPath,
+        key,
+      );
+      const decrypted = await this.crypto.decryptFile(
+        artifactPath,
+        verificationPath,
+        key,
+        encrypted.artifactSha256,
+      );
       if (
-        decrypted.plaintextSha256 !== encrypted.plaintextSha256
-        || decrypted.plaintextBytes !== encrypted.plaintextBytes
+        decrypted.plaintextSha256 !== encrypted.plaintextSha256 ||
+        decrypted.plaintextBytes !== encrypted.plaintextBytes
       ) {
         throw new Error("Backup round-trip checksum verification failed.");
       }
@@ -983,7 +1025,7 @@ export class BackupsService {
       const [manifestChecksumSha256, recordCounts, schemaVersion] =
         await Promise.all([
           this.crypto.sha256File(manifestPath),
-          this.recordCounts(),
+          this.recordCounts(databaseUrl),
           this.schemaVersion(),
         ]);
 
@@ -1042,7 +1084,10 @@ export class BackupsService {
       }
 
       const inventory = await this.manifests.inventory(directory, key);
-      const retentionResult = await this.retention.apply(inventory.backups, retention);
+      const retentionResult = await this.retention.apply(
+        inventory.backups,
+        retention,
+      );
       const completedAt = new Date();
       const completed = await this.prisma.$transaction(async (tx) => {
         const updated = await tx.databaseBackup.update({
@@ -1232,6 +1277,7 @@ export class BackupsService {
       directory,
       `.${localId}.${randomBytes(8).toString("hex")}.restore-test.dump`,
     );
+    const sourceRecordCounts = verifiedRecordCounts(record.recordCounts);
     const startedAt = new Date();
     const restoreRecord = await this.prisma.backupRestoreTest.create({
       data: {
@@ -1249,10 +1295,7 @@ export class BackupsService {
         .then((value) => value.isFile())
         .catch(() => false);
       if (!localExists) {
-        if (
-          !record.providerFileId ||
-          !record.storageConnection?.createdById
-        ) {
+        if (!record.providerFileId || !record.storageConnection?.createdById) {
           throw new Error("Backup artifact is unavailable.");
         }
         await this.prisma.backupRestoreTest.update({
@@ -1288,7 +1331,9 @@ export class BackupsService {
         decrypted.plaintextSha256 !== record.plainChecksumSha256 ||
         BigInt(decrypted.plaintextBytes) !== record.plainSizeBytes
       ) {
-        throw new Error("Decrypted backup checksum does not match its authenticated manifest.");
+        throw new Error(
+          "Decrypted backup checksum does not match its authenticated manifest.",
+        );
       }
       await this.postgres.inspectDump(temporaryDump);
       await this.prisma.backupRestoreTest.update({
@@ -1299,6 +1344,7 @@ export class BackupsService {
         await this.postgres.restoreAndVerifyInTemporaryDatabase(
           databaseUrl,
           temporaryDump,
+          sourceRecordCounts,
         );
       const completedAt = new Date();
       const result = {
@@ -1397,6 +1443,7 @@ export class BackupsService {
     );
     const temporaryGzip = join(directory, `.${id}.${suffix}.restore.sql.gz`);
     const temporarySql = join(directory, `.${id}.${suffix}.restore.sql`);
+    const sourceRecordCounts = verifiedRecordCounts(record.recordCounts);
     const startedAt = new Date();
     const restoreRecord = await this.prisma.backupRestoreTest.create({
       data: {
@@ -1451,8 +1498,13 @@ export class BackupsService {
         createGunzip(),
         createWriteStream(temporarySql, { flags: "wx", mode: 0o600 }),
       );
-      if ((await this.crypto.sha256File(temporarySql)) !== record.plainChecksumSha256) {
-        throw new Error("Decrypted SQL checksum does not match backup metadata.");
+      if (
+        (await this.crypto.sha256File(temporarySql)) !==
+        record.plainChecksumSha256
+      ) {
+        throw new Error(
+          "Decrypted SQL checksum does not match backup metadata.",
+        );
       }
       await this.postgres.inspectSql(temporarySql);
       await this.prisma.backupRestoreTest.update({
@@ -1463,6 +1515,7 @@ export class BackupsService {
         await this.postgres.restorePlainAndVerifyInTemporaryDatabase(
           databaseUrl,
           temporarySql,
+          sourceRecordCounts,
         );
       const completedAt = new Date();
       const result = {
@@ -1536,11 +1589,17 @@ export class BackupsService {
     driveEnabled: boolean;
     retention: RetentionPolicy;
   }> {
-    const directory = resolve(this.config.get<string>("BACKUP_DIRECTORY") ?? resolve(process.cwd(), "backups"));
+    const directory = resolve(
+      this.config.get<string>("BACKUP_DIRECTORY") ??
+        resolve(process.cwd(), "backups"),
+    );
     await mkdir(directory, { recursive: true, mode: 0o700 });
-    const key = decodeBackupKey(this.config.get<string>("BACKUP_ENCRYPTION_KEY") ?? "");
+    const key = decodeBackupKey(
+      this.config.get<string>("BACKUP_ENCRYPTION_KEY") ?? "",
+    );
     const databaseUrl = this.config.get<string>("DATABASE_URL") ?? "";
-    if (!databaseUrl) throw new Error("DATABASE_URL is required for database backups.");
+    if (!databaseUrl)
+      throw new Error("DATABASE_URL is required for database backups.");
     return {
       directory,
       key,
@@ -1551,9 +1610,18 @@ export class BackupsService {
       databaseUrl,
       driveEnabled: this.config.get<boolean>("GOOGLE_DRIVE_ENABLED", false),
       retention: {
-        maxBackups: positiveInteger(this.config.get("BACKUP_RETENTION_MAX_COUNT"), 30),
-        maxAgeDays: positiveInteger(this.config.get("BACKUP_RETENTION_MAX_AGE_DAYS"), 90),
-        minBackups: positiveInteger(this.config.get("BACKUP_RETENTION_MIN_COUNT"), 3),
+        maxBackups: positiveInteger(
+          this.config.get("BACKUP_RETENTION_MAX_COUNT"),
+          30,
+        ),
+        maxAgeDays: positiveInteger(
+          this.config.get("BACKUP_RETENTION_MAX_AGE_DAYS"),
+          90,
+        ),
+        minBackups: positiveInteger(
+          this.config.get("BACKUP_RETENTION_MIN_COUNT"),
+          3,
+        ),
         dailyBackups: positiveInteger(
           this.config.get("BACKUP_DAILY_RETENTION"),
           14,
@@ -1570,11 +1638,19 @@ export class BackupsService {
     };
   }
 
-  private async findRecord(directory: string, key: Buffer, id: string): Promise<BackupRecord> {
+  private async findRecord(
+    directory: string,
+    key: Buffer,
+    id: string,
+  ): Promise<BackupRecord> {
     if (!BACKUP_ID_PATTERN.test(id)) throw new Error("Backup id is invalid.");
     const manifestPath = join(directory, `${id}.manifest.json`);
     const manifest = await this.manifests.load(manifestPath, key);
-    return { manifest, manifestPath, artifactPath: join(directory, manifest.artifact.fileName) };
+    return {
+      manifest,
+      manifestPath,
+      artifactPath: join(directory, manifest.artifact.fileName),
+    };
   }
 
   private async restoreLegacyBackup(
@@ -1710,23 +1786,14 @@ export class BackupsService {
     };
   }
 
-  private async recordCounts() {
-    const [users, campuses, attendanceRecords, issues, auditLogs, files] =
-      await Promise.all([
-        this.prisma.user.count(),
-        this.prisma.campus.count(),
-        this.prisma.attendanceRecord.count(),
-        this.prisma.issue.count(),
-        this.prisma.auditLog.count(),
-        this.prisma.fileRecord.count(),
-      ]);
-    return { users, campuses, attendanceRecords, issues, auditLogs, files };
+  private async recordCounts(databaseUrl: string) {
+    return this.postgres.tableRecordCounts(databaseUrl);
   }
 
   private async schemaVersion(): Promise<string | null> {
     const migrations = await this.prisma.$queryRaw<
       Array<{ migration_name: string }>
-    >`SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1`;
+    >`SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY finished_at DESC LIMIT 1`;
     return migrations[0]?.migration_name ?? null;
   }
 
@@ -1745,7 +1812,10 @@ export class BackupsService {
   }
 
   private newId(): string {
-    const timestamp = new Date().toISOString().replace(/[-:]/gu, "").replace(/\.\d{3}Z$/u, "Z");
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[-:]/gu, "")
+      .replace(/\.\d{3}Z$/u, "Z");
     return `backup-${timestamp}-${randomBytes(6).toString("hex")}`;
   }
 }

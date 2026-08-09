@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 22+ and npm 10+, or the supplied non-root Node 24 Alpine images.
+- Node.js 22 LTS and npm 10+, or the supplied non-root Node 22 Alpine images.
 - PostgreSQL 17+ with backups and a restricted application identity.
 - Persistent Redis configured for queues and suitable eviction policy.
 - A private S3-compatible bucket with lifecycle/retention policy.
@@ -27,7 +27,7 @@ docker compose -f docker-compose.yml -f docker-compose.production.yml --profile 
 docker compose -f docker-compose.yml -f docker-compose.production.yml --profile full run --rm api npm run prisma:deploy -w @college/api
 ```
 
-7. Start the stack and verify `/api/v1/health/ready/dependencies`; it returns only minimal orchestrator readiness and checks PostgreSQL, Redis, and object storage. Authenticated operators with `system.health` can inspect component detail at `/api/v1/health/ready` and `/admin/operations`. The Compose API healthcheck uses the configured `API_PREFIX`, not a hardcoded route.
+7. Start the stack and verify `/health/ready/dependencies`; it returns only minimal orchestrator readiness and checks PostgreSQL, Redis, and object storage. Authenticated operators with `system.health` can inspect component detail at `/health/ready` and `/admin/operations`. Health routes intentionally live outside the configured `API_PREFIX`, and the Compose API healthcheck uses that canonical root route.
 8. Run smoke/Playwright checks for login and session rotation, authorization negatives, attendance submission/correction, issue routing/files/lifecycle, messaging/files/moderation, imports/jobs, and provider-disabled behavior before shifting traffic.
 9. Run a restore drill against an isolated database and verify row counts and `_prisma_migrations`.
 

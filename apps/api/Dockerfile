@@ -1,4 +1,4 @@
-FROM node:24-alpine AS dependencies
+FROM node:22-alpine AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
@@ -9,7 +9,8 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --no-audit --no-fund \
     --fetch-retries=5 \
     --fetch-retry-mintimeout=20000 \
-    --fetch-retry-maxtimeout=120000
+    --fetch-retry-maxtimeout=120000 \
+    && npm ls --all
 
 FROM dependencies AS production-dependencies
 RUN npm prune --omit=dev --ignore-scripts
@@ -22,7 +23,7 @@ ENV NODE_OPTIONS=--max-old-space-size=3072
 COPY . .
 RUN npm run prisma:generate && npm run build -w @college/shared-types && npm run build -w @college/validation && npm run build -w @college/api
 
-FROM node:24-alpine AS runtime
+FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 

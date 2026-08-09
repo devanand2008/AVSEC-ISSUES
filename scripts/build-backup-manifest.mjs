@@ -21,6 +21,16 @@ const files = await Promise.all(
   })),
 );
 const tableCounts = parseJson(process.env.BACKUP_TABLE_COUNTS_JSON, {});
+const backupType = allowedValue(
+  process.env.BACKUP_TYPE ?? "DAILY",
+  ["DAILY", "PRE_MIGRATION"],
+  "BACKUP_TYPE",
+);
+const backupStatus = allowedValue(
+  process.env.BACKUP_STATUS ?? "COMPLETED",
+  ["COMPLETED", "RESTORE_TESTED"],
+  "BACKUP_STATUS",
+);
 const manifest = {
   backupId: process.env.BACKUP_ID,
   backupDate: new Intl.DateTimeFormat("en-CA", {
@@ -51,9 +61,11 @@ const manifest = {
   tableCounts,
   sqlFormat: "PLAIN",
   encryption: "AES-256-GCM",
-  backupStatus: "COMPLETED",
+  backupType,
+  backupStatus,
   uploadStatus: "READY_FOR_UPLOAD",
-  restoreTestStatus: "NOT_TESTED",
+  restoreTestStatus:
+    backupStatus === "RESTORE_TESTED" ? "PASSED" : "NOT_TESTED",
 };
 await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, {
   flag: "wx",
@@ -73,4 +85,9 @@ function parseJson(value, fallback) {
     throw new Error("BACKUP_TABLE_COUNTS_JSON is invalid.");
   }
   return parsed;
+}
+
+function allowedValue(value, allowed, name) {
+  if (!allowed.includes(value)) throw new Error(`${name} is invalid.`);
+  return value;
 }

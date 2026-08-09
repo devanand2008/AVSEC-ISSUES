@@ -5,7 +5,10 @@ import { config } from "dotenv";
 
 config({ path: resolve(process.cwd(), ".env") });
 
-const adminEmail = (process.env.DEVELOPMENT_ADMIN_EMAIL ?? "deva1253@college.com").toLowerCase();
+const adminEmail = process.env.DEVELOPMENT_ADMIN_EMAIL?.toLowerCase();
+if (!adminEmail) {
+  throw new Error("DEVELOPMENT_ADMIN_EMAIL is required for cleanup.");
+}
 const collegeCode = process.env.DEVELOPMENT_COLLEGE_CODE ?? "6201";
 const postgresDb = process.env.POSTGRES_DB || "college_management";
 const postgresUser = process.env.POSTGRES_USER || "college_app";

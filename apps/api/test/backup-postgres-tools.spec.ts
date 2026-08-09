@@ -5,6 +5,7 @@ import type { SafeProcessRunner } from "../src/modules/backups/safe-process-runn
 class MockExecutor implements CommandExecutor {
   readonly commands: SafeCommand[] = [];
   failExecutable?: SafeCommand["executable"];
+  restoredAuditLogCount = 873;
 
   async run(command: SafeCommand): Promise<CommandResult> {
     this.commands.push(command);
@@ -13,11 +14,18 @@ class MockExecutor implements CommandExecutor {
     }
     if (command.executable === "psql") {
       const sql = command.args.at(-1) ?? "";
+      const database = command.args[command.args.indexOf("--dbname") + 1] ?? "";
       return {
         exitCode: 0,
-        stdout: sql.includes("json_build_object")
-          ? '{"users":40,"migrations":39}\n'
-          : "audit_logs\nusers\n",
+        stdout: sql.includes("json_object_agg")
+          ? JSON.stringify({
+              _prisma_migrations: 39,
+              audit_logs: database.startsWith("avs_backup_verify_")
+                ? this.restoredAuditLogCount
+                : 873,
+              users: 40,
+            }) + "\n"
+          : "_prisma_migrations\naudit_logs\nusers\n",
         stderr: "",
       };
     }
@@ -56,7 +64,7 @@ describe("PostgresToolsService command boundaries", () => {
       ),
     ).resolves.toMatchObject({
       recordCountComparison: { matches: true },
-      schemaComparison: { matches: true, sourceTableCount: 2 },
+      schemaComparison: { matches: true, sourceTableCount: 3 },
     });
 
     expect(executor.commands.map(({ executable }) => executable)).toEqual([
@@ -141,6 +149,44 @@ describe("PostgresToolsService command boundaries", () => {
       "psql",
       "createdb",
       "pg_restore",
+      "dropdb",
+    ]);
+  });
+
+  it("rejects a restore when any public table count differs", async () => {
+    const executor = new MockExecutor();
+    executor.restoredAuditLogCount = 872;
+    const service = new PostgresToolsService(
+      executor as unknown as SafeProcessRunner,
+    );
+
+    await expect(
+      service.restoreAndVerifyInTemporaryDatabase(
+        databaseUrl,
+        "C:\\safe\\backup.dump",
+      ),
+    ).rejects.toThrow("did not match the source schema and record counts");
+    expect(executor.commands.at(-1)).toMatchObject({ executable: "dropdb" });
+  });
+
+  it("uses the backup-time count manifest instead of mutable source counts", async () => {
+    const executor = new MockExecutor();
+    const service = new PostgresToolsService(
+      executor as unknown as SafeProcessRunner,
+    );
+
+    await expect(
+      service.restoreAndVerifyInTemporaryDatabase(
+        databaseUrl,
+        "C:\\safe\\backup.dump",
+        { _prisma_migrations: 39, audit_logs: 873, users: 40 },
+      ),
+    ).resolves.toMatchObject({ recordCountComparison: { matches: true } });
+    expect(executor.commands.map(({ executable }) => executable)).toEqual([
+      "createdb",
+      "pg_restore",
+      "psql",
+      "psql",
       "dropdb",
     ]);
   });

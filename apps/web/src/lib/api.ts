@@ -18,6 +18,26 @@ function apiUrl(): string {
   return resolveRuntimeUrl(CONFIGURED_API_URL);
 }
 
+export function resolveApiRequestUrl(base: string, path: string): string {
+  if (path === "/health" || path.startsWith("/health/")) {
+    if (base.startsWith("/")) return path;
+    try {
+      const url = new URL(base);
+      url.pathname = path;
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    } catch {
+      return path;
+    }
+  }
+  return `${base}${path}`;
+}
+
+function requestUrl(path: string): string {
+  return resolveApiRequestUrl(apiUrl(), path);
+}
+
 export function apiEventUrl(path: string): string {
   return `${apiUrl()}${path}`;
 }
@@ -112,17 +132,7 @@ async function fetchWithTimeout(
 }
 
 function healthUrl(check: "live" | "ready"): string {
-  const base = apiUrl();
-  if (base.startsWith("/")) return `/health/${check}`;
-  try {
-    const url = new URL(base);
-    url.pathname = `/health/${check}`;
-    url.search = "";
-    url.hash = "";
-    return url.toString();
-  } catch {
-    return `/health/${check}`;
-  }
+  return requestUrl(`/health/${check}`);
 }
 
 async function warmApi(): Promise<void> {
@@ -167,7 +177,7 @@ async function request<T>(
     if (csrf) headers.set("x-csrf-token", decodeURIComponent(csrf));
   }
   const response = await fetchWithTimeout(
-    `${apiUrl()}${path}`,
+    requestUrl(path),
     {
       ...init,
       headers,
@@ -223,7 +233,7 @@ async function request<T>(
 
 async function requestBlob(path: string, retry = true): Promise<Blob> {
   const response = await fetchWithTimeout(
-    `${apiUrl()}${path}`,
+    requestUrl(path),
     {
       credentials: "include",
     },
@@ -263,6 +273,8 @@ async function requestBlob(path: string, retry = true): Promise<Blob> {
 
 export const api = {
   warmup: warmApi,
+  health: <T>(check: "live" | "ready", init?: RequestInit) =>
+    request<T>(`/health/${check}`, init),
   get: <T>(path: string, init?: RequestInit) => request<T>(path, init),
   post: <T>(
     path: string,

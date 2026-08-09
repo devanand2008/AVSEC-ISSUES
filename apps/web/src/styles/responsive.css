@@ -166,10 +166,3 @@
 @media (min-width: 768px) {
   .avs-bottom-nav { display: none; }
 }
-
-/* ── Safe area for bottom nav content padding ── */
-@media (max-width: 767px) {
-  .main-with-bottom-nav {
-    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px) + var(--space-4));
-  }
-}

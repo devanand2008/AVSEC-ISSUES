@@ -291,4 +291,14 @@ describe("UsersService — Permanent Deletion", () => {
     }, "req-002");
     expect(result.success).toBe(true);
   });
+
+  it("should accept the public-user-bound confirmation phrase", async () => {
+    prisma.user.findFirst.mockResolvedValue(mockStudent);
+    const result = await service.deletePermanently(mockAdmin, mockStudent.publicId, {
+      reason: "Duplicate test account",
+      confirmationPhrase: `DELETE USER ${mockStudent.publicId}`,
+      backupReference: "backup-verified-003",
+    }, "req-003");
+    expect(result.success).toBe(true);
+  });
 });

@@ -119,8 +119,8 @@ export interface CommandExecutor {
 export interface RestoreVerificationResult {
   temporaryDatabaseHash: string;
   recordCountComparison: {
-    source: { users: number; migrations: number };
-    restored: { users: number; migrations: number };
+    source: Record<string, number>;
+    restored: Record<string, number>;
     matches: boolean;
   };
   schemaComparison: {

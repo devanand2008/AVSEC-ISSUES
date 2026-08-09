@@ -397,7 +397,7 @@ export class UsersService {
     const result = await this.prisma.$transaction(async (tx) => {
       let membership: { sectionId: string; academicYearId: string } | undefined;
       if (input.studentProfile) {
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${input.studentProfile.sectionId}))`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.studentProfile.sectionId}))`;
         const section = await tx.section.findFirst({
           where: { id: input.studentProfile.sectionId, isActive: true, archivedAt: null },
           select: { id: true, capacity: true, semester: { select: { academicYearId: true } } },
@@ -1216,10 +1216,11 @@ export class UsersService {
     }
 
     // 3. Verify confirmation phrase
-    const expectedPhrase = `DELETE STUDENT ${target.collegeIdentityId}`;
-    const altPhrase = `PERMANENTLY DELETE USER`;
-    if (input.confirmationPhrase !== expectedPhrase && input.confirmationPhrase !== altPhrase) {
-      throw new BadRequestException(`Incorrect confirmation phrase. Expected: "${expectedPhrase}"`);
+    const expectedStudentPhrase = `DELETE STUDENT ${target.collegeIdentityId}`;
+    const expectedUserPhrase = `DELETE USER ${target.publicId}`;
+    const altPhrase = "PERMANENTLY DELETE USER";
+    if (![expectedStudentPhrase, expectedUserPhrase, altPhrase].includes(input.confirmationPhrase)) {
+      throw new BadRequestException(`Incorrect confirmation phrase. Expected: "${expectedStudentPhrase}"`);
     }
 
     // 4. Verify backup reference

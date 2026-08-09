@@ -22,6 +22,15 @@ describe("safe management compatibility", () => {
     expect(await validate(dto)).toHaveLength(0);
   });
 
+  it("accepts the student-bound phrase submitted by the People UI", async () => {
+    const dto = plainToInstance(DeleteUserDto, {
+      confirmationPhrase: "DELETE STUDENT AVS-TEST-001",
+      backupReference: "BACKUP-2026-08-09",
+      reason: "Remove the production acceptance account",
+    });
+    expect(await validate(dto)).toHaveLength(0);
+  });
+
   it("rejects an uncontrolled permanent deletion phrase", async () => {
     const dto = plainToInstance(DeleteUserDto, {
       confirmationPhrase: "DELETE EVERYONE",

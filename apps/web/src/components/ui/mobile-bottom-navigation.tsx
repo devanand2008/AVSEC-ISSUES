@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   BookOpen,
   ClipboardCheck,
@@ -14,7 +14,11 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
-import { getMobileBottomNav, type BottomNavItem } from "@/components/navigation";
+import {
+  getMobileBottomNav,
+  isMobileNavigationItemActive,
+  type BottomNavItem,
+} from "@/components/navigation";
 import { useAuth } from "@/providers/auth-provider";
 
 const iconMap: Record<BottomNavItem["iconName"], LucideIcon> = {
@@ -32,6 +36,7 @@ const iconMap: Record<BottomNavItem["iconName"], LucideIcon> = {
 
 export function MobileBottomNavigation() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
 
   if (!user) return null;
@@ -41,13 +46,17 @@ export function MobileBottomNavigation() {
     return null;
   }
 
-  const items = getMobileBottomNav(user.roles);
+  const items = getMobileBottomNav(user.roles, user.permissions);
 
   return (
     <nav className="avs-bottom-nav" aria-label="Mobile bottom navigation">
       {items.map((item) => {
         const Icon = iconMap[item.iconName] ?? Gauge;
-        const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
+        const isActive = isMobileNavigationItemActive(
+          item.href,
+          pathname,
+          searchParams,
+        );
 
         return (
           <Link

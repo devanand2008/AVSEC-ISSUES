@@ -1,4 +1,9 @@
-import { ApiNetworkError, api, idempotencyKey } from "./api";
+import {
+  ApiNetworkError,
+  api,
+  idempotencyKey,
+  resolveApiRequestUrl,
+} from "./api";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
@@ -18,6 +23,23 @@ describe("idempotencyKey", () => {
     const second = idempotencyKey();
     expect(first.length).toBeGreaterThan(10);
     expect(second).not.toBe(first);
+  });
+});
+
+describe("resolveApiRequestUrl", () => {
+  it("routes health outside both relative and absolute API prefixes", () => {
+    expect(resolveApiRequestUrl("/api/v1", "/health/ready")).toBe(
+      "/health/ready",
+    );
+    expect(
+      resolveApiRequestUrl("http://localhost:4000/api/v1", "/health/ready"),
+    ).toBe("http://localhost:4000/health/ready");
+  });
+
+  it("keeps business endpoints under the configured API prefix", () => {
+    expect(resolveApiRequestUrl("/api/v1", "/auth/login")).toBe(
+      "/api/v1/auth/login",
+    );
   });
 });
 
@@ -103,6 +125,17 @@ describe("automatic session refresh", () => {
       "/health/live",
       "/health/ready",
     ]);
+  });
+
+  it("keeps operations health requests outside the versioned API prefix", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ status: "ready", components: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.health("ready");
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/health/ready");
   });
 
   it("retains the server request ID on API errors", async () => {

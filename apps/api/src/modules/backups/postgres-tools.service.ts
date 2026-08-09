@@ -18,8 +18,23 @@ interface PostgreSqlConnection {
 const TEMPORARY_DATABASE_PATTERN = /^avs_backup_verify_[a-z0-9_]{12,64}$/;
 const TABLE_INVENTORY_SQL =
   "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename";
-const RECORD_COUNTS_SQL =
-  "SELECT json_build_object('users', (SELECT count(*) FROM users), 'migrations', (SELECT count(*) FROM _prisma_migrations))::text";
+
+function quotePostgreSqlIdentifier(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function quotePostgreSqlLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function recordCountsSql(tables: string[]): string {
+  if (tables.length === 0) return "SELECT '{}'::json::text";
+  const tableQueries = tables.map(
+    (table) =>
+      `SELECT ${quotePostgreSqlLiteral(table)} AS table_name, count(*)::bigint AS row_count FROM public.${quotePostgreSqlIdentifier(table)}`,
+  );
+  return `SELECT json_object_agg(table_name, row_count ORDER BY table_name)::text FROM (${tableQueries.join(" UNION ALL ")}) AS table_counts`;
+}
 
 export function parsePostgreSqlConnection(databaseUrl: string): PostgreSqlConnection {
   let url: URL;
@@ -94,6 +109,18 @@ function assertTemporaryDatabaseName(database: string): void {
 @Injectable()
 export class PostgresToolsService {
   constructor(private readonly executor: SafeProcessRunner) {}
+
+  async tableRecordCounts(
+    databaseUrl: string,
+  ): Promise<Record<string, number>> {
+    const connection = parsePostgreSqlConnection(databaseUrl);
+    const tables = await this.queryLines(
+      connection,
+      connection.database,
+      TABLE_INVENTORY_SQL,
+    );
+    return this.queryCounts(connection, connection.database, tables);
+  }
 
   async dump(databaseUrl: string, outputPath: string): Promise<void> {
     const connection = parsePostgreSqlConnection(databaseUrl);
@@ -194,6 +221,7 @@ export class PostgresToolsService {
   async restoreAndVerifyInTemporaryDatabase(
     databaseUrl: string,
     dumpPath: string,
+    expectedRecordCounts?: Record<string, number>,
   ): Promise<RestoreVerificationResult> {
     const connection = parsePostgreSqlConnection(databaseUrl);
     const temporaryDatabase = `avs_backup_verify_${Date.now().toString(36)}_${randomBytes(6).toString("hex")}`;
@@ -206,15 +234,9 @@ export class PostgresToolsService {
     let failure: unknown;
     let verification: RestoreVerificationResult | undefined;
     try {
-      const sourceTables = await this.queryLines(
-        connection,
-        connection.database,
-        TABLE_INVENTORY_SQL,
-      );
-      const sourceCounts = await this.queryCounts(
-        connection,
-        connection.database,
-      );
+      const sourceCounts =
+        expectedRecordCounts ?? (await this.tableRecordCounts(databaseUrl));
+      const sourceTables = Object.keys(sourceCounts).sort();
       await this.expectSuccess(command("createdb", [
         ...connectionArgs(connection),
         "--maintenance-db", "postgres",
@@ -233,21 +255,27 @@ export class PostgresToolsService {
         dumpPath,
       ], connection, 30 * 60 * 1000));
 
-      const restoredTables = await this.queryLines(
-        connection,
-        temporaryDatabase,
-        TABLE_INVENTORY_SQL,
-      );
+      const restoredTables = (
+        await this.queryLines(
+          connection,
+          temporaryDatabase,
+          TABLE_INVENTORY_SQL,
+        )
+      ).sort();
       const restoredCounts = await this.queryCounts(
         connection,
         temporaryDatabase,
+        restoredTables,
       );
       const schemaMatches =
         sourceTables.length === restoredTables.length &&
         sourceTables.every((table, index) => table === restoredTables[index]);
       const recordCountsMatch =
-        sourceCounts.users === restoredCounts.users &&
-        sourceCounts.migrations === restoredCounts.migrations;
+        sourceTables.length === Object.keys(sourceCounts).length &&
+        restoredTables.length === Object.keys(restoredCounts).length &&
+        sourceTables.every(
+          (table) => sourceCounts[table] === restoredCounts[table],
+        );
       if (!schemaMatches || !recordCountsMatch) {
         throw new Error(
           "Temporary restore database did not match the source schema and record counts.",
@@ -296,6 +324,7 @@ export class PostgresToolsService {
   async restorePlainAndVerifyInTemporaryDatabase(
     databaseUrl: string,
     sqlPath: string,
+    expectedRecordCounts?: Record<string, number>,
   ): Promise<RestoreVerificationResult> {
     const connection = parsePostgreSqlConnection(databaseUrl);
     const temporaryDatabase = `avs_backup_verify_${Date.now().toString(36)}_${randomBytes(6).toString("hex")}`;
@@ -310,15 +339,9 @@ export class PostgresToolsService {
     let failure: unknown;
     let verification: RestoreVerificationResult | undefined;
     try {
-      const sourceTables = await this.queryLines(
-        connection,
-        connection.database,
-        TABLE_INVENTORY_SQL,
-      );
-      const sourceCounts = await this.queryCounts(
-        connection,
-        connection.database,
-      );
+      const sourceCounts =
+        expectedRecordCounts ?? (await this.tableRecordCounts(databaseUrl));
+      const sourceTables = Object.keys(sourceCounts).sort();
       await this.expectSuccess(
         command(
           "createdb",
@@ -351,21 +374,27 @@ export class PostgresToolsService {
           30 * 60 * 1000,
         ),
       );
-      const restoredTables = await this.queryLines(
-        connection,
-        temporaryDatabase,
-        TABLE_INVENTORY_SQL,
-      );
+      const restoredTables = (
+        await this.queryLines(
+          connection,
+          temporaryDatabase,
+          TABLE_INVENTORY_SQL,
+        )
+      ).sort();
       const restoredCounts = await this.queryCounts(
         connection,
         temporaryDatabase,
+        restoredTables,
       );
       const schemaMatches =
         sourceTables.length === restoredTables.length &&
         sourceTables.every((table, index) => table === restoredTables[index]);
       const recordCountsMatch =
-        sourceCounts.users === restoredCounts.users &&
-        sourceCounts.migrations === restoredCounts.migrations;
+        sourceTables.length === Object.keys(sourceCounts).length &&
+        restoredTables.length === Object.keys(restoredCounts).length &&
+        sourceTables.every(
+          (table) => sourceCounts[table] === restoredCounts[table],
+        );
       if (!schemaMatches || !recordCountsMatch) {
         throw new Error(
           "Temporary restore database did not match the source schema and record counts.",
@@ -453,8 +482,13 @@ export class PostgresToolsService {
   private async queryCounts(
     connection: PostgreSqlConnection,
     database: string,
-  ): Promise<{ users: number; migrations: number }> {
-    const lines = await this.queryLines(connection, database, RECORD_COUNTS_SQL);
+    tables: string[],
+  ): Promise<Record<string, number>> {
+    const lines = await this.queryLines(
+      connection,
+      database,
+      recordCountsSql(tables),
+    );
     if (lines.length !== 1) {
       throw new Error("Database record-count verification returned invalid data.");
     }
@@ -467,18 +501,20 @@ export class PostgresToolsService {
     if (
       !value ||
       typeof value !== "object" ||
-      !("users" in value) ||
-      !("migrations" in value) ||
-      typeof value.users !== "number" ||
-      typeof value.migrations !== "number" ||
-      !Number.isSafeInteger(value.users) ||
-      !Number.isSafeInteger(value.migrations) ||
-      value.users < 0 ||
-      value.migrations < 0
+      Array.isArray(value) ||
+      Object.keys(value).length !== tables.length ||
+      tables.some((table) => {
+        const count = (value as Record<string, unknown>)[table];
+        return (
+          typeof count !== "number" ||
+          !Number.isSafeInteger(count) ||
+          count < 0
+        );
+      })
     ) {
       throw new Error("Database record-count verification returned invalid data.");
     }
-    return { users: value.users, migrations: value.migrations };
+    return value as Record<string, number>;
   }
 
   private async expectSuccess(commandToRun: SafeCommand): Promise<void> {

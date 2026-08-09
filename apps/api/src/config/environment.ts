@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 const booleanString = (defaultValue = false) =>
@@ -43,8 +44,11 @@ const knownExampleSecrets = new Set([
   "change-this-local-password",
   "change-this-minio-password",
   "ChangeMe-OnlyFor-Local-2026!",
-  "deva1253",
   "minioadmin",
+]);
+const knownExampleSecretHashes = new Set([
+  // Retain detection for a rotated historical example without keeping it in plaintext.
+  "facd572bb2c202afe81a3a14a09f9337a3dd11949fd7c69aa0b855eddd732aab",
 ]);
 
 export const environmentSchema = z
@@ -443,6 +447,9 @@ export const environmentSchema = z
       if (
         value &&
         (knownExampleSecrets.has(value) ||
+          knownExampleSecretHashes.has(
+            createHash("sha256").update(value).digest("hex"),
+          ) ||
           /(?:replace-with|change-this|only-for-local)/i.test(value))
       ) {
         context.addIssue({

@@ -24,7 +24,6 @@ const FEEDBACK_TOKEN = /^FB_[A-Za-z0-9_-]{16,160}$/;
 const GENERIC_TOKEN = /^QR_[A-Za-z0-9_-]{24,160}$/;
 const APPROVED_PATH_PREFIXES = [
   "/report-issue",
-  "/locations/rooms/qr",
   "/qr/scan",
   "/scan-qr",
   "/student/feedback/target",

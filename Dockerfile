@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS dependencies
+FROM node:22-bookworm-slim AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
@@ -6,7 +6,8 @@ COPY apps/web/package.json apps/web/package.json
 COPY packages/shared-types/package.json packages/shared-types/package.json
 COPY packages/validation/package.json packages/validation/package.json
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --include=dev --no-audit --no-fund
+    npm ci --include=dev --no-audit --no-fund \
+    && npm ls --all
 
 FROM dependencies AS build
 WORKDIR /app
@@ -22,7 +23,8 @@ RUN npm run build -w @college/shared-types \
     && npm run build -w @college/api \
     && npm run build -w @college/web
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:22-bookworm-slim AS runtime
+ARG POSTGRES_CLIENT_MAJOR=17
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV API_INTERNAL_PORT=4000
@@ -30,7 +32,17 @@ ENV WEB_INTERNAL_PORT=3000
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates openssl postgresql-client tini \
+    && apt-get install -y --no-install-recommends ca-certificates curl openssl tini \
+    && install -d -m 0755 /usr/share/postgresql-common/pgdg \
+    && curl --fail --silent --show-error --location \
+      https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends "postgresql-client-${POSTGRES_CLIENT_MAJOR}" \
+    && pg_dump --version | grep -Eq '^pg_dump \(PostgreSQL\) (1[7-9]|[2-9][0-9])\.' \
+    && psql --version | grep -Eq '^psql \(PostgreSQL\) (1[7-9]|[2-9][0-9])\.' \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /app/backups \
     && chown -R node:node /app

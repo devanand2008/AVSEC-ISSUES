@@ -32,10 +32,9 @@ describe("storage dashboard helpers", () => {
       id: "older",
       createdAt: "2026-07-28T08:00:00.000Z",
     };
-    expect(backupRecords({ data: [older, backup] }).map((item) => item.id)).toEqual([
-      backup.id,
-      older.id,
-    ]);
+    expect(
+      backupRecords({ data: [older, backup] }).map((item) => item.id),
+    ).toEqual([backup.id, older.id]);
     expect(backupRecords({ items: [backup] })).toEqual([backup]);
     expect(backupRecords({ backups: [backup] })).toEqual([backup]);
   });
@@ -125,13 +124,50 @@ describe("storage dashboard states", () => {
     ).toBeEnabled();
   });
 
-  it("summarizes connection, backup, and restore-test health", () => {
+  it("does not offer in-app recovery actions for external backup metadata", () => {
+    const onRestoreTest = vi.fn();
     render(
-      <StorageSnapshot
-        drive={{ connected: true }}
-        backups={[backup]}
+      <BackupPanel
+        backups={[
+          {
+            ...backup,
+            recoveryMode: "EXTERNAL_MANUAL",
+            inAppRecoveryAvailable: false,
+            googleDriveStatus: "EXTERNAL",
+          },
+        ]}
+        connected
+        canManage
+        backingUp={false}
+        testingRestore={false}
+        onBackup={vi.fn()}
+        onRestoreTest={onRestoreTest}
+        onVerify={vi.fn()}
+        onDownloadSchema={vi.fn()}
+        onDelete={vi.fn()}
       />,
     );
+
+    expect(
+      screen.getByRole("button", { name: "Test latest restore" }),
+    ).toBeDisabled();
+    expect(screen.getByText(/manual recovery only/i)).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Verify" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Schema SQL" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Manifest" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Delete eligible" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("summarizes connection, backup, and restore-test health", () => {
+    render(<StorageSnapshot drive={{ connected: true }} backups={[backup]} />);
     const summary = within(
       screen.getByRole("region", { name: "Storage status summary" }),
     );

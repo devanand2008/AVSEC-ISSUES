@@ -7,8 +7,32 @@ interface PortalRouteRule {
 
 const adminRoles = ["SUPER_ADMIN", "MAIN_ADMIN"] as const;
 const studentRoles = ["STUDENT", "CLASS_REPRESENTATIVE"] as const;
+const bulkImportPermissions = [
+  "users.import",
+  "locations.import",
+  "assets.import",
+  "academic.manage",
+  "attendance.import",
+  "routing.manage",
+] as const;
 
 const portalRouteRules: readonly PortalRouteRule[] = [
+  {
+    prefix: "/admin/people",
+    any: ["users.read"],
+  },
+  {
+    prefix: "/admin/users",
+    any: ["users.read"],
+  },
+  {
+    prefix: "/admin/imports",
+    any: bulkImportPermissions,
+  },
+  {
+    prefix: "/admin/exports",
+    any: ["attendance.export", "issues.export"],
+  },
   {
     prefix: "/settings/storage",
     any: ["settings.read", "integrations.manage", "backups.manage"],

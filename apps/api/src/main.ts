@@ -8,7 +8,10 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { Logger } from "nestjs-pino";
 import { AppModule } from "./app.module";
-import { isAllowedOriginFromConfig } from "./common/http/allowed-origins";
+import {
+  createCorsOriginGuard,
+  isAllowedOriginFromConfig,
+} from "./common/http/allowed-origins";
 import { SerializationInterceptor } from "./common/http/serialization.interceptor";
 import { RedisIoAdapter } from "./common/realtime/redis-io.adapter";
 
@@ -69,6 +72,7 @@ async function bootstrap(): Promise<void> {
       crossOriginResourcePolicy: { policy: "same-site" },
     }),
   );
+  app.use(createCorsOriginGuard(config));
   app.enableCors({
     origin: (
       origin: string | undefined,
@@ -78,7 +82,7 @@ async function bootstrap(): Promise<void> {
         callback(null, true);
         return;
       }
-      callback(new Error("Request origin is not allowed."), false);
+      callback(null, false);
     },
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

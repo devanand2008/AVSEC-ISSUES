@@ -245,7 +245,7 @@ export default function CreatePersonPage() {
         title="Add Person"
         description="Create a secure account, assign roles, and limit access to the correct college scope."
         breadcrumbs={[
-          { label: "Admin", href: "/admin" },
+          { label: "Dashboard", href: "/" },
           { label: "People", href: "/admin/people" },
           { label: "Add Person" },
         ]}

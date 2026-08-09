@@ -752,7 +752,7 @@ tbody tr:hover {
     height: 46px;
     padding-inline: 13px;
   }
-  body:has(.bottom-nav) .pwa-install-button {
+  body:has(.avs-bottom-nav) .pwa-install-button {
     bottom: calc(78px + env(safe-area-inset-bottom));
   }
   .pwa-install-scrim {
@@ -765,6 +765,18 @@ tbody tr:hover {
       max(20px, env(safe-area-inset-bottom))
       max(18px, env(safe-area-inset-left));
     border-radius: 18px 18px 0 0;
+  }
+}
+
+@media (max-width: 420px) {
+  body:has(.auth-page) {
+    position: relative;
+  }
+  body:has(.auth-page) .auth-form-wrap {
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+  body:has(.auth-page) .pwa-install-button {
+    position: absolute;
   }
 }
 
@@ -1145,6 +1157,14 @@ tbody tr:hover {
   }
   .profile-button > svg {
     display: none;
+  }
+}
+
+@media (min-width: 701px) and (max-width: 767px) {
+  .content {
+    padding-bottom: calc(
+      56px + env(safe-area-inset-bottom, 0px) + var(--space-4)
+    );
   }
 }
 

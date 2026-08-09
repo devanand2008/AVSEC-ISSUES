@@ -37,8 +37,8 @@ Updated: 19 July 2026
   topbar, and first-login password screens.
 - Updated metadata, manifest, theme color, README, and launch scripts from
   CampusOne-style wording to AVS Engineering College.
-- Changed the development seed to create/update college code `6201`, Main Admin
-  Devanand, email `deva1253@college.com`, and first-login password change.
+- Changed the development seed to configure college code `6201`, the Main Admin
+  identity from protected environment values, and first-login password change.
 - Removed source fallback for the admin password; it now comes from
   `DEVELOPMENT_ADMIN_PASSWORD`.
 - Took a fresh database backup before cleanup and seeding.

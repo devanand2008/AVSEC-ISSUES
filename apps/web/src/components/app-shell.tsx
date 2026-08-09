@@ -4,12 +4,8 @@ import {
   Bell,
   ChevronDown,
   CircleUserRound,
-  ClipboardCheck,
-  FileWarning,
-  Gauge,
   LogOut,
   Menu,
-  QrCode,
   Settings,
   X,
 } from "lucide-react";
@@ -19,7 +15,10 @@ import { useEffect, useState, type ReactNode } from "react";
 import { CollegeBranding, LoadingLogo } from "@/components/college-branding";
 import { useAuth } from "@/providers/auth-provider";
 import { GlobalSearch } from "@/components/global-search";
-import { navigation, visibleNavigation } from "@/components/navigation";
+import {
+  getActiveNavigationHref,
+  visibleNavigation,
+} from "@/components/navigation";
 import { canAccessPortalPath } from "@/lib/portal-route-access";
 import { api, apiEventUrl } from "@/lib/api";
 import {
@@ -113,12 +112,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
     );
   const nav = visibleNavigation(user.permissions, user.roles);
-  const canUseAttendance =
-    navigation
-      .find((item) => item.href === "/attendance")
-      ?.any?.some((permission) => user.permissions.includes(permission)) ??
-    false;
-  const canReportIssue = user.permissions.includes("issues.create");
+  const activeNavigationHref = getActiveNavigationHref(pathname, nav);
   const currentAnnouncement = pendingAnnouncements[0];
   return (
     <div className="app-frame">
@@ -135,10 +129,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
         <nav className="side-nav" aria-label="Main navigation">
           {nav.map((item) => {
-            const active =
-              item.href === "/"
-                ? pathname === "/"
-                : pathname.startsWith(item.href);
+            const active = item.href === activeNavigationHref;
             const Icon = item.icon;
             return (
               <Link
@@ -241,44 +232,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         {user.permissions.includes("ai.use") && pathname !== "/avs-bot" && (
           <AvsBotWidget />
         )}
-        <nav className="bottom-nav" aria-label="Mobile navigation">
-          <Link href="/">
-            <Gauge />
-            <span>Home</span>
-          </Link>
-          {canUseAttendance ? (
-            <Link href="/attendance">
-              <ClipboardCheck />
-              <span>Attendance</span>
-            </Link>
-          ) : (
-            <Link href="/issues">
-              <FileWarning />
-              <span>Issues</span>
-            </Link>
-          )}
-          <Link href="/scan-qr" className="report-tab" aria-label="Scan QR">
-            <span>
-              <QrCode />
-            </span>
-            <small>Scan QR</small>
-          </Link>
-          {canReportIssue ? (
-            <Link href="/report-issue">
-              <FileWarning />
-              <span>Report</span>
-            </Link>
-          ) : (
-            <Link href="/notifications">
-              <Bell />
-              <span>Alerts</span>
-            </Link>
-          )}
-          <Link href="/profile">
-            <CircleUserRound />
-            <span>Profile</span>
-          </Link>
-        </nav>
         <MobileBottomNavigation />
       </div>
 

@@ -6,7 +6,7 @@ Goal: make the existing AVS Engineering College system cleaner, safer, mobile-ac
 ## Completed
 
 1. Audited the existing stack: Next.js web, NestJS API, PostgreSQL, Redis and MinIO.
-2. Preserved the Devanand Main Admin account: `deva1253@college.com`, college code `6201`.
+2. Preserved the configured Main Admin account for college code `6201`; its identity is intentionally omitted.
 3. Created verified database and project backups before destructive cleanup.
 4. Added `scripts/cleanup-demo-data.ts` with dry-run, confirmation, transaction safety and audit logging.
 5. Executed confirmed cleanup against known demo/sample records.

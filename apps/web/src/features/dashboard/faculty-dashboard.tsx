@@ -99,7 +99,7 @@ export function FacultyDashboard() {
                         <small>Record student attendance</small>
                     </div>
                 </Link>
-                <Link href="/learn/manage">
+                <Link href="/academic-learn">
                     <span><BookOpen /></span>
                     <div>
                         <strong>Upload Resource</strong>

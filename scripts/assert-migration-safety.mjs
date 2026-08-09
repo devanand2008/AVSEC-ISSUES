@@ -24,7 +24,9 @@ try {
     "SELECT to_regclass('public._prisma_migrations')::text AS name",
   );
   if (!migrationTable.rows[0]?.name) {
-    process.stdout.write("New database detected; no pre-migration backup is required.\n");
+    process.stdout.write(
+      "New database detected; no pre-migration backup is required.\n",
+    );
     process.exit(0);
   }
   const applied = await client.query(
@@ -46,17 +48,40 @@ try {
   }
   const recent = await client.query(
     `SELECT id FROM database_backups
-     WHERE status IN ('COMPLETED', 'RESTORE_TESTED')
+     WHERE backup_type = 'PRE_MIGRATION'
+       AND status = 'RESTORE_TESTED'
        AND completed_at >= now() - interval '24 hours'
        AND deleted_at IS NULL
+       AND plain_size_bytes > 0
+       AND encrypted_size_bytes > 0
+       AND plain_checksum_sha256 ~ '^[a-f0-9]{64}$'
+       AND encrypted_checksum_sha256 ~ '^[a-f0-9]{64}$'
+       AND manifest_checksum_sha256 ~ '^[a-f0-9]{64}$'
+       AND jsonb_typeof(record_counts) = 'object'
+       AND (SELECT count(*) FROM jsonb_object_keys(record_counts)) = (
+         SELECT count(*)::integer
+         FROM pg_tables
+         WHERE schemaname = 'public'
+       )
+       AND (record_counts ->> '_prisma_migrations')::bigint = (
+         SELECT count(*)
+         FROM "_prisma_migrations"
+       )
+       AND schema_version = (
+         SELECT migration_name
+         FROM "_prisma_migrations"
+         WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL
+         ORDER BY finished_at DESC
+         LIMIT 1
+       )
      ORDER BY completed_at DESC LIMIT 1`,
   );
   if (recent.rowCount !== 1) {
     throw new Error(
-      "Pending migrations require a completed backup from the last 24 hours.",
+      "Pending migrations require a verified pre-migration backup from the last 24 hours. Run the manual backup workflow with purpose=pre-migration, then retry deployment.",
     );
   }
-  process.stdout.write("Recent completed backup confirmed for pending migrations.\n");
+  process.stdout.write("Recent verified pre-migration backup confirmed.\n");
 } finally {
   await client.end().catch(() => undefined);
 }

@@ -17,6 +17,7 @@ import { DependencyDialog, depIcon, type DependencyReport } from "@/components/u
 import { PermanentDeleteDialog } from "@/components/ui/permanent-delete-dialog";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { ErrorState } from "@/components/ui/error-state";
+import { PEOPLE_BACKUPS_ENDPOINT } from "@/features/people/people-api";
 import { api } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -104,7 +105,7 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
 
   const backups = useQuery({
     queryKey: ["backups", "people-deletion"],
-    queryFn: () => api.get<BackupListResponse>("/backups"),
+    queryFn: () => api.get<BackupListResponse>(PEOPLE_BACKUPS_ENDPOINT),
     enabled: canDeletePermanently && canManageBackups,
   });
 

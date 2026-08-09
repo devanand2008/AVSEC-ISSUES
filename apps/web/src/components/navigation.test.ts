@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { visibleNavigation } from "./navigation";
+import {
+  getActiveNavigationHref,
+  getMobileBottomNav,
+  isMobileNavigationItemActive,
+  visibleNavigation,
+} from "./navigation";
 
 describe("visibleNavigation", () => {
   it("shows the newly linked work and administration routes to their exact permissions", () => {
@@ -102,5 +107,125 @@ describe("visibleNavigation", () => {
     expect(
       visibleNavigation(permissions, ["FACULTY"]).map((item) => item.href),
     ).not.toContain("/admin/feedback/targets");
+  });
+
+  it("shows Bulk imports only with a supported import permission", () => {
+    expect(
+      visibleNavigation(["users.read"]).map((item) => item.href),
+    ).not.toContain("/admin/imports");
+    expect(
+      visibleNavigation(["attendance.import"]).map((item) => item.href),
+    ).toContain("/admin/imports");
+  });
+
+  it("selects only the most specific matching sidebar route", () => {
+    const candidates = [
+      { href: "/attendance" },
+      { href: "/attendance/corrections" },
+      { href: "/admin/settings" },
+      { href: "/admin/settings/database-backups" },
+    ];
+
+    expect(
+      getActiveNavigationHref("/attendance/corrections/request-1", candidates),
+    ).toBe("/attendance/corrections");
+    expect(
+      getActiveNavigationHref(
+        "/admin/settings/database-backups",
+        candidates,
+      ),
+    ).toBe("/admin/settings/database-backups");
+    expect(getActiveNavigationHref("/attendance-extra", candidates)).toBeNull();
+  });
+});
+
+describe("getMobileBottomNav", () => {
+  it.each([
+    ["admin", ["MAIN_ADMIN"]],
+    ["maintenance", ["IT_SUPPORT"]],
+    ["general", ["STUDENT"]],
+  ])("uses the real profile page for %s users", (_label, roles) => {
+    const profile = getMobileBottomNav(roles, []).find(
+      (item) => item.label === "Profile",
+    );
+
+    expect(profile?.href).toBe("/profile");
+  });
+
+  it("uses the deployed exports page for the admin Reports tab", () => {
+    const reports = getMobileBottomNav(["MAIN_ADMIN"], ["issues.export"]).find(
+      (item) => item.label === "Reports",
+    );
+
+    expect(reports?.href).toBe("/admin/exports");
+  });
+
+  it.each(["PRINCIPAL", "VICE_PRINCIPAL"])(
+    "does not show an inaccessible People tab to %s",
+    (role) => {
+      const items = getMobileBottomNav([role], [
+        "attendance.export",
+        "issues.export",
+      ]);
+
+      expect(items.map((item) => item.href)).not.toContain("/admin/people");
+    },
+  );
+
+  it("shows People only when the user can read people", () => {
+    expect(
+      getMobileBottomNav(["MAIN_ADMIN"], ["users.read"]).map(
+        (item) => item.href,
+      ),
+    ).toContain("/admin/people");
+    expect(
+      getMobileBottomNav(["MAIN_ADMIN"], []).map((item) => item.href),
+    ).not.toContain("/admin/people");
+  });
+
+  it.each([
+    "MAINTENANCE_ADMIN",
+    "MAINTENANCE_SUPERVISOR",
+    "MAINTENANCE_STAFF",
+    "ELECTRICIAN",
+    "PLUMBER",
+    "IT_SUPPORT",
+    "LAB_TECHNICIAN",
+    "HOUSEKEEPING",
+    "SECURITY",
+    "OTHER_RESPONSIBLE",
+  ])("uses the maintenance tabs for backend role %s", (role) => {
+    expect(getMobileBottomNav([role], [])[0]?.href).toBe("/assigned");
+  });
+
+  it("matches query-based maintenance tabs against the live search params", () => {
+    expect(
+      isMobileNavigationItemActive(
+        "/issues?status=IN_PROGRESS",
+        "/issues",
+        "status=IN_PROGRESS",
+      ),
+    ).toBe(true);
+    expect(
+      isMobileNavigationItemActive(
+        "/issues?status=OVERDUE",
+        "/issues",
+        "status=IN_PROGRESS",
+      ),
+    ).toBe(false);
+    expect(
+      isMobileNavigationItemActive(
+        "/issues?status=OVERDUE",
+        "/issues",
+        "status=OVERDUE&page=2",
+      ),
+    ).toBe(true);
+    expect(
+      isMobileNavigationItemActive(
+        "/issues?status=OVERDUE",
+        "/issues/issue-1",
+        "status=OVERDUE",
+      ),
+    ).toBe(false);
   });
 });

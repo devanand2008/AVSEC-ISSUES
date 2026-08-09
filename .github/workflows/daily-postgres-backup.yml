@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: "30 20 * * *"
   workflow_dispatch:
+    inputs:
+      purpose:
+        description: Backup purpose
+        required: true
+        default: pre-migration
+        type: choice
+        options:
+          - pre-migration
+          - daily
 
 permissions:
   contents: read
@@ -24,6 +33,10 @@ jobs:
       GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
       GOOGLE_DRIVE_BACKUP_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_BACKUP_FOLDER_ID }}
       GOOGLE_DRIVE_OWNER_EMAIL: devanand.s2008@gmail.com
+      BACKUP_ENCRYPTION_KEY_VERSION: "1"
+      BACKUP_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.purpose == 'pre-migration' && 'PRE_MIGRATION' || 'DAILY' }}
+      BACKUP_STATUS: ${{ github.event_name == 'workflow_dispatch' && inputs.purpose == 'pre-migration' && 'RESTORE_TESTED' || 'COMPLETED' }}
+      POSTGRES_CLIENT_MAJOR: "17"
 
     steps:
       - name: Check out repository
@@ -42,10 +55,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error --location \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql-client
-          pg_dump --version
-          psql --version
+          sudo apt-get install -y --no-install-recommends "postgresql-client-${POSTGRES_CLIENT_MAJOR}"
+          pg_dump --version | tee /dev/stderr | grep -Eq "^pg_dump \(PostgreSQL\) ${POSTGRES_CLIENT_MAJOR}\."
+          psql --version | tee /dev/stderr | grep -Eq "^psql \(PostgreSQL\) ${POSTGRES_CLIENT_MAJOR}\."
 
       - name: Create IST artifact names
         id: names
@@ -83,8 +103,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          migration="$(psql "$BACKUP_DATABASE_URL" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=on --command='SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1')"
-          counts="$(psql "$BACKUP_DATABASE_URL" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=on --command="SELECT json_build_object('users',(SELECT count(*) FROM users),'campuses',(SELECT count(*) FROM campuses),'attendanceRecords',(SELECT count(*) FROM attendance_records),'issues',(SELECT count(*) FROM issues),'auditLogs',(SELECT count(*) FROM audit_logs))::text")"
+          migration="$(psql "$BACKUP_DATABASE_URL" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=on --command='SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY finished_at DESC LIMIT 1')"
+          counts="$(psql "$BACKUP_DATABASE_URL" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=on --command="
+            SELECT json_object_agg(tablename, row_count ORDER BY tablename)::text
+            FROM (
+              SELECT
+                tablename,
+                ((xpath(
+                  '/row/row_count/text()',
+                  query_to_xml(
+                    format('SELECT count(*) AS row_count FROM %I.%I', schemaname, tablename),
+                    false,
+                    true,
+                    ''
+                  )
+                ))[1]::text)::bigint AS row_count
+              FROM pg_tables
+              WHERE schemaname = 'public'
+            ) AS table_counts
+          ")"
+          test -n "$migration"
+          node -e "const counts=JSON.parse(process.argv[1]);const values=Object.values(counts);if(!Number.isSafeInteger(counts._prisma_migrations)||values.length<1||values.some((value)=>!Number.isSafeInteger(value)||value<0))process.exit(1)" "$counts"
           echo "PRISMA_MIGRATION_VERSION=$migration" >> "$GITHUB_ENV"
           echo "BACKUP_TABLE_COUNTS_JSON=$counts" >> "$GITHUB_ENV"
 
@@ -113,12 +152,43 @@ jobs:
           grep -Eq 'CREATE (TABLE|SCHEMA)' "$verify_sql"
           rm -f "$verify_gzip" "$verify_sql"
 
+      - name: Verify pre-migration backup with an isolated restore
+        if: env.BACKUP_TYPE == 'PRE_MIGRATION'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-sql-restore.sh "$FULL_ENCRYPTED" "$BACKUP_DATABASE_URL"
+
       - name: Upload privately to Google Drive and verify metadata
         shell: bash
         run: |
           set -euo pipefail
           node scripts/google-drive-backup.mjs "$FULL_ENCRYPTED" "$SCHEMA_SQL" "$CHECKSUM" "$MANIFEST"
-          node -e "const fs=require('fs');fs.writeFileSync(process.env.BACKUP_LOG,JSON.stringify({backupId:process.env.BACKUP_ID,status:'COMPLETED',uploaded:true,verified:true,finishedAt:new Date().toISOString()},null,2)+'\n',{mode:0o600})"
+          node -e "const fs=require('fs');fs.writeFileSync(process.env.BACKUP_LOG,JSON.stringify({backupId:process.env.BACKUP_ID,status:process.env.BACKUP_STATUS,uploaded:true,verified:true,restoreTested:process.env.BACKUP_STATUS==='RESTORE_TESTED',finishedAt:new Date().toISOString()},null,2)+'\n',{mode:0o600})"
+
+      - name: Register verified backup for migration readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          plain_sha256="$(sha256sum "$FULL_SQL" | awk '{print $1}')"
+          encrypted_sha256="$(sha256sum "$FULL_ENCRYPTED" | awk '{print $1}')"
+          manifest_sha256="$(sha256sum "$MANIFEST" | awk '{print $1}')"
+          psql "$BACKUP_DATABASE_URL" \
+            --no-psqlrc \
+            --set ON_ERROR_STOP=on \
+            --set backup_type="$BACKUP_TYPE" \
+            --set backup_status="$BACKUP_STATUS" \
+            --set file_name="$(basename "$FULL_ENCRYPTED")" \
+            --set plain_size="$(stat --format='%s' "$FULL_SQL")" \
+            --set encrypted_size="$(stat --format='%s' "$FULL_ENCRYPTED")" \
+            --set plain_sha256="$plain_sha256" \
+            --set encrypted_sha256="$encrypted_sha256" \
+            --set manifest_sha256="$manifest_sha256" \
+            --set encryption_key_version="$BACKUP_ENCRYPTION_KEY_VERSION" \
+            --set schema_version="$PRISMA_MIGRATION_VERSION" \
+            --set application_commit="$GITHUB_SHA" \
+            --set record_counts="$BACKUP_TABLE_COUNTS_JSON" \
+            --file=scripts/register-external-backup.sql
 
       - name: Delete temporary unencrypted SQL and artifacts
         if: always()

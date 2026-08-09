@@ -108,7 +108,10 @@ export class ArchiveUserDto {
 }
 
 export class DeleteUserDto extends ArchiveUserDto {
-  @ApiProperty() @IsString() @Matches(/^(PERMANENTLY DELETE USER|DELETE USER [0-9a-fA-F-]{36})$/) confirmationPhrase!: string;
+  @ApiProperty()
+  @IsString()
+  @Matches(/^(PERMANENTLY DELETE USER|DELETE USER [0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|DELETE STUDENT [^\r\n]{2,60})$/)
+  confirmationPhrase!: string;
   @ApiProperty() @IsString() @Length(3, 255) backupReference!: string;
 }
 
