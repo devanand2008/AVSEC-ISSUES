@@ -12,4 +12,18 @@ describe("frontend security headers", () => {
     });
     expect(rules?.some((rule) => rule.source === "/sw.js")).toBe(true);
   });
+
+  it("allows private Supabase object images without weakening other CSP directives", async () => {
+    const rules = await nextConfig.headers?.();
+    const catchAll = rules?.find((rule) => rule.source === "/(.*)");
+    const csp = catchAll?.headers.find(
+      (header) => header.key === "Content-Security-Policy",
+    )?.value;
+
+    expect(csp).toContain(
+      "img-src 'self' data: blob: https://*.storage.supabase.co",
+    );
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("frame-ancestors 'none'");
+  });
 });

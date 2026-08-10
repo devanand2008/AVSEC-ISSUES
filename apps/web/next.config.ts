@@ -58,6 +58,15 @@ const storageOrigin = origin(
     process.env.S3_PUBLIC_ENDPOINT ??
     process.env.S3_ENDPOINT,
 );
+const imageSources = [
+  "'self'",
+  "data:",
+  "blob:",
+  "https://*.storage.supabase.co",
+  storageOrigin,
+]
+  .filter((value): value is string => Boolean(value))
+  .join(" ");
 const buildCpus = Number(process.env.NEXT_BUILD_CPUS ?? "");
 const connectSources = [
   ...new Set(
@@ -96,7 +105,7 @@ const securityHeaders = [
       "default-src 'self'",
       `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV !== "production" ? " 'unsafe-eval'" : ""} https://www.gstatic.com`,
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
+      `img-src ${imageSources}`,
       "font-src 'self'",
       `connect-src ${connectSources}`,
       "media-src 'self' blob:",

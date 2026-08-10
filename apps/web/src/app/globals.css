@@ -6054,6 +6054,26 @@ body:has(.pwa-install-button) .avs-bot-launcher {
     white-space: normal;
   }
 
+  .setting-editor,
+  .setting-editor-head > div {
+    min-width: 0;
+  }
+
+  .setting-editor-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .setting-editor-head > div {
+    flex: 1 1 180px;
+  }
+
+  .setting-editor-head strong,
+  .setting-editor-head small {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
   .maintenance-grid h3,
   .maintenance-grid p,
   .maintenance-grid dd {
