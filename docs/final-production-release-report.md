@@ -17,18 +17,20 @@
 | Executable release commit          | `4c64bc1216c7370fc79bcfd7b1cf60fe00f4e442`                            |
 | Initial acceptance deployment      | `dep-d9t15k8ae00c73b61g00`                                            |
 | Same-commit persistence deployment | `dep-d9t19legekts739hhtn0`                                            |
-| Documentation-only live commit     | `3ca0ced599e040fb45abef0d3c7c9f0e8630eb3c`                            |
-| Current live deployment            | `dep-d9t1ul3ncjis73blsjd0` (`live`)                                   |
+| Current live commit                | `34cca0a3e2caacb407deb6ab35219ef4fb37379f`                            |
+| Current live deployment            | `dep-d9t22r7avr4c7397kdeg` (`live`)                                   |
+| Full clear-cache redeploy          | PASS                                                                  |
 | Render service                     | Existing `avs-college-portal` service; no replacement service created |
 | Database mode                      | `EXTERNAL_PERSISTENT`                                                 |
 | Production database                | `avs_college_import_20260806`                                         |
 
 The tested application commit was deployed to the existing Render service. A
 second Render deployment of the exact same commit was used to prove PostgreSQL
-persistence. The later documentation-only commit changed no executable source;
-its Render deployment completed successfully and received a final health and
-Main Admin login/logout smoke. No database reset, force-reset, destructive
-storage mirror, or new Render service was used.
+persistence. The later documentation-only commits changed no executable source.
+At the user's request, the latest `main` commit received a full clear-cache
+Render rebuild and deployment, followed by health, Main Admin login/logout,
+Profile, Reports, mobile, database, storage, and runtime-log checks. No database
+reset, force-reset, destructive storage mirror, or new Render service was used.
 
 ## Production Outcome
 
@@ -56,10 +58,11 @@ Across 1,635 retained rows for the executable acceptance deployment, there were
 no level-50 application errors and no HTTP 5xx responses. The non-error signals
 were three known Nest route-conversion warnings, four transient gateway
 connection retries while ports 3000/4000 started, and expected
-authentication/logout HTTP 401s.
-The latest 100 rows after the final documentation-only deployment and smoke had
-zero error-level rows, zero warning-level rows, zero HTTP 5xx responses, and only
-the expected post-logout HTTP 401.
+authentication/logout HTTP 401s. The exact post-ready audit for the final full
+redeployment covered 146 log rows without pagination: zero error-level rows,
+zero warning-level rows, zero fatal signals, zero HTTP 5xx responses, and zero
+database, Redis, storage, crash, or unhandled-error signals. The HTTP 401 rows
+were expected invalidated-token and unauthenticated `/auth/me` checks.
 
 ## Main Admin Authentication
 
