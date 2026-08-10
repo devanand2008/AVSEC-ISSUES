@@ -68,4 +68,23 @@ describe("AnnouncementsController runtime DTO metadata", () => {
       audiences: [{ scopeType: "COLLEGE" }],
     });
   });
+
+  it("transforms recipient pagination query strings before integer validation", async () => {
+    const pipe = new ValidationPipe({
+      transform: true,
+      transformOptions: { enableImplicitConversion: false },
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
+    const transformed = await pipe.transform(
+      { page: "1", pageSize: "2" },
+      {
+        type: "query",
+        metatype: parameterTypes("getRecipients")[2] as new () => object,
+      },
+    );
+
+    expect(transformed).toBeInstanceOf(RecipientQueryDto);
+    expect(transformed).toMatchObject({ page: 1, pageSize: 2 });
+  });
 });

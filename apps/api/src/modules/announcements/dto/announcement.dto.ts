@@ -70,6 +70,6 @@ export class RecipientQueryDto {
   @ApiPropertyOptional({ enum: AnnouncementDeliveryStatus }) @IsOptional() @IsEnum(AnnouncementDeliveryStatus) deliveryStatus?: AnnouncementDeliveryStatus;
   @ApiPropertyOptional() @IsOptional() @IsString() roleCode?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() departmentId?: string;
-  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) page?: number;
-  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(100) pageSize?: number;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) pageSize?: number;
 }
