@@ -1030,6 +1030,21 @@ tbody tr:hover {
   transform: translateY(-1px);
 }
 
+.avs-bot-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 45;
+  width: 350px;
+  height: 500px;
+}
+
+.exports-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 18px;
+}
+
 @media (max-width: 760px) {
   .avs-bot-launcher {
     right: 14px;
@@ -5895,5 +5910,195 @@ tbody tr:hover {
   .avs-modal-backdrop {
     align-items: flex-end;
     padding: 0;
+  }
+}
+
+/*
+ * Final narrow-screen guardrails.
+ *
+ * Several older portal pages still contain inline desktop grid widths and
+ * tables that are not wrapped in .table-wrap. Keep those pages usable on
+ * phones without changing their desktop composition.
+ */
+@media (max-width: 767px) {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  .app-frame,
+  .main-column,
+  .content,
+  .page-container,
+  .card,
+  .section-head,
+  .page-heading,
+  .button-row,
+  .form-grid,
+  .field,
+  .choice-grid,
+  .maintenance-form,
+  .maintenance-grid,
+  .profile-layout {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .content,
+  .page-container {
+    width: 100%;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+
+  .profile-layout {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 14px !important;
+  }
+
+  .profile-layout .profile-card {
+    position: static !important;
+  }
+
+  .account-details dl > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+
+  .account-details dd,
+  .profile-card,
+  .section-head h2,
+  .page-heading h1,
+  .page-subtitle {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .form-grid,
+  .maintenance-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  main [style*="grid-template-columns"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .maintenance-form {
+    padding: 14px;
+  }
+
+  .maintenance-form > header {
+    align-items: flex-start;
+  }
+
+  .maintenance-form > header > div,
+  .maintenance-grid article > header > div {
+    min-width: 0;
+  }
+
+  .maintenance-grid dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .maintenance-grid h3,
+  .maintenance-grid p,
+  .maintenance-grid dd {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .choice-grid {
+    overflow: hidden;
+  }
+
+  .choice-grid label {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .table-wrap,
+  .card:has(> table),
+  .tab-bar {
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .card:has(> table) {
+    display: block;
+  }
+
+  .card > table,
+  .table-wrap > table {
+    max-width: 100%;
+  }
+
+  .data-table th,
+  .data-table td,
+  th,
+  td {
+    padding: 10px 8px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .section-head,
+  .page-heading,
+  .button-row {
+    flex-wrap: wrap;
+  }
+
+  .button-row > .btn,
+  .page-heading .btn,
+  .page-heading-actions > * {
+    max-width: 100%;
+  }
+
+  .topbar {
+    min-width: 0;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+
+  .topbar-search {
+    min-width: 0;
+  }
+
+  .tabs,
+  .tab-bar {
+    max-width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+
+  .tabs > *,
+  .tab-bar > * {
+    flex: 0 0 auto;
+  }
+
+  .avs-bot-launcher {
+    right: 12px;
+    bottom: calc(136px + env(safe-area-inset-bottom));
+    max-width: calc(100vw - 24px);
+  }
+
+  .avs-bot-panel {
+    left: max(12px, env(safe-area-inset-left));
+    right: max(12px, env(safe-area-inset-right));
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    width: auto;
+    height: min(500px, calc(100dvh - 100px - env(safe-area-inset-bottom)));
+    max-width: none;
+    max-height: calc(100dvh - 100px - env(safe-area-inset-bottom));
+  }
+
+  body:has(.avs-bot-panel) .pwa-install-button {
+    visibility: hidden;
+    pointer-events: none;
   }
 }

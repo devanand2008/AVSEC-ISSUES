@@ -13,8 +13,10 @@ interface AccessPayload {
   nonce?: string;
 }
 
+type CachedAuthorization = Omit<AuthPrincipal, "sessionId">;
+
 interface CacheEntry {
-  principal: AuthPrincipal;
+  authorization: CachedAuthorization;
   expiresAt: number;
 }
 
@@ -31,51 +33,85 @@ function cookieExtractor(request: Request): string | null {
 export class JwtStrategy extends PassportStrategy(Strategy) {
   private readonly cache = new Map<string, CacheEntry>();
 
-  constructor(config: ConfigService, private readonly prisma: PrismaService) {
+  constructor(
+    config: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
     super({
-      jwtFromRequest: ExtractJwt.fromExtractors([cookieExtractor, ExtractJwt.fromAuthHeaderAsBearerToken()]),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        cookieExtractor,
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ]),
       ignoreExpiration: false,
       secretOrKey: config.getOrThrow<string>("JWT_ACCESS_SECRET"),
     });
   }
 
   async validate(payload: AccessPayload): Promise<AuthPrincipal> {
-    if (payload.typ !== "access") throw new UnauthorizedException("Invalid token type.");
+    if (payload.typ !== "access")
+      throw new UnauthorizedException("Invalid token type.");
 
-    // Check cache first — avoids the heavy DB query on repeated requests
     const cacheKey = `${payload.sub}:${payload.sid}:${payload.nonce ?? "legacy"}`;
-    const cached = this.cache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.principal;
+    const now = new Date();
+    // Session state is deliberately never cached. This primary-key lookup makes
+    // logout and every other revocation path effective on the next request,
+    // while the expensive authorization snapshot remains cached below.
+    const session = await this.prisma.session.findUnique({
+      where: { id: payload.sid },
+      select: { userId: true, revokedAt: true, expiresAt: true },
+    });
+    if (
+      !session ||
+      session.userId !== payload.sub ||
+      session.revokedAt ||
+      session.expiresAt <= now
+    ) {
+      this.cache.delete(cacheKey);
+      throw new UnauthorizedException("The session is no longer valid.");
     }
 
-    const now = new Date();
+    const cached = this.cache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { ...cached.authorization, sessionId: payload.sid };
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       include: {
         college: { select: { isActive: true } },
-        sessions: { where: { id: payload.sid }, take: 1 },
         roles: {
           where: {
             validFrom: { lte: now },
             OR: [{ validUntil: null }, { validUntil: { gt: now } }],
             role: { isActive: true },
           },
-          include: { role: { include: { permissions: { include: { permission: true } } } } },
+          include: {
+            role: {
+              include: { permissions: { include: { permission: true } } },
+            },
+          },
         },
         scopes: true,
         studentProfile: { select: { id: true } },
         staffProfile: { select: { id: true } },
       },
     });
-    const session = user?.sessions[0];
-    if (!user || !user.college.isActive || user.status !== "ACTIVE" || !session || session.revokedAt || session.expiresAt <= now) {
+    if (!user || !user.college.isActive || user.status !== "ACTIVE") {
       this.cache.delete(cacheKey);
-      throw new UnauthorizedException("The session is no longer valid.");
+      throw new UnauthorizedException("The account is no longer active.");
     }
-    const activeRoles = user.roles.filter((mapping) => !mapping.role.collegeId || mapping.role.collegeId === user.collegeId);
+    const activeRoles = user.roles.filter(
+      (mapping) =>
+        !mapping.role.collegeId || mapping.role.collegeId === user.collegeId,
+    );
     const roles = activeRoles.map((mapping) => mapping.role.code);
-    const permissions = [...new Set(activeRoles.flatMap((mapping) => mapping.role.permissions.map((entry) => entry.permission.code)))];
+    const permissions = [
+      ...new Set(
+        activeRoles.flatMap((mapping) =>
+          mapping.role.permissions.map((entry) => entry.permission.code),
+        ),
+      ),
+    ];
     const profileCompletionStatus = this.profileCompletionStatus(roles, user);
     const principal: AuthPrincipal = {
       id: user.id,
@@ -89,7 +125,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       profileCompletionPercentage: user.profileCompletionPercentage,
       profileRejectionReason: user.profileRejectionReason,
       firstLoginCompletedAt: user.firstLoginCompletedAt,
-      sessionId: session.id,
+      sessionId: payload.sid,
       roles,
       permissions,
       scopes: user.scopes.map((scope) => ({
@@ -104,8 +140,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       const firstKey = this.cache.keys().next().value;
       if (firstKey) this.cache.delete(firstKey);
     }
-    if (!principal.mustChangePassword && ["SUBMITTED", "VERIFIED"].includes(principal.profileCompletionStatus ?? "")) {
-      this.cache.set(cacheKey, { principal, expiresAt: Date.now() + CACHE_TTL_MS });
+    if (
+      !principal.mustChangePassword &&
+      ["SUBMITTED", "VERIFIED"].includes(
+        principal.profileCompletionStatus ?? "",
+      )
+    ) {
+      const { sessionId: _sessionId, ...authorization } = principal;
+      this.cache.set(cacheKey, {
+        authorization,
+        expiresAt: Date.now() + CACHE_TTL_MS,
+      });
     }
 
     return principal;
@@ -113,12 +158,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   private profileCompletionStatus(
     roles: string[],
-    user: { profileCompletionStatus?: string; studentProfile?: { id: string } | null; staffProfile?: { id: string } | null },
+    user: {
+      profileCompletionStatus?: string;
+      studentProfile?: { id: string } | null;
+      staffProfile?: { id: string } | null;
+    },
   ): "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED" | "VERIFIED" | "REJECTED" {
     if (roles.some((role) => ["SUPER_ADMIN", "MAIN_ADMIN"].includes(role))) {
       return "VERIFIED";
     }
-    const needsStudentProfile = roles.includes("STUDENT") || roles.includes("CLASS_REPRESENTATIVE");
+    const needsStudentProfile =
+      roles.includes("STUDENT") || roles.includes("CLASS_REPRESENTATIVE");
     const staffRoles = new Set([
       "FACULTY",
       "HOD",
@@ -137,9 +187,18 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       "OTHER_RESPONSIBLE",
     ]);
     const needsStaffProfile = roles.some((role) => staffRoles.has(role));
-    const hasRequiredProfileRows = (!needsStudentProfile || Boolean(user.studentProfile)) && (!needsStaffProfile || Boolean(user.staffProfile));
-    if (["IN_PROGRESS", "VERIFIED", "REJECTED"].includes(user.profileCompletionStatus ?? "")) {
-      return user.profileCompletionStatus as "IN_PROGRESS" | "VERIFIED" | "REJECTED";
+    const hasRequiredProfileRows =
+      (!needsStudentProfile || Boolean(user.studentProfile)) &&
+      (!needsStaffProfile || Boolean(user.staffProfile));
+    if (
+      ["IN_PROGRESS", "VERIFIED", "REJECTED"].includes(
+        user.profileCompletionStatus ?? "",
+      )
+    ) {
+      return user.profileCompletionStatus as
+        | "IN_PROGRESS"
+        | "VERIFIED"
+        | "REJECTED";
     }
     return hasRequiredProfileRows ? "SUBMITTED" : "NOT_STARTED";
   }

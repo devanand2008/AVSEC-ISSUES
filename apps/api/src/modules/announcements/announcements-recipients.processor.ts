@@ -63,24 +63,41 @@ export class AnnouncementRecipientsProcessor implements OnModuleInit, OnModuleDe
         return;
       }
 
+      if (announcement.status !== "PUBLISHING") {
+        this.logger.log(
+          { announcementId, status: announcement.status },
+          "Announcement is no longer publishing; skipping recipient job",
+        );
+        return;
+      }
+
       const created = await this.announcementsService.createRecipientsInline(
         announcementId,
         collegeId,
         announcement.audiences,
       );
 
-      await this.prisma.announcement.update({
-        where: { id: announcementId },
-        data: { status: "PUBLISHED", totalRecipients: created },
-      });
-
       this.logger.log({ announcementId, created }, "Recipient records created successfully");
     } catch (error) {
       this.logger.error({ announcementId, error: error instanceof Error ? error.message : error }, "Failed to create recipients");
-      await this.prisma.announcement.update({
-        where: { id: announcementId },
-        data: { status: "FAILED" },
-      }).catch(() => undefined);
+      const maxAttempts = job.opts.attempts ?? 1;
+      const isTerminalAttempt = job.attemptsMade + 1 >= maxAttempts;
+      if (isTerminalAttempt) {
+        await this.prisma.$transaction(async (tx) => {
+          const failed = await tx.announcement.updateMany({
+            where: { id: announcementId, status: "PUBLISHING" },
+            data: { status: "FAILED" },
+          });
+          if (failed.count === 1) {
+            await tx.idempotencyKey.deleteMany({
+              where: {
+                endpoint: `/announcements/${announcementId}/send-all`,
+                resourceId: announcementId,
+              },
+            });
+          }
+        }).catch(() => undefined);
+      }
       throw error;
     }
   }

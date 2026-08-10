@@ -161,11 +161,10 @@ export function AvsBotWidget() {
   }
   
   return (
-    <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 9999 }}>
+    <div className="avs-bot-widget">
       {!isOpen && (
         <button
-          className="btn btn-primary"
-          style={{ width: 60, height: 60, borderRadius: "50%", padding: 0, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}
+          className="btn btn-primary avs-bot-launcher"
           onClick={() => setIsOpen(true)}
           aria-label="Open AVS Bot"
         >
@@ -173,12 +172,12 @@ export function AvsBotWidget() {
         </button>
       )}
       {isOpen && (
-        <div className="card" style={{ width: 350, height: 500, display: "flex", flexDirection: "column", boxShadow: "0 8px 24px rgba(0,0,0,0.2)", overflow: "hidden", padding: 0 }}>
+        <div className="card avs-bot-panel" style={{ display: "flex", flexDirection: "column", boxShadow: "0 8px 24px rgba(0,0,0,0.2)", overflow: "hidden", padding: 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", background: "var(--primary)", color: "white" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
               <Bot size={20} /> AVS Bot
             </div>
-            <button style={{ background: "none", border: "none", color: "white", cursor: "pointer", padding: 4 }} onClick={() => setIsOpen(false)}>
+            <button aria-label="Close AVS Bot" style={{ background: "none", border: "none", color: "white", cursor: "pointer", padding: 4 }} onClick={() => setIsOpen(false)}>
               <X size={20} />
             </button>
           </div>

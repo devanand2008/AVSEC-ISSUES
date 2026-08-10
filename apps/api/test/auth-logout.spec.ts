@@ -17,6 +17,10 @@ function serviceHarness() {
     refreshToken: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   };
   const prisma = {
+    session: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+    },
     $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
   };
   const audit = {
@@ -83,6 +87,57 @@ describe("AuthService logout", () => {
     ).resolves.toBeUndefined();
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("revokes a selected non-current device through the shared revocation path", async () => {
+    const { prisma, service, tx } = serviceHarness();
+    prisma.session.findFirst.mockResolvedValue({ id: "other-session-id" });
+
+    await service.revokeOwnSession(
+      "user-id",
+      "other-session-id",
+      "current-session-id",
+      metadata,
+    );
+
+    expect(tx.session.updateMany).toHaveBeenCalledWith({
+      where: { id: "other-session-id", revokedAt: null },
+      data: {
+        revokedAt: expect.any(Date),
+        revokeReason: "USER_REVOKED_DEVICE",
+      },
+    });
+    expect(tx.refreshToken.updateMany).toHaveBeenCalledWith({
+      where: { sessionId: "other-session-id", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
+  it("revokes every other active device through the shared revocation path", async () => {
+    const { prisma, service, tx } = serviceHarness();
+    prisma.session.findMany.mockResolvedValue([
+      { id: "other-session-1" },
+      { id: "other-session-2" },
+    ]);
+
+    await expect(
+      service.revokeOtherSessions("user-id", "current-session-id", metadata),
+    ).resolves.toEqual({ revoked: 2 });
+
+    expect(tx.session.updateMany).toHaveBeenNthCalledWith(1, {
+      where: { id: "other-session-1", revokedAt: null },
+      data: {
+        revokedAt: expect.any(Date),
+        revokeReason: "USER_REVOKED_ALL_OTHERS",
+      },
+    });
+    expect(tx.session.updateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: "other-session-2", revokedAt: null },
+      data: {
+        revokedAt: expect.any(Date),
+        revokeReason: "USER_REVOKED_ALL_OTHERS",
+      },
+    });
   });
 });
 

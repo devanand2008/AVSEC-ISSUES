@@ -90,13 +90,7 @@ export default function ExportsPage() {
         </div>
       )}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-          gap: 18,
-        }}
-      >
+      <div className="exports-grid">
         {available.map((exp) => {
           const Icon = exp.icon;
           const isDownloading = downloading === exp.key;

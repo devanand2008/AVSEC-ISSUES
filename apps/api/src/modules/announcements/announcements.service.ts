@@ -282,14 +282,42 @@ export class AnnouncementsService {
       include: { audiences: true },
     });
     if (!announcement) throw new NotFoundException("Announcement not found.");
+    if (announcement.status === "PUBLISHED" || announcement.status === "PUBLISHING") {
+      throw new ConflictException("This announcement has already been published.");
+    }
 
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.announcement.update({
-        where: { id },
-        data: { status: "PUBLISHED", publishAt: announcement.publishAt ?? new Date(), publishedAt: new Date() },
+      const claimed = await tx.announcement.updateMany({
+        where: { id, collegeId: user.collegeId, status: announcement.status },
+        data: { status: "PUBLISHING" },
       });
-      await this.createNotification(tx, updated, user.collegeId, announcement.audiences);
-      return updated;
+      if (claimed.count !== 1) {
+        throw new ConflictException("This announcement has already been published or changed. Refresh and try again.");
+      }
+
+      const users = await this.createNotification(tx, announcement, user.collegeId, announcement.audiences);
+      if (users.length === 0) throw new BadRequestException("No active users matched the selected audience.");
+
+      const deliveredAt = new Date();
+      await tx.announcementReadReceipt.createMany({
+        data: users.map((recipient) => ({
+          announcementId: id,
+          userId: recipient.id,
+          deliveryStatus: "DELIVERED" as const,
+          firstDeliveredAt: deliveredAt,
+        })),
+        skipDuplicates: true,
+      });
+
+      return tx.announcement.update({
+        where: { id },
+        data: {
+          status: "PUBLISHED",
+          publishAt: announcement.publishAt ?? deliveredAt,
+          publishedAt: deliveredAt,
+          totalRecipients: users.length,
+        },
+      });
     });
   }
 
@@ -319,10 +347,13 @@ export class AnnouncementsService {
 
     // Mark as PUBLISHING immediately
     const response = await this.prisma.$transaction(async (tx) => {
-      await tx.announcement.update({
-        where: { id },
+      const claimed = await tx.announcement.updateMany({
+        where: { id, collegeId: user.collegeId, status: announcement.status },
         data: { status: "PUBLISHING", publishAt: new Date(), publishedAt: new Date() },
       });
+      if (claimed.count !== 1) {
+        throw new ConflictException("This announcement has already been sent or changed. Refresh and try again.");
+      }
       const body = { announcementId: id, estimatedRecipients: recipientCount, status: "PUBLISHING" };
       if (idempotencyKey) {
         await tx.idempotencyKey.create({
@@ -341,17 +372,41 @@ export class AnnouncementsService {
       return body;
     });
 
-    // Queue background job for recipient creation
-    if (this.recipientQueue) {
-      await this.recipientQueue.add("create-recipients", { announcementId: id, collegeId: user.collegeId }, {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 5000 },
-        jobId: `recipients-${id}`,
-        removeOnComplete: true,
-      });
-    } else {
-      // Fallback: create inline (for environments without Redis)
-      await this.createRecipientsInline(id, user.collegeId, announcement.audiences);
+    try {
+      // Queue background job for recipient creation. If Redis fails at this
+      // boundary, the status has already been claimed, so complete inline
+      // instead of leaving a replayable PUBLISHING record with no job.
+      if (this.recipientQueue) {
+        try {
+          await this.recipientQueue.add("create-recipients", { announcementId: id, collegeId: user.collegeId }, {
+            attempts: 3,
+            backoff: { type: "exponential", delay: 5000 },
+            jobId: `recipients-${id}`,
+            removeOnComplete: true,
+          });
+        } catch (error) {
+          this.logger.warn(
+            { announcementId: id, error: error instanceof Error ? error.message : "Queue unavailable" },
+            "Recipient queue unavailable; completing announcement delivery inline",
+          );
+          await this.createRecipientsInline(id, user.collegeId, announcement.audiences);
+        }
+      } else {
+        await this.createRecipientsInline(id, user.collegeId, announcement.audiences);
+      }
+    } catch (error) {
+      await this.prisma.$transaction(async (tx) => {
+        const failed = await tx.announcement.updateMany({
+          where: { id, collegeId: user.collegeId, status: "PUBLISHING" },
+          data: { status: "FAILED" },
+        });
+        if (failed.count === 1 && idempotencyKey) {
+          await tx.idempotencyKey.deleteMany({
+            where: { actorId: user.id, endpoint, key: idempotencyKey },
+          });
+        }
+      }).catch(() => undefined);
+      throw error;
     }
 
     await this.audit.record({
@@ -778,22 +833,38 @@ export class AnnouncementsService {
   async archive(user: AuthPrincipal, id: string, requestId: string) {
     const announcement = await this.prisma.announcement.findFirst({ where: { id, collegeId: user.collegeId } });
     if (!announcement) throw new NotFoundException("Announcement not found.");
+    if (announcement.status === "PUBLISHING") {
+      throw new ConflictException("This announcement is still being delivered. Wait for delivery to finish before archiving it.");
+    }
 
-    const updated = await this.prisma.announcement.update({
-      where: { id },
-      data: { status: "ARCHIVED", archivedAt: new Date() },
+    return this.prisma.$transaction(async (tx) => {
+      const archivedAt = new Date();
+      const archived = await tx.announcement.updateMany({
+        where: { id, collegeId: user.collegeId, status: announcement.status },
+        data: { status: "ARCHIVED", archivedAt },
+      });
+      if (archived.count !== 1) {
+        throw new ConflictException("This announcement changed before it could be archived. Refresh and try again.");
+      }
+      await tx.notificationRecipient.deleteMany({
+        where: {
+          notification: {
+            relatedEntityType: "Announcement",
+            relatedEntityId: id,
+          },
+        },
+      });
+      await this.audit.record({
+        actorId: user.id,
+        collegeId: user.collegeId,
+        action: "announcement.archived",
+        entityType: "Announcement",
+        entityId: id,
+        requestId,
+      }, tx);
+
+      return { ...announcement, status: "ARCHIVED" as const, archivedAt };
     });
-
-    await this.audit.record({
-      actorId: user.id,
-      collegeId: user.collegeId,
-      action: "announcement.archived",
-      entityType: "Announcement",
-      entityId: id,
-      requestId,
-    });
-
-    return updated;
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -846,49 +917,44 @@ export class AnnouncementsService {
     collegeId: string,
     audiences: { scopeType: string; scopeId: string | null; roleCode: string | null; userId: string | null }[],
   ) {
-    const BATCH = 200;
-    const now = new Date();
-    const users = await this.fetchActiveRecipients(collegeId, audiences as never);
-    let created = 0;
-
-    for (let i = 0; i < users.length; i += BATCH) {
-      const batch = users.slice(i, i + BATCH);
-      const result = await this.prisma.announcementReadReceipt.createMany({
-        data: batch.map((u) => ({
-          announcementId,
-          userId: u.id,
-          deliveryStatus: "DELIVERED" as const,
-          firstDeliveredAt: now,
-        })),
-        skipDuplicates: true,
+    return this.prisma.$transaction(async (tx) => {
+      // A no-op conditional update acquires the announcement row lock for this
+      // transaction. Archive either wins before this claim (and we do nothing)
+      // or waits and removes the completed delivery residue afterward.
+      const claimed = await tx.announcement.updateMany({
+        where: { id: announcementId, collegeId, status: "PUBLISHING" },
+        data: { status: "PUBLISHING" },
       });
-      created += result.count;
-    }
+      if (claimed.count !== 1) return 0;
 
-    await this.prisma.announcement.update({
-      where: { id: announcementId },
-      data: { status: "PUBLISHED", totalRecipients: created },
-    });
+      const announcement = await tx.announcement.findUnique({
+        where: { id: announcementId },
+      });
+      if (!announcement) return 0;
 
-    // Create in-app notification
-    if (users.length > 0) {
-      const announcement = await this.prisma.announcement.findUnique({ where: { id: announcementId } });
-      if (announcement) {
-        await this.prisma.notification.create({
-          data: {
-            type: "ANNOUNCEMENT_PUBLISHED",
-            title: announcement.title,
-            body: announcement.message.slice(0, 300),
-            priority: announcement.priority,
-            relatedEntityType: "Announcement",
-            relatedEntityId: announcementId,
-            recipients: { create: users.map((u) => ({ userId: u.id })) },
-          },
+      const users = await this.createNotification(tx, announcement, collegeId, audiences);
+      const deliveredAt = new Date();
+      const BATCH = 200;
+      for (let i = 0; i < users.length; i += BATCH) {
+        const batch = users.slice(i, i + BATCH);
+        await tx.announcementReadReceipt.createMany({
+          data: batch.map((recipient) => ({
+            announcementId,
+            userId: recipient.id,
+            deliveryStatus: "DELIVERED" as const,
+            firstDeliveredAt: deliveredAt,
+          })),
+          skipDuplicates: true,
         });
       }
-    }
 
-    return created;
+      await tx.announcement.update({
+        where: { id: announcementId },
+        data: { status: "PUBLISHED", totalRecipients: users.length },
+      });
+
+      return users.length;
+    }, { maxWait: 5_000, timeout: 30_000 });
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -916,10 +982,20 @@ export class AnnouncementsService {
 
   private audienceWhere(user: AuthPrincipal): Prisma.AnnouncementAudienceWhereInput[] {
     return [
-      { scopeType: "COLLEGE", OR: [{ scopeId: null }, { scopeId: user.collegeId }] },
-      { userId: user.id },
-      { roleCode: { in: user.roles } },
-      ...user.scopes.map((scope) => ({ scopeType: scope.type as never, scopeId: scope.id })),
+      {
+        scopeType: "COLLEGE",
+        userId: null,
+        roleCode: null,
+        OR: [{ scopeId: null }, { scopeId: user.collegeId }],
+      },
+      { scopeType: "COLLEGE", scopeId: null, userId: user.id, roleCode: null },
+      { scopeType: "COLLEGE", scopeId: null, userId: null, roleCode: { in: user.roles } },
+      ...user.scopes.map((scope) => ({
+        scopeType: scope.type as never,
+        scopeId: scope.id,
+        userId: null,
+        roleCode: null,
+      })),
     ];
   }
 
@@ -942,9 +1018,23 @@ export class AnnouncementsService {
     collegeId: string,
     audiences: Array<{ scopeType: string; scopeId: string | null; roleCode: string | null; userId: string | null }>,
   ) {
+    return this.prisma.user.findMany({
+      where: this.activeRecipientWhere(collegeId, audiences),
+      select: { id: true },
+    });
+  }
+
+  private activeRecipientWhere(
+    collegeId: string,
+    audiences: Array<{ scopeType: string; scopeId: string | null; roleCode: string | null; userId: string | null }>,
+  ): Prisma.UserWhereInput {
     const now = new Date();
     const broadCollegeAudience = audiences.some(
-      (a) => a.scopeType === "COLLEGE" && (!a.scopeId || a.scopeId === collegeId),
+      (a) =>
+        a.scopeType === "COLLEGE" &&
+        !a.userId &&
+        !a.roleCode &&
+        (!a.scopeId || a.scopeId === collegeId),
     );
     const userIds = audiences.flatMap((a) => (a.userId ? [a.userId] : []));
     const roleCodes = audiences.flatMap((a) => (a.roleCode ? [a.roleCode] : []));
@@ -982,14 +1072,11 @@ export class AnnouncementsService {
           ],
         };
 
-    return this.prisma.user.findMany({
-      where: {
-        collegeId,
-        status: "ACTIVE",
-        AND: [audienceWhere],
-      },
-      select: { id: true },
-    });
+    return {
+      collegeId,
+      status: "ACTIVE",
+      AND: [audienceWhere],
+    };
   }
 
   private analyticsBreakdowns(
@@ -1058,10 +1145,10 @@ export class AnnouncementsService {
     tx: Prisma.TransactionClient,
     announcement: { id: string; title: string; message: string; priority: string },
     collegeId: string,
-    _audiences: Array<{ scopeType: string; scopeId: string | null; roleCode: string | null; userId: string | null }>,
+    audiences: Array<{ scopeType: string; scopeId: string | null; roleCode: string | null; userId: string | null }>,
   ) {
     const users = await tx.user.findMany({
-      where: { collegeId, status: "ACTIVE" },
+      where: this.activeRecipientWhere(collegeId, audiences),
       select: { id: true },
     });
     if (users.length > 0) {
@@ -1077,6 +1164,7 @@ export class AnnouncementsService {
         },
       });
     }
+    return users;
   }
 
   private validateImageFile(input: { fileName: string; mimeType: string; sizeBytes: number }) {

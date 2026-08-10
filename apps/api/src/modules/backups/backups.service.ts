@@ -219,6 +219,53 @@ export class BackupsService {
       };
     }
 
+    const databaseMode = this.config.get<string>(
+      "DATABASE_MODE",
+      "EXTERNAL_PERSISTENT",
+    );
+    const usesExternalProductionInventory =
+      this.config.get<string>("NODE_ENV") === "production" &&
+      databaseMode === "EXTERNAL_PERSISTENT";
+    if (usesExternalProductionInventory) {
+      const driveEnabled = this.config.get<boolean>(
+        "GOOGLE_DRIVE_ENABLED",
+        false,
+      );
+      const scheduleEnabled = this.config.get<boolean>(
+        "BACKUP_SCHEDULE_ENABLED",
+        false,
+      );
+      const offHostEnabled = driveEnabled && scheduleEnabled;
+      return {
+        backups: [],
+        invalid: [],
+        database: {
+          status: "CONNECTED",
+          mode: databaseMode,
+          warning: null,
+        },
+        schedule: {
+          timezone: "Asia/Kolkata",
+          dailyTime: "02:00",
+          githubActionsCron: "30 20 * * *",
+          enabled: scheduleEnabled,
+          scheduler: scheduleEnabled ? "GITHUB_ACTIONS" : "DISABLED",
+        },
+        retention: { daily: 30, weekly: 12, monthly: 12 },
+        backupReadiness: {
+          status: "DEGRADED",
+          code: offHostEnabled
+            ? "NO_ACTIVE_BACKUP_METADATA"
+            : "OFF_HOST_BACKUP_DISABLED",
+          offHostStatus: offHostEnabled ? "ENABLED" : "DISABLED",
+          inventorySource: "DATABASE_METADATA",
+          message: offHostEnabled
+            ? "No active backup metadata is currently available."
+            : "Scheduled off-host backups are disabled. Recovery currently depends on externally managed verified archives.",
+        },
+      };
+    }
+
     const { directory, key } = await this.settings();
     const inventory = await this.manifests.inventory(directory, key);
     return {
