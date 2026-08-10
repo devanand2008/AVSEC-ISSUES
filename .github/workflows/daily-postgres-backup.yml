@@ -111,7 +111,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          pg_dump --format=plain --no-owner --no-privileges --clean --if-exists --encoding=UTF8 --file="$FULL_SQL" "$BACKUP_DATABASE_URL"
+          pg_dump --format=plain --no-owner --no-privileges --encoding=UTF8 --file="$FULL_SQL" "$BACKUP_DATABASE_URL"
           pg_dump --schema-only --format=plain --no-owner --no-privileges --encoding=UTF8 --file="$SCHEMA_SQL" "$BACKUP_DATABASE_URL"
           test -s "$FULL_SQL"
           test -s "$SCHEMA_SQL"
