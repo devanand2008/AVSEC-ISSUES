@@ -43,13 +43,23 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Mask and validate protected configuration
+        id: protected
         shell: bash
         run: |
           set -euo pipefail
-          for value in "$BACKUP_DATABASE_URL" "$BACKUP_ENCRYPTION_KEY" "$GOOGLE_OAUTH_CLIENT_ID" "$GOOGLE_OAUTH_CLIENT_SECRET" "$GOOGLE_OAUTH_REFRESH_TOKEN" "$GOOGLE_DRIVE_BACKUP_FOLDER_ID"; do
+          for value in "$BACKUP_DATABASE_URL" "$BACKUP_ENCRYPTION_KEY"; do
             test -n "$value"
             echo "::add-mask::$value"
           done
+          drive_enabled=true
+          for value in "$GOOGLE_OAUTH_CLIENT_ID" "$GOOGLE_OAUTH_CLIENT_SECRET" "$GOOGLE_OAUTH_REFRESH_TOKEN" "$GOOGLE_DRIVE_BACKUP_FOLDER_ID"; do
+            if [ -n "$value" ]; then
+              echo "::add-mask::$value"
+            else
+              drive_enabled=false
+            fi
+          done
+          echo "drive_enabled=$drive_enabled" >> "$GITHUB_OUTPUT"
 
       - name: Install PostgreSQL client tools
         shell: bash
@@ -159,12 +169,34 @@ jobs:
           set -euo pipefail
           bash scripts/test-sql-restore.sh "$FULL_ENCRYPTED" "$BACKUP_DATABASE_URL"
 
+      - name: Record verified backup outcome
+        shell: bash
+        env:
+          DRIVE_ENABLED: ${{ steps.protected.outputs.drive_enabled }}
+        run: |
+          set -euo pipefail
+          node -e "const fs=require('fs');fs.writeFileSync(process.env.BACKUP_LOG,JSON.stringify({backupId:process.env.BACKUP_ID,status:process.env.BACKUP_STATUS,uploadedProvider:process.env.DRIVE_ENABLED==='true'?'GITHUB_ACTIONS_AND_GOOGLE_DRIVE':'GITHUB_ACTIONS',verified:true,restoreTested:process.env.BACKUP_STATUS==='RESTORE_TESTED',finishedAt:new Date().toISOString()},null,2)+'\n',{mode:0o600})"
+
+      - name: Upload encrypted private recovery artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BACKUP_ID }}
+          path: |
+            ${{ env.FULL_ENCRYPTED }}
+            ${{ env.SCHEMA_SQL }}
+            ${{ env.CHECKSUM }}
+            ${{ env.MANIFEST }}
+            ${{ env.BACKUP_LOG }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
       - name: Upload privately to Google Drive and verify metadata
+        if: steps.protected.outputs.drive_enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
           node scripts/google-drive-backup.mjs "$FULL_ENCRYPTED" "$SCHEMA_SQL" "$CHECKSUM" "$MANIFEST"
-          node -e "const fs=require('fs');fs.writeFileSync(process.env.BACKUP_LOG,JSON.stringify({backupId:process.env.BACKUP_ID,status:process.env.BACKUP_STATUS,uploaded:true,verified:true,restoreTested:process.env.BACKUP_STATUS==='RESTORE_TESTED',finishedAt:new Date().toISOString()},null,2)+'\n',{mode:0o600})"
 
       - name: Register verified backup for migration readiness
         shell: bash
