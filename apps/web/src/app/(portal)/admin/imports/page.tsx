@@ -412,6 +412,7 @@ export default function ImportsPage() {
           <label className="field">
             <span>Import type</span>
             <select
+              className="input"
               value={entityType}
               onChange={(event) => {
                 const next = event.target.value;

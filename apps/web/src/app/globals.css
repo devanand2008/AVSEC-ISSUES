@@ -752,9 +752,6 @@ tbody tr:hover {
     height: 46px;
     padding-inline: 13px;
   }
-  body:has(.avs-bottom-nav) .pwa-install-button {
-    bottom: calc(78px + env(safe-area-inset-bottom));
-  }
   .pwa-install-scrim {
     align-items: end;
     padding: 0;
@@ -765,6 +762,12 @@ tbody tr:hover {
       max(20px, env(safe-area-inset-bottom))
       max(18px, env(safe-area-inset-left));
     border-radius: 18px 18px 0 0;
+  }
+}
+
+@media (max-width: 767px) {
+  body:has(.avs-bottom-nav) .pwa-install-button {
+    bottom: calc(78px + env(safe-area-inset-bottom));
   }
 }
 
@@ -1037,6 +1040,23 @@ tbody tr:hover {
   z-index: 45;
   width: 350px;
   height: 500px;
+}
+
+.avs-bot-close {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+}
+
+body:has(.avs-bot-panel) .pwa-install-button {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+body:has(.pwa-install-button) .avs-bot-launcher {
+  bottom: calc(84px + env(safe-area-inset-bottom));
 }
 
 .exports-grid {
@@ -6001,6 +6021,39 @@ tbody tr:hover {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .detail-list > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+
+  .detail-list dd,
+  .detail-list code {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .integration-card {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .integration-card > div {
+    min-width: 0;
+  }
+
+  .integration-card h2,
+  .integration-card p {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .integration-card > strong {
+    grid-column: 2;
+    justify-self: start;
+    white-space: normal;
+  }
+
   .maintenance-grid h3,
   .maintenance-grid p,
   .maintenance-grid dd {
@@ -6082,9 +6135,14 @@ tbody tr:hover {
   }
 
   .avs-bot-launcher {
-    right: 12px;
-    bottom: calc(136px + env(safe-area-inset-bottom));
+    left: max(12px, env(safe-area-inset-left));
+    right: auto;
+    bottom: calc(78px + env(safe-area-inset-bottom));
     max-width: calc(100vw - 24px);
+  }
+
+  body:has(.pwa-install-button) .avs-bot-launcher {
+    bottom: calc(78px + env(safe-area-inset-bottom));
   }
 
   .avs-bot-panel {
@@ -6092,13 +6150,15 @@ tbody tr:hover {
     right: max(12px, env(safe-area-inset-right));
     bottom: calc(76px + env(safe-area-inset-bottom));
     width: auto;
-    height: min(500px, calc(100dvh - 100px - env(safe-area-inset-bottom)));
+    height: min(
+      500px,
+      calc(
+        100dvh - 100px - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+      )
+    );
     max-width: none;
-    max-height: calc(100dvh - 100px - env(safe-area-inset-bottom));
-  }
-
-  body:has(.avs-bot-panel) .pwa-install-button {
-    visibility: hidden;
-    pointer-events: none;
+    max-height: calc(
+      100dvh - 100px - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+    );
   }
 }

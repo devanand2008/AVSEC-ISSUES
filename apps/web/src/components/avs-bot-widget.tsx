@@ -177,7 +177,18 @@ export function AvsBotWidget() {
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
               <Bot size={20} /> AVS Bot
             </div>
-            <button aria-label="Close AVS Bot" style={{ background: "none", border: "none", color: "white", cursor: "pointer", padding: 4 }} onClick={() => setIsOpen(false)}>
+            <button
+              className="avs-bot-close"
+              aria-label="Close AVS Bot"
+              style={{
+                background: "none",
+                border: "none",
+                color: "white",
+                cursor: "pointer",
+                padding: 4,
+              }}
+              onClick={() => setIsOpen(false)}
+            >
               <X size={20} />
             </button>
           </div>

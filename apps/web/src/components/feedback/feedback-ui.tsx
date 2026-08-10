@@ -59,6 +59,7 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/query-state";
 import { StatusBadge } from "@/components/status-badge";
 import {
   acquireDecodeLock,
+  buildFeedbackQuery,
   cameraAccessGuidance,
   extractFeedbackToken,
   resetDecodeLock,
@@ -417,9 +418,7 @@ export function FeedbackScannerPage() {
             .stop()
             .catch(() => undefined)
             .finally(() => {
-              router.push(
-                `/feedback/scan/${encodeURIComponent(token)}`,
-              );
+              router.push(`/feedback/scan/${encodeURIComponent(token)}`);
             });
         },
         () => undefined,
@@ -623,7 +622,7 @@ function TargetSearch() {
     queryKey: ["feedback-target-search", search],
     queryFn: () =>
       api.get<FeedbackTarget[]>(
-        `/feedback/targets?search=${encodeURIComponent(search)}`,
+        `/feedback/targets${buildFeedbackQuery({ search })}`,
       ),
     enabled: search.trim().length >= 2,
   });
@@ -1314,7 +1313,7 @@ export function StaffRatingsDirectoryPage({
     queryKey: ["staff-rating-directory", detailBasePath, search],
     queryFn: () =>
       api.get<FeedbackTarget[]>(
-        `/feedback/targets?targetType=STAFF&search=${encodeURIComponent(search.trim())}`,
+        `/feedback/targets${buildFeedbackQuery({ targetType: "STAFF", search })}`,
       ),
   });
   const targets = query.data?.filter((target) => target.staff) ?? [];
@@ -1404,7 +1403,7 @@ export function QrManagementPage() {
     queryKey: ["feedback-qr", search, status, page],
     queryFn: () =>
       api.get<PageResponse<QrRow>>(
-        `/admin/feedback/qr?page=${page}&pageSize=25&search=${encodeURIComponent(search)}&status=${status}`,
+        `/admin/feedback/qr${buildFeedbackQuery({ page, pageSize: 25, search, status })}`,
       ),
   });
   useEffect(
@@ -1873,7 +1872,7 @@ export function FeedbackSubmissionsPage() {
     queryKey: ["feedback-submissions", status],
     queryFn: () =>
       api.get<PageResponse<FeedbackSubmission>>(
-        `/admin/feedback/submissions?pageSize=50&status=${status}`,
+        `/admin/feedback/submissions${buildFeedbackQuery({ pageSize: 50, status })}`,
       ),
   });
   const update = useMutation({
@@ -2546,7 +2545,7 @@ export function FeedbackTargetsPage() {
     queryKey: ["feedback-targets-admin", search],
     queryFn: () =>
       api.get<FeedbackTarget[]>(
-        `/feedback/targets?search=${encodeURIComponent(search)}`,
+        `/feedback/targets${buildFeedbackQuery({ search })}`,
       ),
   });
   return (

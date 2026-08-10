@@ -7,6 +7,24 @@ export interface CameraAccessGuidance {
   message: string;
 }
 
+type FeedbackQueryValue = string | number | boolean | null | undefined;
+
+export function buildFeedbackQuery(
+  values: Record<string, FeedbackQueryValue>,
+): string {
+  const searchParams = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(values)) {
+    if (value === null || value === undefined) continue;
+    const normalized = typeof value === "string" ? value.trim() : String(value);
+    if (!normalized) continue;
+    searchParams.set(key, normalized);
+  }
+
+  const query = searchParams.toString();
+  return query ? `?${query}` : "";
+}
+
 export function extractFeedbackToken(raw: string): string {
   const value = raw.trim();
   if (!value) return "";
