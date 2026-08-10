@@ -17,15 +17,18 @@
 | Executable release commit          | `4c64bc1216c7370fc79bcfd7b1cf60fe00f4e442`                            |
 | Initial acceptance deployment      | `dep-d9t15k8ae00c73b61g00`                                            |
 | Same-commit persistence deployment | `dep-d9t19legekts739hhtn0`                                            |
+| Documentation-only live commit     | `3ca0ced599e040fb45abef0d3c7c9f0e8630eb3c`                            |
+| Current live deployment            | `dep-d9t1ul3ncjis73blsjd0` (`live`)                                   |
 | Render service                     | Existing `avs-college-portal` service; no replacement service created |
-| Live deployment status             | `live`                                                                |
 | Database mode                      | `EXTERNAL_PERSISTENT`                                                 |
 | Production database                | `avs_college_import_20260806`                                         |
 
 The tested application commit was deployed to the existing Render service. A
 second Render deployment of the exact same commit was used to prove PostgreSQL
-persistence. No database reset, force-reset, destructive storage mirror, or new
-Render service was used.
+persistence. The later documentation-only commit changed no executable source;
+its Render deployment completed successfully and received a final health and
+Main Admin login/logout smoke. No database reset, force-reset, destructive
+storage mirror, or new Render service was used.
 
 ## Production Outcome
 
@@ -49,10 +52,14 @@ HSTS is present on API, frontend, manifest, service worker, and offline assets.
 Disallowed CORS origins return HTTP 403 without an allow-origin header instead of
 the previous HTTP 500.
 
-Across 1,635 retained rows for the current deployment, there were no level-50
-application errors and no HTTP 5xx responses. The non-error signals were three
-known Nest route-conversion warnings, four transient gateway connection retries
-while ports 3000/4000 started, and expected authentication/logout HTTP 401s.
+Across 1,635 retained rows for the executable acceptance deployment, there were
+no level-50 application errors and no HTTP 5xx responses. The non-error signals
+were three known Nest route-conversion warnings, four transient gateway
+connection retries while ports 3000/4000 started, and expected
+authentication/logout HTTP 401s.
+The latest 100 rows after the final documentation-only deployment and smoke had
+zero error-level rows, zero warning-level rows, zero HTTP 5xx responses, and only
+the expected post-logout HTTP 401.
 
 ## Main Admin Authentication
 
