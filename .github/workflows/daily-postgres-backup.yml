@@ -74,8 +74,12 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends "postgresql-client-${POSTGRES_CLIENT_MAJOR}"
-          pg_dump --version | tee /dev/stderr | grep -Eq "^pg_dump \(PostgreSQL\) ${POSTGRES_CLIENT_MAJOR}\."
-          psql --version | tee /dev/stderr | grep -Eq "^psql \(PostgreSQL\) ${POSTGRES_CLIENT_MAJOR}\."
+          client_bin="/usr/lib/postgresql/${POSTGRES_CLIENT_MAJOR}/bin"
+          test -x "$client_bin/pg_dump"
+          test -x "$client_bin/psql"
+          echo "$client_bin" >> "$GITHUB_PATH"
+          "$client_bin/pg_dump" --version | tee /dev/stderr | grep -Eq "^pg_dump \(PostgreSQL\) ${POSTGRES_CLIENT_MAJOR}\."
+          "$client_bin/psql" --version | tee /dev/stderr | grep -Eq "^psql \(PostgreSQL\) ${POSTGRES_CLIENT_MAJOR}\."
 
       - name: Create IST artifact names
         id: names
