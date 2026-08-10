@@ -147,7 +147,7 @@ export default function ProfilePage() {
     
     {message && <div className="info-box" role="status" style={{ marginBottom: 16 }}>{message}</div>}
 
-    <div className="profile-layout" style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 24, alignItems: "start" }}>
+    <div className="profile-layout" style={{ display: "grid", gridTemplateColumns: "300px minmax(0, 1fr)", gap: 24, alignItems: "start" }}>
         
         {/* Left Sidebar: Profile Header Card */}
         <section className="card profile-card" style={{ textAlign: "center", position: "sticky", top: 80 }}>
@@ -194,7 +194,7 @@ export default function ProfilePage() {
         </section>
 
         {/* Right Content Area: Tabs */}
-        <div className="profile-tabs-container">
+        <div className="profile-tabs-container" style={{ minWidth: 0 }}>
             <div className="tabs" style={{ display: "flex", gap: 8, overflowX: "auto", borderBottom: "1px solid var(--border)", paddingBottom: 12, marginBottom: 24 }}>
                 {tabs.map(tab => (
                     <button 
