@@ -25,7 +25,7 @@ import {
 } from "../../common/http/allowed-origins";
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { AnnouncementsService } from "./announcements.service";
-import type {
+import {
   CompleteAnnouncementImageDto,
   CreateAnnouncementDto,
   PresignAnnouncementImageDto,
