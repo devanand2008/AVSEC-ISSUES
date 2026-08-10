@@ -1,213 +1,247 @@
-# AVS COLLEGE MANAGEMENT SYSTEM
+# AVS College Management System
 
-# FINAL PRODUCTION RELEASE REPORT
+# Final Production Release Report
 
-**Report state:** PRE-DEPLOYMENT DRAFT  
-**Last updated:** 2026-08-09 (Asia/Kolkata)
+**Report state:** DEPLOYED - VERIFIED WEB RELEASE WITH DOCUMENTED LIMITS
 
-Repository:  
-`https://github.com/devanand2008/AVSEC-ISSUES`
+**Last updated:** 2026-08-11 (Asia/Kolkata)
 
-Commit deployed:  
-PENDING — release candidate not yet committed or deployed
+**Public URL:** https://avs-college-portal.onrender.com/
 
-Render deployment ID:  
-PENDING — do not reuse the previous deployment ID
+**Repository:** https://github.com/devanand2008/AVSEC-ISSUES
 
-Render revision:  
-`main` at PENDING RELEASE COMMIT
+## Release Identity
 
-PUBLIC URL:  
-`https://avs-college-portal.onrender.com`
+| Item                               | Verified value                                                        |
+| ---------------------------------- | --------------------------------------------------------------------- |
+| Executable release commit          | `4c64bc1216c7370fc79bcfd7b1cf60fe00f4e442`                            |
+| Initial acceptance deployment      | `dep-d9t15k8ae00c73b61g00`                                            |
+| Same-commit persistence deployment | `dep-d9t19legekts739hhtn0`                                            |
+| Render service                     | Existing `avs-college-portal` service; no replacement service created |
+| Live deployment status             | `live`                                                                |
+| Database mode                      | `EXTERNAL_PERSISTENT`                                                 |
+| Production database                | `avs_college_import_20260806`                                         |
 
-API:  
-`https://avs-college-portal.onrender.com/api/v1`
+The tested application commit was deployed to the existing Render service. A
+second Render deployment of the exact same commit was used to prove PostgreSQL
+persistence. No database reset, force-reset, destructive storage mirror, or new
+Render service was used.
 
-Health:  
-`https://avs-college-portal.onrender.com/health`  
-PENDING POST-DEPLOY — the existing deployment baseline returns HTTP 200.
+## Production Outcome
 
-## DATABASE CUTOVER
+The web application is live and operational. The previously reported mobile
+Profile and Reports 404 errors are fixed: Profile opens `/profile`, Reports opens
+`/admin/exports`, and both render successfully while authenticated. The empty
+feedback-filter 400 errors, backup inventory 500, invalid-origin CORS 500,
+Supabase signed-download endpoint issue, announcement audience leaks, logout
+session-cache window, and identified responsive-layout defects were also fixed.
 
-Old database:  
-Redacted; retained for rollback and not deleted.
+At the final 2026-08-11 health check:
 
-New production database:  
-`avs_college_import_20260806`
+| Endpoint                     | Result                                           |
+| ---------------------------- | ------------------------------------------------ |
+| `/health`                    | HTTP 200, `ready`, `EXTERNAL_PERSISTENT`         |
+| `/health/live`               | HTTP 200, `ok`                                   |
+| `/health/ready`              | HTTP 200, PostgreSQL `up`, configuration `valid` |
+| `/health/ready/dependencies` | HTTP 200, `ready`                                |
 
-Render was already targeting the verified restored database when authorised
-control-plane access became available. No `DATABASE_URL` change was required or
-performed during this repair run.
+HSTS is present on API, frontend, manifest, service worker, and offline assets.
+Disallowed CORS origins return HTTP 403 without an allow-origin header instead of
+the previous HTTP 500.
 
-Old database backup:  
-PASS — PostgreSQL 17 custom archive, `--no-owner`, `--no-privileges`, SHA-256
-`23EB635C44A1AD728796D1485520EA73E9704A5582476E2C3CF11042F12DEE4C`,
-143 table-data entries, Prisma history present, isolated restore verified,
-AES-256-GCM encrypted, authenticated decryption verified, plaintext removed.
+Across 1,635 retained rows for the current deployment, there were no level-50
+application errors and no HTTP 5xx responses. The non-error signals were three
+known Nest route-conversion warnings, four transient gateway connection retries
+while ports 3000/4000 started, and expected authentication/logout HTTP 401s.
 
-New database backup:  
-PASS — pre-rotation SHA-256
-`EB9D296A36B14C13212955C2987BA2BF8CD49B8F5B5E7BC56B7D65D2A95AAA37`;
-post-Main-Admin-rotation recovery archive SHA-256
-`94DA3D62438678ED4B7F0872FC95860343D75EE1DAC48996AE2DC949B7D6B043`.
-Both contain 143 table-data entries and Prisma history, passed isolated restore,
-were AES-256-GCM encrypted, passed authenticated decryption, and had their
-plaintext archives securely removed.
+## Main Admin Authentication
 
-Expected tables:  
-143
+| Check                                      | Result                                                    |
+| ------------------------------------------ | --------------------------------------------------------- |
+| Account identity                           | `deva1253@college.com`                                    |
+| Status and role                            | `ACTIVE`, `MAIN_ADMIN`                                    |
+| Forced password change                     | Disabled after controlled rotation                        |
+| Replacement credential                     | Stored outside Git in the protected local credential file |
+| Fresh login and `/auth/me`                 | PASS                                                      |
+| Profile API                                | PASS                                                      |
+| Backup inventory API                       | HTTP 200                                                  |
+| Logout                                     | HTTP 204                                                  |
+| Same access token immediately after logout | HTTP 401                                                  |
 
-Actual tables:  
-143
+The publicly exposed old password was invalidated. It is not the live password
+and must not be restored. The replacement secret is intentionally not included
+in this report, source control, logs, or chat.
 
-Expected restored rows:  
-7,425 source-snapshot baseline
+## Database Cutover and Integrity
 
-Actual production rows:  
-6,485 at the verified post-rotation recovery snapshot. The difference from the
-source snapshot is primarily verified cleanup of transient sessions, refresh
-tokens, and idempotency records plus legitimate production activity. Re-query
-after final live acceptance.
+The original 7,425-row figure is the exact authoritative source snapshot before
+the documented transient cleanup. That cleanup removed 671 refresh tokens, 452
+sessions, 12 password-reset tokens, 32 idempotency records, and 25 pending outbox
+records. It is therefore not the expected live total after cutover.
 
-Users: 41  
-Issues: 23  
-Messages: 69  
-Announcements: 1
+The final read-only production snapshot contained 143 public tables and 6,887
+rows. It is not bootstrap-like, no protected baseline table is below its
+post-cleanup floor, and the live database is the intended restored Supabase
+database.
 
-AVS Skill courses: 17  
-AVS Skill modules: 34  
-AVS Skill lessons: 513  
-AVS Skill assessments: 1,019  
-AVS Skill progress: 45  
-AVS Skill certificates: 2
+| Data                          | Final live count |
+| ----------------------------- | ---------------: |
+| Users / credentials           |          45 / 45 |
+| Student / staff profiles      |          13 / 13 |
+| Roles / permissions           |         19 / 104 |
+| Issues / issue attachments    |          23 / 29 |
+| Conversations / messages      |          24 / 70 |
+| Announcements                 |                4 |
+| Attendance sessions / records |            3 / 5 |
+| AVS Skill courses             |               17 |
+| Modules / lessons             |         34 / 513 |
+| Assessments                   |            1,019 |
+| Student progress              |               45 |
+| Learning certificates         |                2 |
+| Audit logs                    |            1,052 |
 
-Main Admin:  
-PASS — the exposed credential was invalidated, the replacement credential is
-retained outside Git, and ACTIVE `MAIN_ADMIN` role and authentication were
-validated.
+Migration state is clean: 40 local migration directories, 40 applied migrations,
+four retained rolled-back audit records, zero failed migrations, zero pending
+local migrations, and zero database-only migration directories.
 
-Main Admin live login:  
-PASS — password rotation, re-login, `/auth/me`, logout, session revocation, and
-offline old-password invalidation checks passed through the current live app.
+### Source-to-live progress variance
 
-## LIVE FUNCTIONAL ACCEPTANCE
+The source snapshot contained 46 `student_progress` rows. An exact identifier and
+natural-key comparison found 45 unchanged rows live, no extra rows, and one
+removed completion belonging to the active Main Admin. The related account,
+course, and lesson remain intact, and that user retains 23 other progress rows.
+The application deliberately supports marking a completed lesson incomplete,
+which deletes that one progress row. Render retained one successful authenticated
+`POST /api/v1/learn/progress` mutation after the isolated restore; this is strong
+evidence that the difference is a user "mark incomplete" action, but request-body
+auditing is unavailable, so it is an inference rather than direct proof. A stale
+completion was not reinserted because doing so would overwrite mutable user state
+without evidence that the removal was accidental.
 
-Add Person: PENDING POST-DEPLOY  
-Add Person PostgreSQL persistence: PENDING POST-DEPLOY AND REDEPLOY  
-People CRUD: PENDING POST-DEPLOY  
-Campus CRUD: PENDING POST-DEPLOY  
-Announcement custom title: PENDING POST-DEPLOY  
-Profile workflow: PENDING POST-DEPLOY — local navigation fix builds and tests  
-Reports navigation/export: PENDING POST-DEPLOY — local route fixes build and test  
-Attendance: PENDING POST-DEPLOY  
-Half-day attendance: PENDING POST-DEPLOY  
-Attendance correction: PENDING POST-DEPLOY  
-Issue Reporting: PENDING POST-DEPLOY  
-Repeated Issues: PENDING POST-DEPLOY  
-Maintenance: PENDING POST-DEPLOY  
-Messenger: PENDING POST-DEPLOY  
-Broadcast recipients: PENDING POST-DEPLOY  
-Feedback QR: PENDING POST-DEPLOY  
-QR real HTTPS: PENDING POST-DEPLOY  
-AVS Learn: PENDING POST-DEPLOY  
-AVS Skill: PENDING POST-DEPLOY  
-Compiler: PENDING POST-DEPLOY  
-Certificate: PENDING POST-DEPLOY  
-AVS Bot: PENDING POST-DEPLOY
+## Controlled Live Transaction and Persistence
 
-Supabase/object storage:  
-PENDING POST-DEPLOY — private inventory passed; the repaired application-signed
-download endpoint requires live acceptance.
+A uniquely marked TEST student was created through the production API with an
+ACTIVE STUDENT role, coherent department/programme/semester/section assignment,
+student profile, and SECTION scope. Its public identifier and creation timestamp
+were unchanged after the same executable commit was redeployed.
 
-Stored-object integrity:  
-PASS — all 108 private objects were downloaded and their hash, MIME type, and
-size verified. Four pre-existing historical missing database references remain
-documented (two READY import sources, one COMPLETED import source, and one
-abandoned UPLOADING message attachment).
+A selected-recipient TEST announcement was created and published. It reached
+exactly one recipient, remained published across the same-commit redeployment,
+and retained the same database identity. Both issue and attendance CSV exports
+returned their corrected endpoints and produced exact request-linked audit rows.
 
-## PWA AND BROWSER ACCEPTANCE
+Cleanup completed safely:
 
-PWA install: NOT RUN AGAINST RELEASE CANDIDATE  
-Installed-PWA login: NOT RUN AGAINST RELEASE CANDIDATE  
-PWA deep links: NOT RUN AGAINST RELEASE CANDIDATE  
-Service worker: PENDING POST-DEPLOY — anonymous pre-fix baseline passed  
-Chrome automation: NOT RUN AGAINST DEPLOYED RELEASE CANDIDATE  
-Physical camera: NOT AVAILABLE  
-Firefox: NOT AVAILABLE  
-Edge: NOT RUN AGAINST RELEASE CANDIDATE — pre-fix anonymous smoke passed  
-Responsive: PENDING POST-DEPLOY — local 320x568 fix and geometry test pass
+- The TEST announcement is `ARCHIVED`.
+- Its notification recipient residue is absent.
+- The final TEST student is `ARCHIVED`.
+- Acceptance sessions were closed; no transaction-specific sessions remain.
+- Permanent anonymization was correctly refused because the verified backup
+  predates the test-user creation. The archived record was not bypass-deleted by
+  direct SQL.
 
-## SECURITY AND QUALITY GATES
+Earlier repair attempts also left four clearly marked archived TEST users. They
+remain non-active because no post-creation restore-tested backup exists to satisfy
+the application's permanent-deletion safety gate.
 
-NODE_ENV: production  
-CORS: PENDING POST-DEPLOY — local denial fix and tests pass  
-Secure cookies: PENDING LIVE AUTHENTICATED VERIFICATION  
-CSP: PENDING LIVE HEADER VERIFICATION  
-HSTS: PENDING POST-DEPLOY — local frontend/PWA header tests pass  
-Rate limiting: PENDING LIVE VERIFICATION  
-Secret scan: PASS — no sensitive files, private keys, or known exposed password tracked  
-Dependency audit: PASS — full npm audit reports zero vulnerabilities  
-RBAC: PASS — automated regression coverage  
-IDOR: PASS — automated regression coverage  
-QR security: PASS — automated regression coverage
+## Object Storage
 
-Backend full suite:  
-Total: 438  
-Passed: 438  
-Failed: 0  
-Skipped: 0  
-Duration: 106.627 seconds (Node 22 release-candidate run)
+| Check                               | Result    |
+| ----------------------------------- | --------- |
+| Supabase private objects            | 108       |
+| Total bytes                         | 2,686,456 |
+| Unique database references          | 102       |
+| Present references                  | 98        |
+| Known historical missing references | 4         |
+| New reference regression            | None      |
 
-Web tests:  
-Total: 116  
-Passed: 116  
-Failed: 0
+All 108 objects were read and matched their stored size, MIME metadata, and
+SHA-256. The four absent references predate this release: two READY import
+sources, one COMPLETED import source, and one abandoned UPLOADING message
+attachment. A live application-signed attachment download used the Supabase
+origin, returned HTTP 200, and matched its stored byte count and SHA-256; it did
+not point to the Render host on port 9000.
 
-Playwright:  
-Total: NOT RUN AGAINST DEPLOYED RELEASE CANDIDATE  
-Passed: NOT APPLICABLE  
-Failed: NOT APPLICABLE  
-Skipped: NOT APPLICABLE
+## Backup and Recovery
 
-Load test:  
-NOT RUN
+GitHub Actions run
+https://github.com/devanand2008/AVSEC-ISSUES/actions/runs/31415240902 completed
+successfully as a production pre-migration backup.
 
-## REMAINING RELEASE GATES
+| Backup gate                 | Result                            |
+| --------------------------- | --------------------------------- |
+| PostgreSQL client           | 17                                |
+| Backup format               | PostgreSQL custom archive         |
+| Ownership/privileges        | Excluded                          |
+| Public table-count manifest | 143 entries                       |
+| Encryption                  | AES-256-GCM                       |
+| Decryption round trip       | PASS                              |
+| Isolated restore            | PASS                              |
+| Exact restored table counts | PASS                              |
+| Database metadata           | `PRE_MIGRATION`, `RESTORE_TESTED` |
+| Encrypted GitHub artifact   | `avs-2026-08-10_23-11-21-IST`     |
+| Artifact retention          | Through 2026-09-09                |
 
-Remaining BLOCKERS:
+The database payload is AES-256-GCM encrypted and its encryption key is retained
+outside Git in the protected local backup-key file. The repository is public, so
+the GitHub-hosted artifact itself is not described as private; eligible GitHub
+users may be able to download the ciphertext, but cannot decrypt it without the
+separate key. This successful run was manually dispatched. A daily cron is
+configured, but a scheduled execution has not yet been observed. The in-app
+Google Drive provider and in-app scheduler remain disabled, so `/health/ready`
+intentionally reports backup readiness as degraded even though the separate
+restore-tested off-host artifact exists.
 
-1. The release commit is not deployed and fresh post-deploy health/browser
-   checks have not run.
-2. Required production transaction acceptance, persistence across a Render
-   redeploy, and dependency-safe TEST-data cleanup have not run.
-3. Scheduled encrypted off-host backup remains unconfigured/degraded; no fresh
-   successful off-host backup and restore-test record exists in production.
+## Automated Quality Gates
 
-Remaining CRITICAL:  
-None known from completed pre-deployment checks.
+| Gate                                        | Result                      |
+| ------------------------------------------- | --------------------------- |
+| API tests                                   | 59 suites, 468 tests passed |
+| Web tests                                   | 19 files, 120 tests passed  |
+| API typecheck, lint, production build       | PASS                        |
+| Web typecheck, lint, production build       | PASS; 85 routes generated   |
+| Production dependency audit                 | 0 vulnerabilities           |
+| Sensitive-file/security scan                | PASS                        |
+| Prisma generation and migration safety gate | PASS                        |
+| Production migrations                       | PASS; zero pending/failed   |
 
-Remaining HIGH:
+## Browser, PWA, and Responsive Acceptance
 
-1. Live verification of Profile, Reports, CORS, HSTS, and application-signed
-   storage downloads remains pending.
-2. Production provider/application secret-rotation evidence beyond the Main
-   Admin credential is incomplete.
+Chrome and Edge public smoke checks passed. The service worker registered,
+activated, and controlled scope `/`; the offline page and manifest icons loaded;
+API requests were not replayed from the PWA cache. The installed-app prompt,
+bottom navigation, drawer, and AVS Bot were tested for overlap and viewport fit.
 
-Remaining MEDIUM:  
-Installed-PWA, full Edge/Firefox browser matrix, physical-camera testing, and
-controlled load testing remain incomplete.
+Authenticated route checks were executed at 320, 360, 375, 390, 412, 430, and
+768 pixel widths across the available route sets. Final targeted checks at
+430x932 and 768x1024 reported HTTP 200, no 404 body, no horizontal document
+overflow, no incomplete loading state, no runtime error, and verified logout.
+Public/login responsive checks also covered 1024, 1366, and 1440 pixel widths.
+Profile, Reports, feedback, imports, storage/backups, announcements, settings,
+and Report Issue were included in the repaired mobile coverage.
 
-Manual actions still required:
+## Remaining Assurance Limits
 
-1. Deploy the exact release commit and record its commit and Render deployment ID.
-2. Run the required live transaction workflow, redeploy persistence check, and
-   remove only clearly marked TEST data.
-3. Configure an authorised off-host backup destination and verify a scheduled
-   encrypted backup plus restore-test metadata.
-4. Complete remaining secret-rotation validation without changing
-   `PASSWORD_PEPPER` blindly.
-5. Complete remaining device/browser/load checks and obtain authorised human
-   sign-off.
+These are not known live web regressions, but they prevent an unconditional
+all-platform sign-off:
 
-PRODUCTION RELEASE DECISION:  
-**BLOCKED**
+1. Google Drive integration and the in-app backup scheduler remain disabled;
+   recovery currently relies on the verified encrypted GitHub Actions artifact,
+   and the configured daily cron has not yet completed a scheduled run.
+2. A physical-device camera/QR run, a downloaded installed-PWA login, and Firefox
+   testing were not available in this environment.
+3. A controlled production load test was not run.
+4. Five archived TEST users remain under the application's fail-closed deletion
+   policy until a qualifying post-creation restore-tested backup exists.
+5. The one mutable Main Admin learning-progress difference from the pre-cutover
+   source snapshot cannot be proven intentional from retained audit data and was
+   therefore disclosed rather than overwritten.
+
+## Release Decision
+
+**Operational web deployment: LIVE AND VERIFIED**
+
+**Formal unconditional production approval: BLOCKED by the remaining assurance
+limits above.** No unresolved blocker is known for ordinary web login, Profile,
+Reports, mobile navigation, database persistence, object downloads, or the tested
+production transactions.
