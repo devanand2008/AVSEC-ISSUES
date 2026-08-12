@@ -54,6 +54,7 @@ COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=build --chown=node:node /app/apps/api/package.json ./apps/api/package.json
 COPY --from=build --chown=node:node /app/apps/api/dist ./apps/api/dist
 COPY --from=build --chown=node:node /app/apps/api/src/generated/prisma ./apps/api/src/generated/prisma
+COPY --from=build --chown=node:node /app/apps/api/src/modules/academic/avs-academic-structure.ts ./apps/api/src/modules/academic/avs-academic-structure.ts
 COPY --from=build --chown=node:node /app/apps/api/prisma ./apps/api/prisma
 COPY --from=build --chown=node:node /app/apps/api/prisma.config.ts ./apps/api/prisma.config.ts
 COPY --from=build --chown=node:node /app/packages/shared-types/package.json ./packages/shared-types/package.json
@@ -68,6 +69,13 @@ COPY --from=build --chown=node:node /app/scripts/unified-server.mjs ./scripts/un
 COPY --from=build --chown=node:node /app/scripts/assert-migration-safety.mjs ./scripts/assert-migration-safety.mjs
 COPY --from=build --chown=node:node /app/scripts/backup-crypto.mjs ./scripts/backup-crypto.mjs
 COPY --from=build --chown=node:node /app/scripts/test-sql-restore.sh ./scripts/test-sql-restore.sh
+
+RUN test -f /app/apps/api/src/modules/academic/avs-academic-structure.ts \
+    && DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build \
+      DEVELOPMENT_ADMIN_EMAIL=build-check@example.invalid \
+      DEVELOPMENT_ADMIN_PASSWORD='BuildCheckOnlyPassword123!' \
+      node_modules/.bin/tsx --eval \
+      "import('./apps/api/prisma/seed.ts').then(() => process.stdout.write('bootstrap dependency graph resolved.\\n'))"
 
 USER node
 EXPOSE 10000

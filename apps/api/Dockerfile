@@ -42,6 +42,9 @@ COPY --from=build --chown=college:college /app/apps/api/dist ./apps/api/dist
 # Prisma generated client (required at runtime for the pg adapter)
 COPY --from=build --chown=college:college /app/apps/api/src/generated ./apps/api/src/generated
 
+# Canonical academic constants imported by the production bootstrap seed module
+COPY --from=build --chown=college:college /app/apps/api/src/modules/academic/avs-academic-structure.ts ./apps/api/src/modules/academic/avs-academic-structure.ts
+
 # Prisma schema and migrations (required for prisma migrate deploy in production)
 COPY --from=build --chown=college:college /app/apps/api/prisma ./apps/api/prisma
 COPY --from=build --chown=college:college /app/apps/api/prisma.config.ts ./apps/api/prisma.config.ts
@@ -56,6 +59,13 @@ COPY --from=build --chown=college:college /app/packages/shared-types/dist ./pack
 COPY --from=build --chown=college:college /app/packages/shared-types/package.json ./packages/shared-types/package.json
 COPY --from=build --chown=college:college /app/packages/validation/dist ./packages/validation/dist
 COPY --from=build --chown=college:college /app/packages/validation/package.json ./packages/validation/package.json
+
+RUN test -f /app/apps/api/src/modules/academic/avs-academic-structure.ts \
+    && DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build \
+      DEVELOPMENT_ADMIN_EMAIL=build-check@example.invalid \
+      DEVELOPMENT_ADMIN_PASSWORD='BuildCheckOnlyPassword123!' \
+      node_modules/.bin/tsx --eval \
+      "import('./apps/api/prisma/seed.ts').then(() => process.stdout.write('bootstrap dependency graph resolved.\\n'))"
 
 RUN mkdir -p /app/backups && chown college:college /app/backups
 
