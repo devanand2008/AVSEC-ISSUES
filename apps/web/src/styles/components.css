@@ -885,6 +885,7 @@
 
 .academic-department-detail {
   padding: var(--space-5);
+  container-type: inline-size;
 }
 
 .academic-department-detail-header {
@@ -1058,6 +1059,24 @@
 .academic-section-actions {
   justify-content: flex-end;
   flex-wrap: nowrap;
+}
+
+@container (max-width: 720px) {
+  .academic-section-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-3);
+  }
+
+  .academic-section-meta {
+    grid-column: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .academic-section-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
 }
 
 .academic-workspace-empty {
