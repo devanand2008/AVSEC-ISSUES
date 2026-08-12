@@ -1,9 +1,10 @@
 import { ConfigService } from "@nestjs/config";
 import { Workbook } from "exceljs";
+import { createHash } from "node:crypto";
 import * as XLSX from "xlsx";
 
 import type { AuthPrincipal } from "../src/common/http/request-context";
-import type { CredentialExportRow } from "../src/modules/imports/import.types";
+import type { CredentialExportRow, ImportRow } from "../src/modules/imports/import.types";
 import { ImportsFileService } from "../src/modules/imports/imports-file.service";
 import { ImportsService } from "../src/modules/imports/imports.service";
 
@@ -78,6 +79,7 @@ describe("ImportsFileService", () => {
         }),
       ]),
     );
+    expect(parsed.duplicateRowCount).toBe(1);
   });
 
   it("returns header errors while preserving raw columns for mapping", async () => {
@@ -191,7 +193,7 @@ describe("ImportsFileService", () => {
     expect(parsed.errors).toEqual([]);
   });
 
-  it("accepts student sheets that use student_id as the login ID", async () => {
+  it("keeps legacy student_id sheets readable while reporting missing canonical fields", async () => {
     const parsed = await service.parse(
       csvFile(
         "student_id,full_name,department_code,programme_code,section,academic_year,temporary_password\nAVS26CSE001,Student Name,CSE,CSE-AIML,A,2026-27,TempPass@123\n",
@@ -211,10 +213,17 @@ describe("ImportsFileService", () => {
       college_identity_id: "AVS26CSE001",
       admission_year: "2026",
     });
-    expect(parsed.errors).toEqual([]);
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: "email", message: "email is required." }),
+        expect.objectContaining({ field: "register_number", message: "register_number is required." }),
+        expect.objectContaining({ field: "year", message: "year is required." }),
+        expect.objectContaining({ field: "semester_number", message: "semester_number is required." }),
+      ]),
+    );
   });
 
-  it("accepts minimum student email and password sheets", async () => {
+  it("rejects legacy email-only student rows instead of creating profile-less accounts", async () => {
     const parsed = await service.parse(
       csvFile(
         "Student Email,Temporary Password\nBASIC.STUDENT@EXAMPLE.EDU,001234\n",
@@ -224,12 +233,19 @@ describe("ImportsFileService", () => {
 
     expect(parsed.headers).toEqual(["email", "temporary_password"]);
     expect(parsed.rows[0]).toMatchObject({
-      college_identity_id: "basic.student@example.edu",
-      full_name: "Basic Student",
       email: "basic.student@example.edu",
       temporary_password: "001234",
     });
-    expect(parsed.errors).toEqual([]);
+    expect(parsed.rows[0]?.college_identity_id).toBeUndefined();
+    expect(parsed.rows[0]?.full_name).toBeUndefined();
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: "full_name", message: "full_name is required." }),
+        expect.objectContaining({ field: "college_identity_id", message: "college_identity_id is required." }),
+        expect.objectContaining({ field: "department_code", message: "department_code is required." }),
+        expect.objectContaining({ field: "section_code", message: "section_code is required." }),
+      ]),
+    );
   });
 
   it("accepts the basic four-column AVS user workbook and preserves numeric password text", async () => {
@@ -307,7 +323,13 @@ describe("ImportsFileService", () => {
         expect.objectContaining({ sheetName: "MECH", headerRowNumber: 2, rowCount: 1 }),
       ]),
     );
-    expect(parsed.errors).toEqual([]);
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining("Missing required headers"),
+        }),
+      ]),
+    );
   });
 
   it("detects cross-sheet duplicate emails and supports skipping both rows", async () => {
@@ -338,7 +360,9 @@ describe("ImportsFileService", () => {
     expect(new Set(parsed.errors.map((error) => error.rowNumber))).toEqual(
       new Set([2, 3]),
     );
-    expect(parsed.errors[0]?.message).toContain("will be skipped");
+    expect(
+      parsed.errors.some((error) => error.message.includes("will be skipped")),
+    ).toBe(true);
   });
 
   it("enforces official domains and rejects inexact numeric password cells without exposing their values", async () => {
@@ -437,7 +461,7 @@ describe("ImportsFileService", () => {
     expect(parsed.columnMapping.email_password).toBe("__IGNORE__");
     expect(parsed.rows[0]).toMatchObject({
       college_identity_id: "AVS24CSE009",
-      roll_number: "24CSE009",
+      register_number: "24CSE009",
       email: "leading.zero@example.edu",
       temporary_password: "001234",
       admission_year: "2024",
@@ -459,11 +483,71 @@ describe("ImportsFileService", () => {
     expect(parsed.rows[0]).toMatchObject({
       temporary_password: "000567",
       admission_year: "2023",
-      year: "THIRD_YEAR",
+      year: "3",
       semester_number: "5",
       section_code: "B",
     });
     expect(parsed.errors).toEqual([]);
+  });
+
+  it("supports the canonical student template headers and keeps register number distinct", async () => {
+    const parsed = await service.parse(
+      csvFile(
+        "full_name,official_email,college_id,register_number,department_code,academic_year,study_year,semester,section,temporary_password,mobile\nCanonical Student,student@college.edu,AVS001,620124104001,AIDS,2026-2027,2,3,B,TempPass@123,9876543210\n",
+      ),
+      "STUDENTS",
+      { departmentMappings: { AIDS: "AI & DS" } },
+    );
+
+    expect(parsed.rows[0]).toMatchObject({
+      full_name: "Canonical Student",
+      email: "student@college.edu",
+      college_identity_id: "AVS001",
+      student_id: "AVS001",
+      register_number: "620124104001",
+      department_code: "AI & DS",
+      source_department_code: "AIDS",
+      academic_year: "2026-2027",
+      year: "2",
+      semester_number: "3",
+      section_code: "B",
+      mobile: "9876543210",
+    });
+    expect(parsed.rows[0]?.roll_number).toBeUndefined();
+    expect(parsed.errors).toEqual([]);
+  });
+
+  it.each(["1", "8"])(
+    "accepts study year %s at the supported boundary",
+    async (studyYear) => {
+      const parsed = await service.parse(
+        csvFile(
+          `full_name,official_email,college_id,register_number,department_code,academic_year,study_year,semester,section,temporary_password\nBoundary Student,boundary${studyYear}@college.edu,AVS${studyYear},REG${studyYear},CSE,2026-27,${studyYear},1,A,AvsTemp@2026!\n`,
+        ),
+        "STUDENTS",
+      );
+
+      expect(parsed.rows[0]?.year).toBe(studyYear);
+      expect(parsed.errors).toEqual([]);
+    },
+  );
+
+  it("rejects study years outside 1 through 8", async () => {
+    const parsed = await service.parse(
+      csvFile(
+        "full_name,official_email,college_id,register_number,department_code,academic_year,study_year,semester,section,temporary_password\nInvalid Year,invalid.year@college.edu,AVS9,REG9,CSE,2026-27,9,1,A,AvsTemp@2026!\n",
+      ),
+      "STUDENTS",
+    );
+
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "year",
+          message: "study_year must be an integer from 1 to 8.",
+        }),
+      ]),
+    );
   });
 
   it("accepts combined user sheets with separate login and profile IDs", async () => {
@@ -595,12 +679,342 @@ describe("ImportsFileService", () => {
       email: "legacy.student@example.edu",
       temporary_password: "001234",
     });
-    expect(parsed.errors).toEqual([]);
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining("Missing required headers"),
+        }),
+      ]),
+    );
   });
 });
 
 describe("ImportsService Excel workbooks", () => {
   const service = Object.create(ImportsService.prototype) as ImportsService;
+
+  it("previews and confirms the canonical student template without a source student_id column", async () => {
+    const files = new ImportsFileService(
+      new ConfigService({
+        S3_BUCKET: "private",
+        S3_ENDPOINT: "http://127.0.0.1:9000",
+        S3_REGION: "us-east-1",
+        S3_ACCESS_KEY: "test",
+        S3_SECRET_KEY: "test",
+      }),
+    );
+    jest.spyOn(files, "saveSource").mockResolvedValue({
+      key: "colleges/college-1/imports/source/students.csv",
+      sha256: "sha256",
+    });
+    const createdAt = new Date("2026-08-11T00:00:00.000Z");
+    let storedJob: Record<string, unknown> | undefined;
+    const prisma = {
+      department: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: "department-cse", code: "CSE", name: "Computer Science and Engineering", shortName: "CSE" },
+        ]),
+      },
+      appSetting: { findUnique: jest.fn().mockResolvedValue(null) },
+      role: { findMany: jest.fn().mockResolvedValue([]) },
+      importJob: {
+        create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          storedJob = {
+            id: "job-1",
+            ...data,
+            resultStorageKey: null,
+            createdAt,
+            updatedAt: createdAt,
+          };
+          return storedJob;
+        }),
+        findFirst: jest.fn(async () => storedJob),
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+    };
+    const handler = { validate: jest.fn().mockResolvedValue([]) };
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const queue = { add: jest.fn().mockResolvedValue(undefined) };
+    const importService = Object.create(ImportsService.prototype) as ImportsService;
+    Object.defineProperties(importService, {
+      prisma: { value: prisma },
+      files: { value: files },
+      handler: { value: handler },
+      audit: { value: audit },
+      queue: { value: queue },
+    });
+    const user = {
+      id: "admin-1",
+      collegeId: "college-1",
+      roles: ["MAIN_ADMIN"],
+      permissions: ["users.import"],
+    } as AuthPrincipal;
+    const file = csvFile(
+      "full_name,official_email,college_id,register_number,department_code,programme_code,academic_year,study_year,semester,section,temporary_password,mobile\nCanonical Student,canonical.student@college.edu,AVS001,620124104001,CSE,,2026-27,2,3,A,AvsTemp@2026!,9876543210\n",
+    );
+
+    const preview = await importService.preview(
+      user,
+      "STUDENTS",
+      file,
+      "request-1",
+      { importMode: "CREATE_ONLY" },
+    );
+    expect(preview.job).toMatchObject({ id: "job-1", validRows: 1, errorRows: 0 });
+    expect(preview.previewRows[0]?.values).toMatchObject({
+      college_identity_id: "AVS001",
+      student_id: "AVS001",
+      register_number: "620124104001",
+    });
+    expect(preview.previewRows[0]?.values.temporary_password).toBeUndefined();
+
+    await expect(
+      importService.confirm(user, "job-1", "request-2"),
+    ).resolves.toEqual({ id: "job-1", status: "QUEUED" });
+    expect(queue.add).toHaveBeenCalledWith(
+      "process",
+      { jobId: "job-1" },
+      expect.objectContaining({ jobId: "job-1" }),
+    );
+  });
+
+  it("does not let a parser-invalid row reserve the last seat during queued processing", async () => {
+    const source = Buffer.from("stored student import", "utf8");
+    const firstRow = {
+      full_name: "Parser Invalid",
+      college_identity_id: "AVS001",
+      student_id: "AVS001",
+      section_code: "A",
+    } as ImportRow;
+    const secondRow = {
+      full_name: "Valid Student",
+      college_identity_id: "AVS002",
+      student_id: "AVS002",
+      section_code: "A",
+    } as ImportRow;
+    const parserError = {
+      rowNumber: 2,
+      field: "email",
+      message: "official_email is required.",
+    };
+    const importJob = {
+      id: "job-capacity",
+      collegeId: "college-1",
+      requestedById: "admin-1",
+      entityType: "STUDENTS",
+      importMode: "CREATE_ONLY",
+      selectedSheetName: null,
+      columnMapping: null,
+      sourceStorageKey: "colleges/college-1/imports/source/students.csv",
+      sourceSha256: createHash("sha256").update(source).digest("hex"),
+      status: "QUEUED",
+    };
+    const transactionImportUpdate = jest.fn().mockResolvedValue(undefined);
+    const prisma = {
+      appSetting: { findUnique: jest.fn().mockResolvedValue(null) },
+      importJob: {
+        findUnique: jest.fn().mockResolvedValue(importJob),
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      $transaction: jest.fn(async (work: (tx: unknown) => Promise<void>) =>
+        work({ importJob: { update: transactionImportUpdate } }),
+      ),
+    };
+    const files = {
+      loadSource: jest.fn().mockResolvedValue(source),
+      parse: jest.fn().mockResolvedValue({
+        rows: [firstRow, secondRow],
+        errors: [parserError],
+      }),
+      saveReport: jest.fn().mockResolvedValue(
+        "colleges/college-1/imports/results/job-capacity.json",
+      ),
+      deleteSource: jest.fn().mockResolvedValue(undefined),
+    };
+    const handler = {
+      validate: jest.fn(
+        async (
+          _entityType: string,
+          _collegeId: string,
+          rows: ImportRow[],
+          _importMode: string,
+          preInvalidRows: ReadonlySet<number> = new Set<number>(),
+        ) => {
+          let reservedSeats = 0;
+          return rows.flatMap((_row, index) => {
+            const rowNumber = index + 2;
+            if (preInvalidRows.has(rowNumber)) return [];
+            if (reservedSeats === 1) {
+              return [{
+                rowNumber,
+                field: "section_code",
+                message: "Section A is full. Current capacity: 1 / 1. Please select another Section.",
+              }];
+            }
+            reservedSeats += 1;
+            return [];
+          });
+        },
+      ),
+      create: jest.fn().mockResolvedValue({
+        rowNumber: 3,
+        model: "User",
+        id: "user-2",
+        label: "AVS002",
+      }),
+    };
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const importService = Object.create(ImportsService.prototype) as ImportsService;
+    Object.defineProperties(importService, {
+      prisma: { value: prisma },
+      files: { value: files },
+      handler: { value: handler },
+      audit: { value: audit },
+    });
+    const updateProgress = jest.fn().mockResolvedValue(undefined);
+    const process = (importService as unknown as {
+      process(job: {
+        data: { jobId: string };
+        updateProgress(progress: number): Promise<void>;
+      }): Promise<void>;
+    }).process.bind(importService);
+
+    await process({ data: { jobId: importJob.id }, updateProgress });
+
+    expect(handler.validate).toHaveBeenCalledWith(
+      "STUDENTS",
+      "college-1",
+      [firstRow, secondRow],
+      "CREATE_ONLY",
+      new Set([2]),
+    );
+    expect(handler.create).toHaveBeenCalledTimes(1);
+    expect(handler.create).toHaveBeenCalledWith(
+      "STUDENTS",
+      "college-1",
+      secondRow,
+      3,
+      importJob.id,
+      "admin-1",
+      "CREATE_ONLY",
+      { resetExistingPasswords: false },
+    );
+    expect(files.saveReport).toHaveBeenCalledWith(
+      "college-1",
+      expect.objectContaining({
+        successful: [expect.objectContaining({ rowNumber: 3, id: "user-2" })],
+        errors: [parserError],
+      }),
+    );
+  });
+
+  it("resolves only exact configured aliases and exposes unknown departments", () => {
+    const mappingPreview = (service as unknown as {
+      departmentMappingPreview(
+        rows: Array<Partial<ImportRow>>,
+        context: {
+          mappings: Record<string, string>;
+          departments: Array<{ id: string; code: string; name: string; shortName: string | null }>;
+        },
+      ): {
+        mappings: Record<string, string>;
+        unresolved: Array<{ sourceCode: string; rowCount: number }>;
+      };
+    }).departmentMappingPreview.bind(service);
+    const departments = [
+      { id: "department-aiml", code: "AI & ML", name: "Artificial Intelligence and Machine Learning", shortName: "AI & ML" },
+    ];
+
+    const result = mappingPreview(
+      [
+        { source_department_code: "AI-ML", department_code: "AI & ML" },
+        { source_department_code: "Computer Science", department_code: "Computer Science" },
+      ],
+      { mappings: { AIML: "AI & ML" }, departments },
+    );
+
+    expect(result.mappings).toEqual({ "AI-ML": "AI & ML" });
+    expect(result.unresolved).toEqual([{ sourceCode: "Computer Science", rowCount: 1 }]);
+  });
+
+  it("applies the built-in AI department aliases to ordinary CSV rows without fuzzy matching", async () => {
+    const mappingService = Object.create(ImportsService.prototype) as ImportsService;
+    Object.defineProperty(mappingService, "prisma", {
+      value: {
+        department: {
+          findMany: jest.fn().mockResolvedValue([
+            { id: "department-aids", code: "AI & DS", name: "Artificial Intelligence and Data Science", shortName: "AI & DS" },
+            { id: "department-aiml", code: "AI & ML", name: "Artificial Intelligence and Machine Learning", shortName: "AI & ML" },
+          ]),
+        },
+        appSetting: { findUnique: jest.fn().mockResolvedValue(null) },
+      },
+    });
+    const context = await (mappingService as unknown as {
+      departmentImportContext(
+        collegeId: string,
+      ): Promise<{ mappings: Record<string, string> }>;
+    }).departmentImportContext("college-1");
+    const parser = new ImportsFileService(
+      new ConfigService({
+        S3_BUCKET: "private",
+        S3_ENDPOINT: "http://127.0.0.1:9000",
+        S3_REGION: "us-east-1",
+        S3_ACCESS_KEY: "test",
+        S3_SECRET_KEY: "test",
+      }),
+    );
+    const aliases = [
+      ["AIDS", "AI & DS"],
+      ["AI&DS", "AI & DS"],
+      ["AI-DS", "AI & DS"],
+      ["AIML", "AI & ML"],
+      ["AI&ML", "AI & ML"],
+      ["AI-ML", "AI & ML"],
+    ] as const;
+
+    for (const [source, expected] of aliases) {
+      const parsed = await parser.parse(
+        csvFile(
+          `full_name,official_email,college_id,register_number,department_code,academic_year,study_year,semester,section,temporary_password\nAlias Student,alias.${source.replace(/[^a-z]/gi, "").toLowerCase()}@college.edu,ID${source.replace(/[^a-z]/gi, "")},REG${source.replace(/[^a-z]/gi, "")},${source},2026-27,2,3,A,AvsTemp@2026!\n`,
+        ),
+        "STUDENTS",
+        { departmentMappings: context.mappings },
+      );
+      expect(parsed.rows[0]).toMatchObject({
+        source_department_code: source,
+        department_code: expected,
+      });
+      expect(parsed.errors).toEqual([]);
+    }
+  });
+
+  it("generates the canonical student data-entry template", async () => {
+    const result = await service.template(
+      { permissions: ["users.import"] } as AuthPrincipal,
+      "STUDENTS",
+    );
+    const workbook = new Workbook();
+    await workbook.xlsx.load(
+      result.content as unknown as Parameters<typeof workbook.xlsx.load>[0],
+    );
+    const worksheet = workbook.getWorksheet("Template");
+    const headers = worksheet?.getRow(1).values as string[] | undefined;
+
+    expect(headers?.slice(1)).toEqual([
+      "full_name",
+      "official_email",
+      "college_id",
+      "register_number",
+      "department_code",
+      "academic_year",
+      "study_year",
+      "semester",
+      "section",
+      "temporary_password",
+      "mobile",
+    ]);
+    expect(worksheet?.getCell("J2").text).toBe("AvsTemp@2026!");
+  });
 
   it("generates a readable XLSX template with required and example rows", async () => {
     const result = await service.template(

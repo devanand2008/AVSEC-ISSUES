@@ -25,6 +25,30 @@ function validBaseForm() {
   };
 }
 
+function validStudentForm() {
+  return {
+    ...createBlankPersonForm(),
+    collegeIdentityId: "AVS001",
+    fullName: "Test Student",
+    email: "student1@college.edu",
+    temporaryPassword: "Strong!Pass123",
+    roleCodes: ["STUDENT"],
+    scopes: [{ type: "SECTION" as const, targetId: "section-cse-a" }],
+    profileType: "student" as const,
+    departmentId: "department-cse",
+    programmeId: "programme-cse",
+    academicYearId: "academic-year-2026",
+    studyYear: "2",
+    semesterId: "semester-3",
+    sectionId: "section-cse-a",
+    studentId: "AVS001",
+    registerNumber: "620124104001",
+    dateOfBirth: "2007-05-17",
+    gender: "FEMALE",
+    admissionYear: "2026",
+  };
+}
+
 describe("person creation helpers", () => {
   it("generates strong temporary passwords", () => {
     for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -70,6 +94,70 @@ describe("person creation helpers", () => {
     expect(validateCreatePersonForm(validBaseForm())).toBeNull();
   });
 
+  it("accepts a complete student and serializes the full academic profile", () => {
+    const form = validStudentForm();
+
+    expect(validateCreatePersonForm(form)).toBeNull();
+    expect(buildCreatePersonPayload(form)).toMatchObject({
+      email: "student1@college.edu",
+      mustChangePassword: true,
+      studentProfile: {
+        departmentId: "department-cse",
+        programmeId: "programme-cse",
+        academicYearId: "academic-year-2026",
+        studyYear: 2,
+        semesterId: "semester-3",
+        sectionId: "section-cse-a",
+        studentId: "AVS001",
+        registerNumber: "620124104001",
+        dateOfBirth: "2007-05-17",
+        gender: "FEMALE",
+        admissionYear: 2026,
+      },
+    });
+  });
+
+  it("requires an official college email for student accounts only", () => {
+    expect(
+      validateCreatePersonForm({ ...validStudentForm(), email: "" }),
+    ).toMatch(/official college email is required/i);
+    expect(validateCreatePersonForm(validBaseForm())).toBeNull();
+  });
+
+  it("requires every academic parent before a student section", () => {
+    expect(
+      validateCreatePersonForm({
+        ...validStudentForm(),
+        academicYearId: "",
+      }),
+    ).toMatch(/academic year, study year, semester, and section/i);
+  });
+
+  it("keeps gender and date of birth optional for student creation", () => {
+    const form = {
+      ...validStudentForm(),
+      gender: "",
+      dateOfBirth: "",
+    };
+
+    expect(validateCreatePersonForm(form)).toBeNull();
+    expect(buildCreatePersonPayload(form).studentProfile).not.toHaveProperty(
+      "gender",
+    );
+    expect(buildCreatePersonPayload(form).studentProfile).not.toHaveProperty(
+      "dateOfBirth",
+    );
+  });
+
+  it("preserves the administrator's first-login password choice", () => {
+    expect(
+      buildCreatePersonPayload({
+        ...validStudentForm(),
+        mustChangePassword: false,
+      }).mustChangePassword,
+    ).toBe(false);
+  });
+
   it("requires a college scope for college administrators", () => {
     expect(
       validateCreatePersonForm({
@@ -93,6 +181,9 @@ describe("person creation helpers", () => {
       "collegeIdentityId",
     );
     expect(createPersonErrorField("email must be an email")).toBe("email");
+    expect(createPersonErrorField("registerNumber must be unique")).toBe(
+      "registerNumber",
+    );
     expect(createPersonErrorField("Unrelated server error")).toBeNull();
   });
 });

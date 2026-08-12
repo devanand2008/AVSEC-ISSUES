@@ -4,6 +4,10 @@ import * as argon2 from "argon2";
 import { createHash, randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { PrismaClient } from "../src/generated/prisma/client";
+import {
+  AVS_DEPARTMENT_IMPORT_ALIASES,
+  AVS_ENGINEERING_ACADEMIC_STRUCTURE,
+} from "../src/modules/academic/avs-academic-structure";
 
 config({ path: resolve(process.cwd(), ".env") });
 config({ path: resolve(process.cwd(), "../../.env") });
@@ -620,36 +624,41 @@ async function main() {
     },
     update: {},
   });
-  const deptInputs = [
-    ["CSE", "Computer Science & Engineering"],
-    ["ECE", "Electronics & Communication"],
-    ["ME", "Mechanical Engineering"],
-  ] as const;
   const departments = new Map<string, string>();
-  for (const [code, name] of deptInputs) {
-    const row = await prisma.department.upsert({
-      where: { collegeId_code: { collegeId: college.id, code } },
-      create: { collegeId: college.id, campusId: mainCampus.id, code, name },
-      update: { name },
+  for (const input of AVS_ENGINEERING_ACADEMIC_STRUCTURE) {
+    const matches = await prisma.department.findMany({
+      where: { collegeId: college.id, code: { in: [input.code, ...input.aliases] } },
+      take: 2,
+      select: { id: true },
     });
-    departments.set(code, row.id);
+    if (matches.length > 1) {
+      throw new Error(`Department ${input.code} has both canonical and legacy rows; resolve the duplicate before seeding.`);
+    }
+    const row = matches[0]
+      ? await prisma.department.update({
+          where: { id: matches[0].id },
+          data: {
+            campusId: mainCampus.id,
+            code: input.code,
+            name: input.name,
+            shortName: input.code,
+            sortOrder: input.sortOrder,
+            isActive: true,
+            archivedAt: null,
+          },
+        })
+      : await prisma.department.create({
+          data: {
+            collegeId: college.id,
+            campusId: mainCampus.id,
+            code: input.code,
+            name: input.name,
+            shortName: input.code,
+            sortOrder: input.sortOrder,
+          },
+        });
+    departments.set(input.code, row.id);
   }
-  const programme = await prisma.programme.upsert({
-    where: {
-      departmentId_code: {
-        departmentId: departments.get("CSE")!,
-        code: "BTECH-CSE",
-      },
-    },
-    create: {
-      collegeId: college.id,
-      departmentId: departments.get("CSE")!,
-      code: "BTECH-CSE",
-      name: "B.Tech Computer Science",
-      durationYears: 4,
-    },
-    update: {},
-  });
   const year = await prisma.academicYear.upsert({
     where: { collegeId_name: { collegeId: college.id, name: "2026-27" } },
     create: {
@@ -661,41 +670,117 @@ async function main() {
     },
     update: { isCurrent: true },
   });
-  const semester = await prisma.semester.upsert({
-    where: {
-      programmeId_academicYearId_number: {
-        programmeId: programme.id,
+  const programmeRows = new Map<string, { id: string }>();
+  const semesterRows = new Map<string, { id: string }>();
+  const sectionRows = new Map<string, { id: string; name: string }>();
+  for (const structure of AVS_ENGINEERING_ACADEMIC_STRUCTURE) {
+    const departmentId = departments.get(structure.code);
+    if (!departmentId) throw new Error(`Department ${structure.code} was not seeded.`);
+    const programmeMatches = await prisma.programme.findMany({
+      where: {
+        departmentId,
+        code: { in: [structure.programmeCode, ...structure.legacyProgrammeCodes] },
+      },
+      take: 2,
+      select: { id: true },
+    });
+    if (programmeMatches.length > 1) {
+      throw new Error(`Programme ${structure.programmeCode} has both canonical and legacy rows; resolve the duplicate before seeding.`);
+    }
+    const programmeRow = programmeMatches[0]
+      ? await prisma.programme.update({
+          where: { id: programmeMatches[0].id },
+          data: {
+            code: structure.programmeCode,
+            name: structure.programmeName,
+            degreeType: "B.Tech",
+            durationYears: 4,
+            isActive: true,
+          },
+        })
+      : await prisma.programme.create({
+          data: {
+            collegeId: college.id,
+            departmentId,
+            code: structure.programmeCode,
+            name: structure.programmeName,
+            degreeType: "B.Tech",
+            durationYears: 4,
+          },
+        });
+    programmeRows.set(structure.code, { id: programmeRow.id });
+    const semesterRow = await prisma.semester.upsert({
+      where: {
+        programmeId_academicYearId_number: {
+          programmeId: programmeRow.id,
+          academicYearId: year.id,
+          number: 5,
+        },
+      },
+      create: {
+        programmeId: programmeRow.id,
         academicYearId: year.id,
         number: 5,
+        name: "Semester 5",
+      },
+      update: { name: "Semester 5", isActive: true },
+    });
+    semesterRows.set(structure.code, { id: semesterRow.id });
+    for (const sectionCode of structure.sections) {
+      const sectionRow = await prisma.section.upsert({
+        where: { semesterId_code: { semesterId: semesterRow.id, code: sectionCode } },
+        create: {
+          semesterId: semesterRow.id,
+          code: sectionCode,
+          name: `Section ${sectionCode}`,
+          studyYear: 3,
+          displayName: `${structure.code} - Section ${sectionCode}`,
+          capacity: 70,
+        },
+        update: {
+          name: `Section ${sectionCode}`,
+          studyYear: 3,
+          displayName: `${structure.code} - Section ${sectionCode}`,
+          capacity: 70,
+          isActive: true,
+          archivedAt: null,
+        },
+      });
+      sectionRows.set(`${structure.code}:${sectionCode}`, { id: sectionRow.id, name: sectionRow.name });
+    }
+  }
+  const programme = programmeRows.get("CSE")!;
+  const semester = semesterRows.get("CSE")!;
+  const sectionA = sectionRows.get("CSE:A")!;
+  const sectionB = sectionRows.get("CSE:B")!;
+  const aliasSetting = await prisma.appSetting.findUnique({
+    where: {
+      collegeId_key: {
+        collegeId: college.id,
+        key: "imports.department_aliases",
+      },
+    },
+    select: { value: true },
+  });
+  const savedAliases = aliasSetting?.value && typeof aliasSetting.value === "object" && !Array.isArray(aliasSetting.value)
+    ? aliasSetting.value as Record<string, string>
+    : {};
+  await prisma.appSetting.upsert({
+    where: {
+      collegeId_key: {
+        collegeId: college.id,
+        key: "imports.department_aliases",
       },
     },
     create: {
-      programmeId: programme.id,
-      academicYearId: year.id,
-      number: 5,
-      name: "Semester 5",
+      collegeId: college.id,
+      key: "imports.department_aliases",
+      value: { ...AVS_DEPARTMENT_IMPORT_ALIASES, ...savedAliases },
     },
-    update: {},
-  });
-  const sectionA = await prisma.section.upsert({
-    where: { semesterId_code: { semesterId: semester.id, code: "A" } },
-    create: {
-      semesterId: semester.id,
-      code: "A",
-      name: "CSE 3A",
-      capacity: 60,
+    update: {
+      value: { ...AVS_DEPARTMENT_IMPORT_ALIASES, ...savedAliases },
+      version: { increment: 1 },
     },
-    update: {},
-  });
-  const sectionB = await prisma.section.upsert({
-    where: { semesterId_code: { semesterId: semester.id, code: "B" } },
-    create: {
-      semesterId: semester.id,
-      code: "B",
-      name: "CSE 3B",
-      capacity: 60,
-    },
-    update: {},
   });
   const subject = await prisma.subject.upsert({
     where: { semesterId_code: { semesterId: semester.id, code: "CS501" } },
@@ -1662,7 +1747,7 @@ async function main() {
   await ensureFeedbackTarget({ targetType: "HOD", staffUserId: users.hod.id, departmentId: departments.get("CSE"), targetName: users.hod.fullName, description: "CSE HOD feedback" });
   await ensureFeedbackTarget({ targetType: "STAFF", staffUserId: users.faculty.id, departmentId: departments.get("CSE"), targetName: users.faculty.fullName, description: "Faculty feedback" });
   await ensureFeedbackTarget({ targetType: "STAFF", staffUserId: users.coordinator.id, departmentId: departments.get("CSE"), targetName: users.coordinator.fullName, description: "Faculty feedback" });
-  await ensureFeedbackTarget({ targetType: "DEPARTMENT", departmentId: departments.get("CSE"), targetName: "Computer Science & Engineering", description: "Department feedback" });
+  await ensureFeedbackTarget({ targetType: "DEPARTMENT", departmentId: departments.get("CSE"), targetName: "Computer Science and Engineering", description: "Department feedback" });
   for (const block of blocks) {
     const fullBlock = await prisma.block.findUnique({
       where: { id: block.id },

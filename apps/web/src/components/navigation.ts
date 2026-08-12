@@ -285,8 +285,8 @@ export const navigation: NavigationItem[] = [
     any: ["roles.manage"],
   },
   {
-    href: "/admin/academic",
-    label: "Academic structure",
+    href: "/admin/academic/departments-sections",
+    label: "Academic setup",
     icon: BookOpen,
     any: ["academic.manage"],
   },

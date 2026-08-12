@@ -7,7 +7,8 @@ import { Workbook } from "exceljs";
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
 import { AuditService } from "../audit/audit.service";
-import { IMPORT_ENTITY_TYPES, IMPORT_MODES, IMPORT_TEMPLATES, type CredentialExportRow, type ImportEntityType, type ImportMode, type ImportedRecord, type ImportResultReport, type ImportRow, type ImportRowError } from "./import.types";
+import { AVS_DEPARTMENT_IMPORT_ALIASES } from "../academic/avs-academic-structure";
+import { IMPORT_ENTITY_TYPES, IMPORT_MODES, IMPORT_TEMPLATES, type CredentialExportRow, type ImportEntityType, type ImportMode, type ImportedRecord, type ImportResultReport, type ImportRow, type ImportRowError, type ImportStudyYear } from "./import.types";
 import { ImportsFileService } from "./imports-file.service";
 import { ImportsHandlerService } from "./imports-handler.service";
 
@@ -30,7 +31,7 @@ interface PreviewOptions {
   selectedRoleCode?: string;
   resetExistingPasswords: boolean;
   departmentMappings?: Record<string, string>;
-  detectedStudyYear?: "2" | "3";
+  detectedStudyYear?: ImportStudyYear;
   duplicateResolution: "KEEP_FIRST" | "SKIP_ALL";
 }
 
@@ -39,6 +40,7 @@ const RESET_EXISTING_PASSWORDS_KEY = "__reset_existing_passwords";
 const DETECTED_STUDY_YEAR_KEY = "__detected_study_year";
 const DUPLICATE_RESOLUTION_KEY = "__duplicate_resolution";
 const DEPARTMENT_MAPPING_PREFIX = "__department_mapping:";
+const EXPLICIT_DEPARTMENT_MAPPING_PREFIX = "__explicit_department_mapping:";
 const DEPARTMENT_ALIAS_SETTING_KEY = "imports.department_aliases";
 
 const ROLE_RANK: Record<string, number> = {
@@ -83,7 +85,12 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     const entityType = this.entityType(value);
     this.assertPermission(user, entityType);
     const template = IMPORT_TEMPLATES[entityType];
-    const headers = [...template.required, ...template.optional];
+    const headers = (template.downloadHeaders ?? [
+      ...template.required,
+      ...template.optional,
+    ]).filter(
+      (header) => entityType !== "STUDENTS" || header !== "programme_code",
+    );
     const workbook = new Workbook();
     const worksheet = workbook.addWorksheet("Template");
     worksheet.addRows([
@@ -112,8 +119,18 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
       officialEmailDomains: await this.officialEmailDomains(user.collegeId),
     });
     this.applySelectedRole(entityType, parsed.rows, options.selectedRoleCode);
+    const departmentMappingPreview = this.departmentMappingPreview(
+      parsed.rows,
+      departmentContext,
+    );
     await this.assertRoleDelegation(user, entityType, parsed.rows);
-    const databaseErrors = await this.handler.validate(entityType, user.collegeId, parsed.rows, options.importMode);
+    const databaseErrors = await this.handler.validate(
+      entityType,
+      user.collegeId,
+      parsed.rows,
+      options.importMode,
+      new Set(parsed.errors.map((error) => error.rowNumber)),
+    );
     const source = await this.files.saveSource(user.collegeId, entityType, file);
     const allErrors = [...parsed.errors, ...databaseErrors];
     const invalidRows = new Set(allErrors.map((error) => error.rowNumber));
@@ -128,6 +145,12 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
           target,
         ]),
       ),
+      ...Object.fromEntries(
+        Object.entries(departmentContext.explicitMappings).map(([source, target]) => [
+          `${EXPLICIT_DEPARTMENT_MAPPING_PREFIX}${source}`,
+          target,
+        ]),
+      ),
       ...(parsed.detectedStudyYear
         ? { [DETECTED_STUDY_YEAR_KEY]: parsed.detectedStudyYear }
         : {}),
@@ -136,12 +159,6 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     const persistedOptions = options.resetExistingPasswords
       ? { ...(persistedColumnMapping ?? {}), [RESET_EXISTING_PASSWORDS_KEY]: "true" }
       : persistedColumnMapping;
-    if (Object.keys(departmentContext.explicitMappings).length)
-      await this.saveDepartmentMappings(
-        user.collegeId,
-        user.id,
-        departmentContext.explicitMappings,
-      );
     const importJob = await this.prisma.importJob.create({ data: {
       collegeId: user.collegeId,
       requestedById: user.id,
@@ -171,8 +188,11 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
       detectedStudyYear: parsed.detectedStudyYear,
       passwordWarnings: parsed.passwordWarnings,
       duplicateGroups: parsed.duplicateGroups,
+      duplicateRowCount: parsed.duplicateRowCount,
       duplicateResolution: options.duplicateResolution,
       departmentOptions: departmentContext.departments,
+      departmentMappings: departmentMappingPreview.mappings,
+      unresolvedDepartmentMappings: departmentMappingPreview.unresolved,
       previewRows: parsed.rows.slice(0, 25).map((row, index) => ({
         rowNumber: index + 2,
         values: this.safePreviewRow(row),
@@ -203,6 +223,10 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     if (job.importMode === "VALIDATE_ONLY") throw new ConflictException("This job was created in validate-only mode and cannot be confirmed.");
     if (job.status !== "READY") throw new ConflictException("Only a validated READY import can be confirmed.");
     if (job.validRows === 0) throw new BadRequestException("This import has no valid rows to process.");
+    const explicitDepartmentMappings = this.explicitDepartmentMappingsFromColumnMapping(job.columnMapping);
+    if (explicitDepartmentMappings) {
+      await this.saveDepartmentMappings(user.collegeId, user.id, explicitDepartmentMappings);
+    }
     await this.prisma.importJob.update({ where: { id }, data: { status: "QUEUED" } });
     try {
       await this.queue.add("process", { jobId: id }, { jobId: id, attempts: 1, removeOnComplete: 500, removeOnFail: 1000 });
@@ -293,7 +317,13 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
       });
       this.applySelectedRole(entityType, parsed.rows, this.selectedRoleFromColumnMapping(importJob.columnMapping));
       const resetExistingPasswords = this.resetExistingPasswordsFromColumnMapping(importJob.columnMapping);
-      const databaseErrors = await this.handler.validate(entityType, importJob.collegeId, parsed.rows, importMode);
+      const databaseErrors = await this.handler.validate(
+        entityType,
+        importJob.collegeId,
+        parsed.rows,
+        importMode,
+        new Set(parsed.errors.map((error) => error.rowNumber)),
+      );
       const invalidRows = new Set([...parsed.errors, ...databaseErrors].map((error) => error.rowNumber));
       const errors: ImportRowError[] = [...parsed.errors, ...databaseErrors];
       const successful: ImportedRecord[] = [];
@@ -493,15 +523,23 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     return entries.length ? Object.fromEntries(entries) : undefined;
   }
 
-  private studyYearOption(value?: string): "2" | "3" | undefined {
+  private studyYearOption(value?: string): ImportStudyYear | undefined {
     const normalized = (value || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
     if (!normalized) return undefined;
-    if (["2", "2ND", "2RD", "SECOND", "SECOND_YEAR"].includes(normalized))
-      return "2";
-    if (["3", "3RD", "THIRD", "THIRD_YEAR"].includes(normalized))
-      return "3";
+    if (/^[1-8]$/.test(normalized)) return normalized as ImportStudyYear;
+    const aliases: Record<string, ImportStudyYear> = {
+      "1ST": "1", "1ST_YEAR": "1", FIRST: "1", FIRST_YEAR: "1",
+      "2ND": "2", "2RD": "2", "2ND_YEAR": "2", "2RD_YEAR": "2", SECOND: "2", SECOND_YEAR: "2",
+      "3RD": "3", "3RD_YEAR": "3", THIRD: "3", THIRD_YEAR: "3",
+      "4TH": "4", "4TH_YEAR": "4", FOURTH: "4", FOURTH_YEAR: "4",
+      "5TH": "5", "5TH_YEAR": "5", FIFTH: "5", FIFTH_YEAR: "5",
+      "6TH": "6", "6TH_YEAR": "6", SIXTH: "6", SIXTH_YEAR: "6",
+      "7TH": "7", "7TH_YEAR": "7", SEVENTH: "7", SEVENTH_YEAR: "7",
+      "8TH": "8", "8TH_YEAR": "8", EIGHTH: "8", EIGHTH_YEAR: "8",
+    };
+    if (aliases[normalized]) return aliases[normalized];
     throw new BadRequestException(
-      "detectedStudyYear must be Second Year or Third Year.",
+      "detectedStudyYear must be an integer from 1 to 8.",
     );
   }
 
@@ -546,13 +584,35 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     return Object.keys(mappings).length ? mappings : undefined;
   }
 
+  private explicitDepartmentMappingsFromColumnMapping(
+    value: unknown,
+  ): Record<string, string> | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return undefined;
+    const mappings = Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(
+          (entry): entry is [string, string] =>
+            entry[0].startsWith(EXPLICIT_DEPARTMENT_MAPPING_PREFIX) &&
+            typeof entry[1] === "string",
+        )
+        .map(([source, target]) => [
+          source.slice(EXPLICIT_DEPARTMENT_MAPPING_PREFIX.length),
+          target,
+        ]),
+    );
+    return Object.keys(mappings).length ? mappings : undefined;
+  }
+
   private studyYearFromColumnMapping(
     value: unknown,
-  ): "2" | "3" | undefined {
+  ): ImportStudyYear | undefined {
     if (!value || typeof value !== "object" || Array.isArray(value))
       return undefined;
     const year = (value as Record<string, unknown>)[DETECTED_STUDY_YEAR_KEY];
-    return year === "2" || year === "3" ? year : undefined;
+    return typeof year === "string" && /^[1-8]$/.test(year)
+      ? year as ImportStudyYear
+      : undefined;
   }
 
   private duplicateResolutionFromColumnMapping(
@@ -623,27 +683,22 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     const explicitMappings: Record<string, string> = {};
     const builtInTargets: Record<string, string[]> = {
       CIVIL: ["CIVIL", "CE", "Civil Engineering"],
-      CSE: ["CSE", "Computer Science and Engineering"],
+      CSE: ["CSE", "Computer Science and Engineering", "Computer Science & Engineering"],
       EEE: ["EEE", "Electrical and Electronics Engineering"],
-      ECE: ["ECE", "Electronics and Communication Engineering"],
+      ECE: ["ECE", "Electronics and Communication Engineering", "Electronics & Communication"],
       MECH: ["MECH", "ME", "Mechanical Engineering"],
       BME: ["BME", "Biomedical Engineering"],
       IT: ["IT", "Information Technology"],
-      AID_S: [
-        "AI&DS",
-        "AIDS",
-        "Artificial Intelligence and Data Science",
-      ],
-      AIML: [
-        "AIML",
-        "CSE(AI&ML)",
-        "CSE-AIML",
-        "Computer Science and Engineering AI and ML",
-      ],
     };
 
     for (const [source, targets] of Object.entries(builtInTargets)) {
       const department = this.matchImportDepartment(departments, targets);
+      if (department) mappings[source] = department.code;
+    }
+    for (const [source, target] of Object.entries(
+      AVS_DEPARTMENT_IMPORT_ALIASES,
+    )) {
+      const department = this.matchImportDepartment(departments, [target]);
       if (department) mappings[source] = department.code;
     }
     for (const [source, rawTarget] of Object.entries(stored)) {
@@ -665,6 +720,60 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     return { mappings, explicitMappings, departments };
   }
 
+  private departmentMappingPreview(
+    rows: ImportRow[],
+    context: {
+      mappings: Record<string, string>;
+      departments: Array<{
+        id: string;
+        code: string;
+        name: string;
+        shortName: string | null;
+      }>;
+    },
+  ): {
+    mappings: Record<string, string>;
+    unresolved: Array<{ sourceCode: string; rowCount: number }>;
+  } {
+    const sourceCounts = new Map<string, number>();
+    for (const row of rows) {
+      const source = (row.source_department_code || row.department_code || "").trim();
+      if (!source) continue;
+      sourceCounts.set(source, (sourceCounts.get(source) ?? 0) + 1);
+    }
+    const mappings: Record<string, string> = {};
+    const unresolved: Array<{ sourceCode: string; rowCount: number }> = [];
+    for (const [sourceCode, rowCount] of sourceCounts) {
+      const configured = Object.entries(context.mappings).find(
+        ([candidate]) =>
+          this.departmentToken(candidate) === this.departmentToken(sourceCode),
+      )?.[1];
+      const direct = this.exactImportDepartment(context.departments, sourceCode);
+      const target = configured ?? direct?.code;
+      if (target) mappings[sourceCode] = target;
+      else unresolved.push({ sourceCode, rowCount });
+    }
+    return { mappings, unresolved };
+  }
+
+  private exactImportDepartment(
+    departments: Array<{
+      id: string;
+      code: string;
+      name: string;
+      shortName: string | null;
+    }>,
+    value: string,
+  ) {
+    const exact = value.trim().toLocaleLowerCase("en-US");
+    const matches = departments.filter((department) =>
+      [department.id, department.code, department.name, department.shortName]
+        .filter((candidate): candidate is string => Boolean(candidate))
+        .some((candidate) => candidate.trim().toLocaleLowerCase("en-US") === exact),
+    );
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+
   private matchImportDepartment(
     departments: Array<{
       id: string;
@@ -678,7 +787,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     const tokens = new Set(
       values.map((value) => this.departmentToken(value)),
     );
-    return departments.find(
+    const matches = departments.filter(
       (department) =>
         ids.has(department.id) ||
         tokens.has(this.departmentToken(department.code)) ||
@@ -688,6 +797,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
             tokens.has(this.departmentToken(department.shortName)),
         ),
     );
+    return matches.length === 1 ? matches[0] : undefined;
   }
 
   private departmentToken(value: string): string {

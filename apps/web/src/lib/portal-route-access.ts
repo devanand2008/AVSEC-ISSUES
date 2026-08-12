@@ -18,6 +18,10 @@ const bulkImportPermissions = [
 
 const portalRouteRules: readonly PortalRouteRule[] = [
   {
+    prefix: "/admin/academic",
+    any: ["academic.manage"],
+  },
+  {
     prefix: "/admin/people",
     any: ["users.read"],
   },

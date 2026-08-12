@@ -45,9 +45,12 @@ export class ReviewCorrectionDto {
 export class AddClassStudentDto {
   @ApiProperty() @IsString() @Length(2, 180) fullName!: string;
   @ApiProperty() @IsString() @Length(2, 60) studentId!: string;
-  @ApiPropertyOptional() @IsOptional() @IsEmail() @MaxLength(254) email?: string;
+  @ApiProperty() @IsEmail() @MaxLength(254) email!: string;
+  @ApiProperty() @IsString() @Length(2, 60) registerNumber!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(30) mobile?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(60) rollNumber?: string;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1990) @Max(2200) admissionYear?: number;
+  @ApiPropertyOptional() @IsOptional() @IsDateString({ strict: true }) dateOfBirth?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(30) gender?: string;
   @ApiProperty({ minLength: 12 }) @IsString() @MinLength(12) @MaxLength(200) temporaryPassword!: string;
 }

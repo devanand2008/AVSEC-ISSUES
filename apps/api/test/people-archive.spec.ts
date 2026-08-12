@@ -12,6 +12,7 @@
 
 import { Test, TestingModule } from "@nestjs/testing";
 import { UsersService } from "../src/modules/users/users.service";
+import { SectionPlacementService } from "../src/modules/academic/section-placement.service";
 import { PrismaService } from "../src/database/prisma.service";
 import { AuditService } from "../src/modules/audit/audit.service";
 import { ConfigService } from "@nestjs/config";
@@ -40,17 +41,25 @@ function createMockPrisma() {
       update: jest.fn().mockResolvedValue({}),
     },
     session: { deleteMany: jest.fn().mockResolvedValue({ count: 3 }) },
-    userRole: { findMany: jest.fn().mockResolvedValue([{ role: { code: "STUDENT", rank: 10 } }]) },
+    userRole: {
+      findMany: jest
+        .fn()
+        .mockResolvedValue([{ role: { code: "STUDENT", rank: 10 } }]),
+    },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
     attendanceRecord: { count: jest.fn().mockResolvedValue(248) },
-    $transaction: jest.fn().mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-      const txProxy = new Proxy({} as Record<string, unknown>, {
-        get: (_target, prop) => {
-          return (createMockPrisma() as Record<string, unknown>)[prop as string];
-        },
-      });
-      return fn(txProxy);
-    }),
+    $transaction: jest
+      .fn()
+      .mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const txProxy = new Proxy({} as Record<string, unknown>, {
+          get: (_target, prop) => {
+            return (createMockPrisma() as Record<string, unknown>)[
+              prop as string
+            ];
+          },
+        });
+        return fn(txProxy);
+      }),
   };
 }
 
@@ -64,9 +73,13 @@ describe("UsersService — Archive & Restore", () => {
       providers: [
         UsersService,
         { provide: PrismaService, useValue: prisma },
-        { provide: AuditService, useValue: { record: jest.fn().mockResolvedValue({}) } },
+        {
+          provide: AuditService,
+          useValue: { record: jest.fn().mockResolvedValue({}) },
+        },
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: OfficialGroupsService, useValue: {} },
+        { provide: SectionPlacementService, useValue: {} },
       ],
     }).compile();
     _service = module.get(UsersService);
@@ -74,8 +87,11 @@ describe("UsersService — Archive & Restore", () => {
 
   it("should archive an active student", async () => {
     prisma.user.findFirst.mockResolvedValue({
-      id: "stu-001", publicId: "stu-pub-001", fullName: "Test Student",
-      status: "ACTIVE", collegeId: "college-001",
+      id: "stu-001",
+      publicId: "stu-pub-001",
+      fullName: "Test Student",
+      status: "ACTIVE",
+      collegeId: "college-001",
       roles: [{ role: { code: "STUDENT", rank: 10 } }],
     });
 
@@ -87,12 +103,16 @@ describe("UsersService — Archive & Restore", () => {
 
   it("attendance records exist independently of user status", async () => {
     prisma.attendanceRecord.count.mockResolvedValue(248);
-    const count = await prisma.attendanceRecord.count({ where: { studentUserId: "stu-001" } });
+    const count = await prisma.attendanceRecord.count({
+      where: { studentUserId: "stu-001" },
+    });
     expect(count).toBe(248);
   });
 
   it("sessions can be bulk deleted for a user", async () => {
-    const result = await prisma.session.deleteMany({ where: { userId: "stu-001" } });
+    const result = await prisma.session.deleteMany({
+      where: { userId: "stu-001" },
+    });
     expect(result.count).toBe(3);
   });
 });

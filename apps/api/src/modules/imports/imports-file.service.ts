@@ -27,6 +27,7 @@ import {
   type ImportResultReport,
   type ImportRow,
   type ImportRowError,
+  type ImportStudyYear,
 } from "./import.types";
 
 const MAX_IMPORT_BYTES =
@@ -107,6 +108,7 @@ const HEADER_ALIASES: Record<string, string> = {
   login_id: "college_identity_id",
   college_id: "college_identity_id",
   college_email: "email",
+  official_email: "email",
   email_address: "email",
   email_id: "email",
   mail_id: "email",
@@ -115,9 +117,9 @@ const HEADER_ALIASES: Record<string, string> = {
   original_password: "__IGNORED_IMPORT_COLUMN__",
   path: "legacy_path",
   real_password: "__IGNORED_IMPORT_COLUMN__",
-  register_number: "roll_number",
-  register_no: "roll_number",
-  reg_no: "roll_number",
+  register_number: "register_number",
+  register_no: "register_number",
+  reg_no: "register_number",
   roll_no: "roll_number",
   study_year: "year",
   academic_year_or_study_year: "year",
@@ -177,7 +179,7 @@ interface ParseOptions {
   columnMapping?: Record<string, string>;
   departmentMappings?: Record<string, string>;
   duplicateResolution?: "KEEP_FIRST" | "SKIP_ALL";
-  forcedStudyYear?: "2" | "3";
+  forcedStudyYear?: ImportStudyYear;
   officialEmailDomains?: string[];
 }
 
@@ -203,7 +205,7 @@ interface AvsStudentWorkbook {
   matrix: unknown[][];
   sheetNames: string[];
   sheetInspections: ImportSheetInspection[];
-  detectedStudyYear?: "2" | "3";
+  detectedStudyYear?: ImportStudyYear;
   passwordWarnings: number;
   errors: ImportRowError[];
 }
@@ -305,16 +307,17 @@ export class ImportsFileService {
     selectedSheetName?: string;
     columnMapping: Record<string, string>;
     sheetInspections: ImportSheetInspection[];
-    detectedStudyYear?: "2" | "3";
+    detectedStudyYear?: ImportStudyYear;
     passwordWarnings: number;
     duplicateGroups: ImportDuplicateGroup[];
+    duplicateRowCount: number;
   }> {
     const extension = extname(file.originalname).toLowerCase();
     let matrix: unknown[][];
     let sheetNames: string[] = [];
     let selectedSheetName: string | undefined;
     let sheetInspections: ImportSheetInspection[] = [];
-    let detectedStudyYear: "2" | "3" | undefined;
+    let detectedStudyYear: ImportStudyYear | undefined;
     let passwordWarnings = 0;
     let workbookErrors: ImportRowError[] = [];
     try {
@@ -423,6 +426,9 @@ export class ImportsFileService {
           ) as ImportRow,
         ),
       );
+    rows.forEach((row) =>
+      this.applyDepartmentMapping(row, options.departmentMappings),
+    );
     if (!rows.length)
       throw new BadRequestException(
         "The import file does not contain any data rows.",
@@ -448,6 +454,11 @@ export class ImportsFileService {
       detectedStudyYear,
       passwordWarnings,
       duplicateGroups: this.duplicateEmailGroups(rows),
+      duplicateRowCount: this.duplicateRowNumbers(
+        entityType,
+        rows,
+        options.duplicateResolution ?? "KEEP_FIRST",
+      ).size,
       columnMapping: Object.fromEntries(
         rawHeaders.map((rawHeader, index) => [
           rawHeader,
@@ -706,11 +717,15 @@ export class ImportsFileService {
           }
         } else seen.set(key, rowNumber);
       }
-      if (entityType === "STUDENTS" && row.year && !["2", "3", "SECOND_YEAR", "THIRD_YEAR"].includes(row.year.toUpperCase().trim())) {
+      if (
+        entityType === "STUDENTS" &&
+        row.year &&
+        !this.normalizedStudyYear(row.year)
+      ) {
         errors.push({
           rowNumber,
           field: "year",
-          message: "study_year must be 2, 3, SECOND_YEAR, or THIRD_YEAR.",
+          message: "study_year must be an integer from 1 to 8.",
         });
       }
       if (entityType === "STUDENTS" && row.source_sheet && !row.first_name) {
@@ -724,14 +739,15 @@ export class ImportsFileService {
         errors.push({
           rowNumber,
           field: "year",
-          message: "Study year was not detected. Select Second Year or Third Year before confirming.",
+          message: "Study year was not detected. Select a study year from 1 to 8 before confirming.",
         });
       }
       if (
         entityType === "STUDENTS" &&
-        (row.programme_code || row.section_code || row.student_id || row.roll_number) &&
+        (row.programme_code || row.section_code || row.student_id || row.register_number || row.roll_number) &&
         !row.college_identity_id &&
         !row.student_id &&
+        !row.register_number &&
         !row.roll_number
       ) {
         errors.push({
@@ -774,7 +790,8 @@ export class ImportsFileService {
           : "",
         row.email ? `email:${row.email.toLowerCase()}` : "",
         row.student_id ? `student:${row.student_id.toUpperCase()}` : "",
-        row.roll_number ? `register:${row.roll_number.toUpperCase()}` : "",
+        row.register_number ? `register:${row.register_number.toUpperCase()}` : "",
+        row.roll_number ? `roll:${row.roll_number.toUpperCase()}` : "",
       ].filter(Boolean);
     }
     if (entityType === "ASSETS") return row.code ? [row.code.toUpperCase()] : [];
@@ -817,8 +834,7 @@ export class ImportsFileService {
   ): boolean {
     if (field === "email" && entityType === "STAFF")
       return Boolean(row.employee_id || row.college_identity_id);
-    if (field === "email" && entityType === "STUDENTS")
-      return Boolean(row.student_id || row.college_identity_id);
+    if (field === "email" && entityType === "STUDENTS") return false;
     if (field === "department_code" && entityType === "STAFF") return true;
     return false;
   }
@@ -1216,15 +1232,14 @@ export class ImportsFileService {
     headers: string[],
   ): boolean {
     if (header === "college_identity_id" && entityType === "STUDENTS")
-      return headers.includes("student_id") || headers.includes("roll_number");
+      return false;
     if (header === "student_id" && entityType === "STUDENTS")
-      return headers.includes("college_identity_id") || headers.includes("roll_number");
+      return headers.includes("college_identity_id") || headers.includes("register_number") || headers.includes("roll_number");
     if (header === "college_identity_id" && entityType === "STAFF")
       return headers.includes("employee_id");
     if (header === "email" && entityType === "STAFF")
       return headers.includes("employee_id");
-    if (header === "email" && entityType === "STUDENTS")
-      return headers.includes("student_id") || headers.includes("college_identity_id");
+    if (header === "email" && entityType === "STUDENTS") return false;
     if (header === "department_code" && entityType === "STAFF")
       return true;
     if (header === "college_identity_id" && entityType === "USERS")
@@ -1244,6 +1259,10 @@ export class ImportsFileService {
   }
 
   private prepareRow(entityType: ImportEntityType, row: ImportRow): ImportRow {
+    const hasCollegeIdentityColumn = Object.prototype.hasOwnProperty.call(
+      row,
+      "college_identity_id",
+    );
     if (!row.full_name?.trim() && (row.first_name || row.last_name))
       row.full_name = [row.first_name, row.last_name]
         .filter(Boolean)
@@ -1253,12 +1272,16 @@ export class ImportsFileService {
     row.email = row.email?.trim().toLowerCase();
     row.department_code = row.department_code?.trim();
     row.temporary_password = row.temporary_password?.trim();
-    if (!row.full_name?.trim() && ["USERS", "STUDENTS", "STAFF"].includes(entityType)) {
+    if (!row.full_name?.trim() && ["USERS", "STAFF"].includes(entityType)) {
       row.full_name = this.displayNameFromAccount(row);
     }
     if (row.role_codes)
       row.role_codes = this.normalizeRoleCodes(row.role_codes);
-    if (!row.college_identity_id && entityType === "STUDENTS")
+    if (
+      !row.college_identity_id &&
+      entityType === "STUDENTS" &&
+      !hasCollegeIdentityColumn
+    )
       row.college_identity_id = row.student_id;
     if (!row.college_identity_id && entityType === "STAFF")
       row.college_identity_id = row.employee_id;
@@ -1268,7 +1291,11 @@ export class ImportsFileService {
         row.employee_or_student_id ||
         row.employee_id ||
         row.student_id;
-    if (!row.college_identity_id && ["USERS", "STUDENTS", "STAFF"].includes(entityType) && row.email)
+    if (
+      !row.college_identity_id &&
+      ["USERS", "STAFF"].includes(entityType) &&
+      row.email
+    )
       row.college_identity_id = row.email.length <= 60 ? row.email : row.email.slice(0, 60);
     if (
       entityType === "USERS" &&
@@ -1282,11 +1309,15 @@ export class ImportsFileService {
       !row.student_id &&
       row.role_codes?.split(/[;,|]/).includes("STUDENT")
     )
-      row.student_id = row.employee_or_student_id || row.college_identity_id || row.roll_number;
-    if (!row.college_identity_id && entityType === "STUDENTS")
-      row.college_identity_id = row.student_id || row.roll_number;
+      row.student_id = row.employee_or_student_id || row.college_identity_id || row.register_number || row.roll_number;
+    if (
+      !row.college_identity_id &&
+      entityType === "STUDENTS" &&
+      !hasCollegeIdentityColumn
+    )
+      row.college_identity_id = row.student_id || row.register_number || row.roll_number;
     if (!row.student_id && entityType === "STUDENTS")
-      row.student_id = row.college_identity_id || row.roll_number;
+      row.student_id = row.college_identity_id || row.register_number || row.roll_number;
     if (!row.admission_year && entityType === "STUDENTS") {
       const derivedYear =
         this.admissionYearForStudyYear(row.academic_year, row.year) ||
@@ -1305,6 +1336,9 @@ export class ImportsFileService {
       );
     if (!row.semester_number && row.semester)
       row.semester_number = row.semester;
+    if (entityType === "STUDENTS" && row.year) {
+      row.year = this.normalizedStudyYear(row.year) ?? row.year;
+    }
     if (!row.joined_on && row.date_of_joining)
       row.joined_on = row.date_of_joining;
     return row;
@@ -1371,22 +1405,49 @@ export class ImportsFileService {
       .replace(/^_+|_+$/g, "");
   }
 
-  private studyYearFromFileName(value: string): "2" | "3" | undefined {
+  private studyYearFromFileName(value: string): ImportStudyYear | undefined {
     const name = value
       .replace(extname(value), "")
       .toUpperCase()
       .replace(/[_-]+/g, " ");
-    if (
-      /\b(?:2ND|2RD|SECOND)\s+YEAR\b/.test(name) ||
-      /\bYEAR\s+2\b/.test(name)
-    )
-      return "2";
-    if (
-      /\b(?:3RD|THIRD)\s+YEAR\b/.test(name) ||
-      /\bYEAR\s+3\b/.test(name)
-    )
-      return "3";
+    const words: ImportStudyYear[] = ["1", "2", "3", "4", "5", "6", "7", "8"];
+    const names = [
+      "FIRST",
+      "SECOND",
+      "THIRD",
+      "FOURTH",
+      "FIFTH",
+      "SIXTH",
+      "SEVENTH",
+      "EIGHTH",
+    ];
+    for (const [index, year] of words.entries()) {
+      const ordinal = index === 0 ? "ST" : index === 1 ? "ND" : index === 2 ? "RD" : "TH";
+      const numericOrdinal = year === "2" ? `${year}(?:ND|RD)` : `${year}${ordinal}`;
+      if (
+        new RegExp(`\\b(?:${numericOrdinal}|${names[index]})\\s+YEAR\\b`).test(name) ||
+        new RegExp(`\\bYEAR\\s+${year}\\b`).test(name)
+      ) {
+        return year;
+      }
+    }
     return undefined;
+  }
+
+  private normalizedStudyYear(value: string): ImportStudyYear | undefined {
+    const normalized = value.trim().toUpperCase().replace(/[\s-]+/g, "_");
+    if (/^[1-8]$/.test(normalized)) return normalized as ImportStudyYear;
+    const aliases: Record<string, ImportStudyYear> = {
+      "1ST": "1", "1ST_YEAR": "1", FIRST: "1", FIRST_YEAR: "1",
+      "2ND": "2", "2RD": "2", "2ND_YEAR": "2", "2RD_YEAR": "2", SECOND: "2", SECOND_YEAR: "2",
+      "3RD": "3", "3RD_YEAR": "3", THIRD: "3", THIRD_YEAR: "3",
+      "4TH": "4", "4TH_YEAR": "4", FOURTH: "4", FOURTH_YEAR: "4",
+      "5TH": "5", "5TH_YEAR": "5", FIFTH: "5", FIFTH_YEAR: "5",
+      "6TH": "6", "6TH_YEAR": "6", SIXTH: "6", SIXTH_YEAR: "6",
+      "7TH": "7", "7TH_YEAR": "7", SEVENTH: "7", SEVENTH_YEAR: "7",
+      "8TH": "8", "8TH_YEAR": "8", EIGHTH: "8", EIGHTH_YEAR: "8",
+    };
+    return aliases[normalized];
   }
 
   private departmentMapping(
@@ -1400,6 +1461,17 @@ export class ImportsFileService {
         this.normalizeDepartmentKey(candidate) === normalizedSource,
     );
     return entry?.[1]?.trim() || undefined;
+  }
+
+  private applyDepartmentMapping(
+    row: ImportRow,
+    mappings: Record<string, string> | undefined,
+  ): void {
+    const source = (row.source_department_code || row.department_code || "").trim();
+    if (!source) return;
+    row.source_department_code = source;
+    const mapped = this.departmentMapping(mappings, source);
+    if (mapped) row.department_code = mapped;
   }
 
   private normalizeDepartmentKey(value: string): string {
@@ -1437,6 +1509,28 @@ export class ImportsFileService {
       }));
   }
 
+  private duplicateRowNumbers(
+    entityType: ImportEntityType,
+    rows: ImportRow[],
+    resolution: "KEEP_FIRST" | "SKIP_ALL",
+  ): Set<number> {
+    const seen = new Map<string, number>();
+    const duplicateRows = new Set<number>();
+    rows.forEach((row, index) => {
+      const rowNumber = index + 2;
+      for (const key of this.logicalKeys(entityType, row)) {
+        const previous = seen.get(key);
+        if (previous) {
+          duplicateRows.add(rowNumber);
+          if (resolution === "SKIP_ALL") duplicateRows.add(previous);
+        } else {
+          seen.set(key, rowNumber);
+        }
+      }
+    });
+    return duplicateRows;
+  }
+
   private cell(value: unknown): string {
     if (value instanceof Date) return value.toISOString().slice(0, 10);
     return value == null ? "" : String(value).trim();
@@ -1459,7 +1553,7 @@ export class ImportsFileService {
   }
   private displayNameFromAccount(row: ImportRow): string {
     const emailPrefix = row.email?.split("@")[0]?.replace(/[._-]+/g, " ");
-    const identity = row.college_identity_id || row.student_id || row.employee_id || row.user_id;
+    const identity = row.college_identity_id || row.student_id || row.register_number || row.employee_id || row.user_id;
     const value = emailPrefix || identity || "Imported User";
     return value
       .split(/\s+/)
@@ -1474,15 +1568,10 @@ export class ImportsFileService {
   ): string {
     const academicStart = this.yearFromAcademicValue(academicYearValue);
     if (!academicStart || !studyYearValue) return "";
-    const aliases: Record<string, number> = {
-      "2": 2,
-      "2ND": 2,
-      SECOND_YEAR: 2,
-      "3": 3,
-      "3RD": 3,
-      THIRD_YEAR: 3,
-    };
-    const studyYear = aliases[studyYearValue.toUpperCase().trim()];
+    const normalizedStudyYear = this.normalizedStudyYear(studyYearValue);
+    const studyYear = normalizedStudyYear
+      ? Number(normalizedStudyYear)
+      : undefined;
     if (!studyYear) return "";
     return String(Number(academicStart) - studyYear + 1);
   }

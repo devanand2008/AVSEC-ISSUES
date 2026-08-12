@@ -30,6 +30,18 @@ import {
   type ScopeRow,
   type ScopeType,
 } from "@/features/people/create-person";
+import {
+  academicYearsForProgramme,
+  isSectionFull,
+  programmesForDepartment,
+  sectionCapacity,
+  sectionOptionLabel,
+  sectionsForAcademicSelection,
+  semestersForStudyYear,
+  studyYearsForAcademicPeriod,
+  type StudentAcademicOption,
+  type StudentAcademicOptions,
+} from "@/features/people/student-academic-options";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -39,24 +51,11 @@ interface Role {
   description: string | null;
 }
 
-interface Option {
-  id: string;
-  code?: string;
-  name: string;
-  departmentId?: string;
-  programmeId?: string;
-  academicYearId?: string;
-  semesterId?: string;
-}
+type Option = StudentAcademicOption;
 
-interface ScopeOptions {
+interface ScopeOptions extends StudentAcademicOptions {
   college: Option[];
   campuses: Option[];
-  departments: Option[];
-  programmes: Option[];
-  academicYears: Option[];
-  semesters: Option[];
-  sections: Option[];
   blocks: Option[];
   floors: Option[];
   rooms: Option[];
@@ -143,29 +142,58 @@ export default function CreatePersonPage() {
 
   const programmes = useMemo(
     () =>
-      options.data?.programmes.filter(
-        (item) => !form.departmentId || item.departmentId === form.departmentId,
-      ) ?? [],
-    [form.departmentId, options.data?.programmes],
+      options.data
+        ? programmesForDepartment(options.data, form.departmentId)
+        : [],
+    [form.departmentId, options.data],
   );
-  const programmeSemesterIds = useMemo(
+  const academicYears = useMemo(
     () =>
-      new Set(
-        options.data?.semesters
-          .filter(
-            (item) =>
-              !form.programmeId || item.programmeId === form.programmeId,
-          )
-          .map((item) => item.id) ?? [],
-      ),
-    [form.programmeId, options.data?.semesters],
+      options.data
+        ? academicYearsForProgramme(options.data, form.programmeId)
+        : [],
+    [form.programmeId, options.data],
+  );
+  const studyYears = useMemo(
+    () =>
+      options.data
+        ? studyYearsForAcademicPeriod(options.data, {
+            programmeId: form.programmeId,
+            academicYearId: form.academicYearId,
+          })
+        : [],
+    [form.academicYearId, form.programmeId, options.data],
+  );
+  const semesters = useMemo(
+    () =>
+      options.data
+        ? semestersForStudyYear(options.data, {
+            programmeId: form.programmeId,
+            academicYearId: form.academicYearId,
+            studyYear: form.studyYear,
+          })
+        : [],
+    [form.academicYearId, form.programmeId, form.studyYear, options.data],
   );
   const sections = useMemo(
     () =>
-      options.data?.sections.filter((item) =>
-        programmeSemesterIds.has(item.semesterId ?? ""),
-      ) ?? [],
-    [options.data?.sections, programmeSemesterIds],
+      options.data
+        ? sectionsForAcademicSelection(options.data, {
+            departmentId: form.departmentId,
+            programmeId: form.programmeId,
+            academicYearId: form.academicYearId,
+            studyYear: form.studyYear,
+            semesterId: form.semesterId,
+          })
+        : [],
+    [
+      form.academicYearId,
+      form.departmentId,
+      form.programmeId,
+      form.semesterId,
+      form.studyYear,
+      options.data,
+    ],
   );
 
   const create = useMutation({
@@ -203,6 +231,26 @@ export default function CreatePersonPage() {
       const field = createPersonErrorField(validationError);
       setFieldError(field ? { field, message: validationError } : null);
       return;
+    }
+    if (form.profileType === "student") {
+      const selectedSection = sections.find(
+        (section) => section.id === form.sectionId,
+      );
+      if (!selectedSection) {
+        const message =
+          "Select an active section that belongs to the chosen academic period.";
+        setError(message);
+        setFieldError({ field: "sectionId", message });
+        return;
+      }
+      if (isSectionFull(selectedSection)) {
+        const { capacity, currentStudentCount } =
+          sectionCapacity(selectedSection);
+        const message = `Section ${selectedSection.code ?? selectedSection.name} is full. Current capacity: ${currentStudentCount} / ${capacity}. Please select another Section.`;
+        setError(message);
+        setFieldError({ field: "sectionId", message });
+        return;
+      }
     }
     create.mutate();
   }
@@ -280,8 +328,10 @@ export default function CreatePersonPage() {
             <div>
               <h2 style={{ margin: 0 }}>Account created</h2>
               <p className="muted" style={{ margin: "4px 0 0" }}>
-                {created.fullName} can sign in now and must change this
-                temporary password after the first login.
+                {created.fullName} can sign in now
+                {created.mustChangePassword
+                  ? " and must change this temporary password after the first login."
+                  : " with the temporary password below."}
               </p>
             </div>
           </div>
@@ -366,10 +416,14 @@ export default function CreatePersonPage() {
                 onChange={(fullName) => setForm({ ...form, fullName })}
               />
               <TextField
-                label="Email"
+                label={
+                  form.profileType === "student"
+                    ? "Official college email"
+                    : "Email"
+                }
                 value={form.email}
                 type="email"
-                optional
+                optional={form.profileType !== "student"}
                 maxLength={254}
                 autoComplete="email"
                 error={
@@ -414,6 +468,19 @@ export default function CreatePersonPage() {
                 </select>
               </label>
             </div>
+            <label className="check-field person-entry-account-option">
+              <input
+                type="checkbox"
+                checked={form.mustChangePassword}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    mustChangePassword: event.target.checked,
+                  })
+                }
+              />
+              Must change password on first login
+            </label>
             <label className="field" style={{ marginTop: 16 }}>
               <span>Temporary password</span>
               <div
@@ -461,7 +528,7 @@ export default function CreatePersonPage() {
                     })
                   }
                 >
-                  <RefreshCw size={16} /> Regenerate
+                  <RefreshCw size={16} /> Generate temporary password
                 </button>
               </div>
               <small
@@ -671,7 +738,11 @@ export default function CreatePersonPage() {
                     profileType: event.target.value as ProfileType,
                     departmentId: "",
                     programmeId: "",
+                    academicYearId: "",
+                    studyYear: "",
+                    semesterId: "",
                     sectionId: "",
+                    scopes: clearSectionScopeTargets(form.scopes),
                   })
                 }
               >
@@ -682,7 +753,62 @@ export default function CreatePersonPage() {
             </label>
 
             {form.profileType === "student" && (
-              <div className="form-grid" style={{ marginTop: 16 }}>
+              <div className="person-entry-student-fields">
+                <label className="field">
+                  <span>Gender (optional)</span>
+                  <select
+                    className="input"
+                    aria-invalid={
+                      fieldError?.field === "gender" || undefined
+                    }
+                    value={form.gender}
+                    onChange={(event) =>
+                      setForm({ ...form, gender: event.target.value })
+                    }
+                  >
+                    <option value="">Select...</option>
+                    <option value="FEMALE">Female</option>
+                    <option value="MALE">Male</option>
+                    <option value="NON_BINARY">Non-binary</option>
+                    <option value="PREFER_NOT_TO_SAY">
+                      Prefer not to say
+                    </option>
+                  </select>
+                  {fieldError?.field === "gender" && (
+                    <small className="error-box" role="alert">
+                      {fieldError.message}
+                    </small>
+                  )}
+                </label>
+                <TextField
+                  label="Date of birth"
+                  value={form.dateOfBirth}
+                  type="date"
+                  optional
+                  max={new Date().toISOString().slice(0, 10)}
+                  error={
+                    fieldError?.field === "dateOfBirth"
+                      ? fieldError.message
+                      : undefined
+                  }
+                  onChange={(dateOfBirth) =>
+                    setForm({ ...form, dateOfBirth })
+                  }
+                />
+                <TextField
+                  label="Register number"
+                  value={form.registerNumber}
+                  minLength={2}
+                  maxLength={60}
+                  error={
+                    fieldError?.field === "registerNumber"
+                      ? fieldError.message
+                      : undefined
+                  }
+                  onChange={(registerNumber) =>
+                    setForm({ ...form, registerNumber })
+                  }
+                />
                 <OptionField
                   label="Department"
                   value={form.departmentId}
@@ -697,7 +823,11 @@ export default function CreatePersonPage() {
                       ...form,
                       departmentId,
                       programmeId: "",
+                      academicYearId: "",
+                      studyYear: "",
+                      semesterId: "",
                       sectionId: "",
+                      scopes: clearSectionScopeTargets(form.scopes),
                     })
                   }
                 />
@@ -711,8 +841,84 @@ export default function CreatePersonPage() {
                       : undefined
                   }
                   onChange={(programmeId) =>
-                    setForm({ ...form, programmeId, sectionId: "" })
+                    setForm({
+                      ...form,
+                      programmeId,
+                      academicYearId: "",
+                      studyYear: "",
+                      semesterId: "",
+                      sectionId: "",
+                      scopes: clearSectionScopeTargets(form.scopes),
+                    })
                   }
+                  disabled={!form.departmentId}
+                  emptyMessage="Select a department first."
+                />
+                <OptionField
+                  label="Academic year"
+                  value={form.academicYearId}
+                  options={academicYears}
+                  error={
+                    fieldError?.field === "academicYearId"
+                      ? fieldError.message
+                      : undefined
+                  }
+                  onChange={(academicYearId) =>
+                    setForm({
+                      ...form,
+                      academicYearId,
+                      studyYear: "",
+                      semesterId: "",
+                      sectionId: "",
+                      scopes: clearSectionScopeTargets(form.scopes),
+                    })
+                  }
+                  disabled={!form.programmeId}
+                  emptyMessage="Select a programme first."
+                />
+                <OptionField
+                  label="Study year"
+                  value={form.studyYear}
+                  options={studyYears.map((year) => ({
+                    id: String(year),
+                    name: `Year ${year}`,
+                  }))}
+                  error={
+                    fieldError?.field === "studyYear"
+                      ? fieldError.message
+                      : undefined
+                  }
+                  onChange={(studyYear) =>
+                    setForm({
+                      ...form,
+                      studyYear,
+                      semesterId: "",
+                      sectionId: "",
+                      scopes: clearSectionScopeTargets(form.scopes),
+                    })
+                  }
+                  disabled={!form.academicYearId}
+                  emptyMessage="Select an academic year first."
+                />
+                <OptionField
+                  label="Semester"
+                  value={form.semesterId}
+                  options={semesters}
+                  error={
+                    fieldError?.field === "semesterId"
+                      ? fieldError.message
+                      : undefined
+                  }
+                  onChange={(semesterId) =>
+                    setForm({
+                      ...form,
+                      semesterId,
+                      sectionId: "",
+                      scopes: clearSectionScopeTargets(form.scopes),
+                    })
+                  }
+                  disabled={!form.studyYear}
+                  emptyMessage="Select a study year first."
                 />
                 <OptionField
                   label="Section"
@@ -734,6 +940,10 @@ export default function CreatePersonPage() {
                       ),
                     })
                   }
+                  disabled={!form.semesterId}
+                  emptyMessage="Select a semester first."
+                  getOptionLabel={sectionOptionLabel}
+                  isOptionDisabled={isSectionFull}
                 />
                 <TextField
                   label="Student ID"
@@ -764,17 +974,18 @@ export default function CreatePersonPage() {
                   }
                 />
                 <TextField
-                  label="Roll number"
+                  label="Internal roll number"
                   value={form.rollNumber}
                   optional
                   maxLength={60}
-                  error={
-                    fieldError?.field === "employeeId"
-                      ? fieldError.message
-                      : undefined
-                  }
                   onChange={(rollNumber) => setForm({ ...form, rollNumber })}
                 />
+                {sections.some(isSectionFull) && (
+                  <p className="person-entry-capacity-note" role="status">
+                    Full sections are shown with their capacity and cannot be
+                    selected. Please choose another section.
+                  </p>
+                )}
               </div>
             )}
 
@@ -918,6 +1129,10 @@ function OptionField({
   onChange,
   optional = false,
   error,
+  disabled = false,
+  emptyMessage,
+  getOptionLabel = optionLabel,
+  isOptionDisabled = () => false,
 }: {
   label: string;
   value: string;
@@ -925,6 +1140,10 @@ function OptionField({
   onChange: (value: string) => void;
   optional?: boolean;
   error?: string;
+  disabled?: boolean;
+  emptyMessage?: string;
+  getOptionLabel?: (option: Option) => string;
+  isOptionDisabled?: (option: Option) => boolean;
 }) {
   return (
     <label className="field">
@@ -935,14 +1154,19 @@ function OptionField({
       <select
         className="input"
         required={!optional}
+        disabled={disabled}
         aria-invalid={Boolean(error) || undefined}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
         <option value="">{optional ? "Not assigned" : "Select..."}</option>
         {options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {optionLabel(option)}
+          <option
+            key={option.id}
+            value={option.id}
+            disabled={isOptionDisabled(option)}
+          >
+            {getOptionLabel(option)}
           </option>
         ))}
       </select>
@@ -953,7 +1177,7 @@ function OptionField({
       )}
       {!options.length && (
         <small className="muted">
-          No active {label.toLowerCase()} options.
+          {emptyMessage ?? `No active ${label.toLowerCase()} options.`}
         </small>
       )}
     </label>
@@ -962,4 +1186,10 @@ function OptionField({
 
 function optionLabel(option: Option): string {
   return option.code ? `${option.code} - ${option.name}` : option.name;
+}
+
+function clearSectionScopeTargets(scopes: ScopeRow[]): ScopeRow[] {
+  return scopes.map((scope) =>
+    scope.type === "SECTION" ? { ...scope, targetId: "" } : scope,
+  );
 }

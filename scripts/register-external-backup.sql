@@ -90,4 +90,41 @@ SELECT 1 / CASE WHEN EXISTS (
     AND deleted_at IS NULL
 ) THEN 1 ELSE 0 END AS verified_backup_registered;
 
+-- PRE_MIGRATION and PRE_DELETION rows carry RESTORE_TESTED status only after
+-- the workflow's isolated restore succeeded. Persist that proof so application
+-- safety gates can distinguish it from a merely completed encrypted artifact.
+INSERT INTO backup_restore_tests (
+  id,
+  college_id,
+  backup_id,
+  status,
+  record_count_comparison,
+  schema_comparison,
+  started_at,
+  completed_at,
+  created_at,
+  updated_at
+)
+SELECT
+  gen_random_uuid(),
+  b.college_id,
+  b.id,
+  'PASSED'::"BackupRestoreTestStatus",
+  jsonb_build_object('status', 'MATCHED', 'recordCounts', b.record_counts),
+  jsonb_build_object('status', 'MATCHED', 'schemaVersion', b.schema_version),
+  now(),
+  now(),
+  now(),
+  now()
+FROM database_backups b
+WHERE b.encrypted_checksum_sha256 = :'encrypted_sha256'
+  AND b.backup_type = :'backup_type'::"DatabaseBackupType"
+  AND b.status = 'RESTORE_TESTED'::"DatabaseBackupStatus"
+  AND b.deleted_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM backup_restore_tests t
+    WHERE t.backup_id = b.id AND t.status = 'PASSED'::"BackupRestoreTestStatus"
+  );
+
 COMMIT;

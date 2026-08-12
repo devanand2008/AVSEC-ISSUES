@@ -78,7 +78,11 @@ describe("BackupsService list", () => {
       take: 100,
       include: {
         restoreTests: {
-          orderBy: { createdAt: "desc" },
+          orderBy: [
+            { completedAt: "desc" },
+            { createdAt: "desc" },
+            { id: "desc" },
+          ],
           take: 1,
         },
       },

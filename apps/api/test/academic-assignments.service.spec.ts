@@ -39,7 +39,7 @@ function harness(overrides: Record<string, unknown> = {}) {
   const prisma = { $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const officialGroups = { synchronizeSection: jest.fn().mockResolvedValue(undefined) };
-  const service = new AcademicService(prisma as unknown as PrismaService, audit as unknown as AuditService, officialGroups as never);
+  const service = new AcademicService(prisma as unknown as PrismaService, audit as unknown as AuditService, officialGroups as never, {} as never);
   return { service, tx, prisma, audit, officialGroups };
 }
 

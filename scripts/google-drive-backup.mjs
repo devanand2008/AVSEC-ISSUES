@@ -24,7 +24,7 @@ await verifyOwner(accessToken);
 const rootId = safeId(process.env.GOOGLE_DRIVE_BACKUP_FOLDER_ID);
 const backupType = allowedValue(
   process.env.BACKUP_TYPE ?? "DAILY",
-  ["DAILY", "PRE_MIGRATION"],
+  ["DAILY", "PRE_MIGRATION", "PRE_DELETION"],
   "BACKUP_TYPE",
 );
 const backupStatus = allowedValue(
@@ -49,12 +49,10 @@ const destinations = [tierId, schemaId, manifestsId];
 const kinds = ["encrypted-full", "schema", "checksum"];
 
 for (let index = 0; index < 3; index += 1) {
-  await uploadAndVerify(
-    accessToken,
-    paths[index],
-    destinations[index],
-    { ...commonProperties, avsArtifactKind: kinds[index] },
-  );
+  await uploadAndVerify(accessToken, paths[index], destinations[index], {
+    ...commonProperties,
+    avsArtifactKind: kinds[index],
+  });
 }
 
 const manifest = JSON.parse(await readFile(paths[3], "utf8"));
@@ -72,7 +70,9 @@ await uploadAndVerify(accessToken, paths[3], manifestsId, {
   ...commonProperties,
   avsArtifactKind: "manifest",
 });
-process.stdout.write("Google Drive backup upload and metadata verification passed.\n");
+process.stdout.write(
+  "Google Drive backup upload and metadata verification passed.\n",
+);
 
 async function refreshAccessToken() {
   const body = new URLSearchParams({
@@ -105,7 +105,9 @@ async function verifyOwner(token) {
     String(payload.email).toLowerCase() !==
       process.env.GOOGLE_DRIVE_OWNER_EMAIL.toLowerCase()
   ) {
-    throw new Error("The authorized Google account does not match the configured backup owner.");
+    throw new Error(
+      "The authorized Google account does not match the configured backup owner.",
+    );
   }
 }
 
@@ -137,7 +139,8 @@ async function ensureFolder(token, parentId, name) {
 
 async function uploadAndVerify(token, path, parentId, appProperties) {
   const details = await stat(path);
-  if (!details.isFile() || details.size < 1) throw new Error("Backup artifact is empty.");
+  if (!details.isFile() || details.size < 1)
+    throw new Error("Backup artifact is empty.");
   const name = path.split(/[\\/]/).pop();
   const mimeType = name.endsWith(".json")
     ? "application/json"
@@ -160,7 +163,8 @@ async function uploadAndVerify(token, path, parentId, appProperties) {
     },
   );
   const location = session.headers.get("location");
-  if (!session.ok || !location) throw new Error(`Google Drive upload session failed for ${name}.`);
+  if (!session.ok || !location)
+    throw new Error(`Google Drive upload session failed for ${name}.`);
   const uploaded = await fetch(location, {
     method: "PUT",
     headers: {
@@ -172,7 +176,11 @@ async function uploadAndVerify(token, path, parentId, appProperties) {
     duplex: "half",
   });
   const metadata = await uploaded.json();
-  if (!uploaded.ok || metadata.name !== name || Number(metadata.size) !== details.size) {
+  if (
+    !uploaded.ok ||
+    metadata.name !== name ||
+    Number(metadata.size) !== details.size
+  ) {
     throw new Error(`Google Drive size/name verification failed for ${name}.`);
   }
   const localMd5 = await hashFile(path, "md5");
@@ -211,7 +219,8 @@ async function hashFile(path, algorithm) {
 
 function safeId(value) {
   const id = String(value ?? "").trim();
-  if (!/^[A-Za-z0-9_-]{3,256}$/.test(id)) throw new Error("Google Drive id is invalid.");
+  if (!/^[A-Za-z0-9_-]{3,256}$/.test(id))
+    throw new Error("Google Drive id is invalid.");
   return id;
 }
 

@@ -139,4 +139,17 @@ describe("canAccessPortalPath", () => {
       canAccessPortalPath("/admin/exports", ["issues.export"], []),
     ).toBe(true);
   });
+
+  it("gates both academic setup routes by academic management permission", () => {
+    expect(
+      canAccessPortalPath(
+        "/admin/academic/departments-sections",
+        ["academic.manage"],
+        [],
+      ),
+    ).toBe(true);
+    expect(canAccessPortalPath("/admin/academic", [], ["MAIN_ADMIN"])).toBe(
+      false,
+    );
+  });
 });

@@ -8,6 +8,11 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/query-state";
 import { StatusBadge } from "@/components/status-badge";
 import { AttendanceMarkingPanel } from "@/components/attendance-marking-panel";
 import { canViewAttendanceSessions } from "@/lib/attendance-permissions";
+import {
+  buildAttendanceStudentPayload,
+  createAttendanceStudentDraft,
+  validateAttendanceStudentDraft,
+} from "@/features/attendance/class-student-entry";
 import { api, ApiError } from "@/lib/api";
 import type { PageResponse, SelectOption } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
@@ -43,8 +48,6 @@ interface ClassStudent {
   status: string;
 }
 
-const defaultStudentPassword = "Student@2026!";
-
 const getTodayInKolkata = () => {
   if (typeof window === "undefined") return new Date().toISOString().slice(0, 10);
   try {
@@ -63,7 +66,7 @@ export default function AttendancePage() {
   const [activeSessionId, setActiveSessionId] = useState("");
   const [error, setError] = useState("");
   const [form, setForm] = useState({ academicYearId: "", sectionId: "", subjectId: "", sessionDate: getTodayInKolkata(), periodNumber: 1, sessionType: "LECTURE", startTime: "", endTime: "" });
-  const [studentForm, setStudentForm] = useState({ fullName: "", studentId: "", email: "", mobile: "", rollNumber: "", admissionYear: new Date().getFullYear(), temporaryPassword: defaultStudentPassword });
+  const [studentForm, setStudentForm] = useState(() => createAttendanceStudentDraft());
   const permissions = user?.permissions ?? [];
   const canCreate = permissions.includes("attendance.session.create");
   const canOwn = permissions.includes("attendance.read_own") && (user?.roles.includes("STUDENT") ?? false);
@@ -102,18 +105,10 @@ export default function AttendancePage() {
   });
 
   const addStudent = useMutation({
-    mutationFn: () => api.post(`/attendance/classes/${selectedSectionValue}/students`, {
-      fullName: studentForm.fullName.trim(),
-      studentId: studentForm.studentId.trim(),
-      ...(studentForm.email.trim() ? { email: studentForm.email.trim() } : {}),
-      ...(studentForm.mobile.trim() ? { mobile: studentForm.mobile.trim() } : {}),
-      ...(studentForm.rollNumber.trim() ? { rollNumber: studentForm.rollNumber.trim() } : {}),
-      admissionYear: studentForm.admissionYear,
-      temporaryPassword: studentForm.temporaryPassword,
-    }),
+    mutationFn: () => api.post(`/attendance/classes/${selectedSectionValue}/students`, buildAttendanceStudentPayload(studentForm)),
     onSuccess: () => {
       setShowStudentForm(false);
-      setStudentForm({ fullName: "", studentId: "", email: "", mobile: "", rollNumber: "", admissionYear: new Date().getFullYear(), temporaryPassword: defaultStudentPassword });
+      setStudentForm(createAttendanceStudentDraft());
       setError("");
       void client.invalidateQueries({ queryKey: ["attendance-class-students", selectedSectionValue] });
       void client.invalidateQueries({ queryKey: ["attendance-sessions"] });
@@ -136,6 +131,11 @@ export default function AttendancePage() {
     setError("");
     if (!selectedSectionValue) {
       setError("Select a class before adding a student.");
+      return;
+    }
+    const validation = validateAttendanceStudentDraft(studentForm);
+    if (validation) {
+      setError(validation);
       return;
     }
     addStudent.mutate();
@@ -201,7 +201,8 @@ export default function AttendancePage() {
             <div className="form-grid">
               <label className="field"><span>Full name</span><input className="input" required minLength={2} value={studentForm.fullName} onChange={(event) => setStudentForm({ ...studentForm, fullName: event.target.value })} /></label>
               <label className="field"><span>Student ID</span><input className="input" required minLength={2} value={studentForm.studentId} onChange={(event) => setStudentForm({ ...studentForm, studentId: event.target.value })} /></label>
-              <label className="field"><span>Email</span><input className="input" type="email" value={studentForm.email} onChange={(event) => setStudentForm({ ...studentForm, email: event.target.value })} /></label>
+              <label className="field"><span>Official college email</span><input className="input" type="email" required value={studentForm.email} onChange={(event) => setStudentForm({ ...studentForm, email: event.target.value })} /></label>
+              <label className="field"><span>Register number</span><input className="input" required minLength={2} maxLength={60} value={studentForm.registerNumber} onChange={(event) => setStudentForm({ ...studentForm, registerNumber: event.target.value })} /></label>
               <label className="field"><span>Mobile</span><input className="input" value={studentForm.mobile} onChange={(event) => setStudentForm({ ...studentForm, mobile: event.target.value })} /></label>
               <label className="field"><span>Roll number</span><input className="input" value={studentForm.rollNumber} onChange={(event) => setStudentForm({ ...studentForm, rollNumber: event.target.value })} /></label>
               <label className="field"><span>Admission year</span><input className="input" type="number" min={1990} max={2200} required value={studentForm.admissionYear} onChange={(event) => setStudentForm({ ...studentForm, admissionYear: Number(event.target.value) })} /></label>

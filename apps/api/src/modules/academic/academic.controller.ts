@@ -219,6 +219,12 @@ export class AcademicController {
   }
 
   @Permissions("academic.manage")
+  @Get("departments/:id/dependencies")
+  departmentDependencies(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string) {
+    return this.academic.departmentDependencies(user, id);
+  }
+
+  @Permissions("academic.manage")
   @Post("departments/:id/restore")
   restoreDepartment(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
     return this.academic.restoreDepartment(user, id, requestId);
@@ -228,6 +234,30 @@ export class AcademicController {
   @Delete("departments/:id")
   deleteDepartment(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
     return this.academic.deleteDepartment(user, id, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Get("sections/:id/dependencies")
+  sectionDependencies(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string) {
+    return this.academic.sectionDependencies(user, id);
+  }
+
+  @Permissions("academic.manage")
+  @Post("sections/:id/archive")
+  archiveSection(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: ArchiveDepartmentDto, @CurrentRequestId() requestId: string) {
+    return this.academic.archiveSection(user, id, input.reason, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Post("sections/:id/restore")
+  restoreSection(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
+    return this.academic.restoreSection(user, id, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Delete("sections/:id")
+  deleteSection(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
+    return this.academic.deleteSection(user, id, requestId);
   }
 
   @Permissions("academic.manage")

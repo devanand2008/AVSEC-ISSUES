@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, BookOpen, ChevronRight, GraduationCap, Layers, Library, Mail, MapPin, MessageCircle, Pencil, Phone, Plus, RotateCcw, Search, ToggleLeft, ToggleRight, UserRoundCheck, Users, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { ErrorState, LoadingState } from "@/components/query-state";
 import { api, ApiError } from "@/lib/api";
 import { AssignmentsPanel } from "./assignments-panel";
@@ -35,14 +36,19 @@ export default function AcademicAdminPage() {
 
   return <>
     <PageHeader
-      title="Academic Structure"
-      description="Manage hierarchy, courses, and the people assigned to each class."
-      breadcrumbs={[{ label: "Admin" }, { label: "Academic Setup" }]}
+      title="Advanced Academic Setup"
+      description="Manage programmes, academic years, semesters, subjects, and detailed class assignments."
+      breadcrumbs={[{ label: "Admin" }, { label: "Academic Setup", href: "/admin/academic/departments-sections" }, { label: "Advanced" }]}
       actions={
-        <button className="btn btn-primary" onClick={() => setCreating(!creating)}>
-          <Plus size={17} />
-          {creating ? "Cancel" : "Add new"}
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Link className="btn btn-secondary" href="/admin/academic/departments-sections">
+            Departments & Sections
+          </Link>
+          <button className="btn btn-primary" onClick={() => setCreating(!creating)}>
+            <Plus size={17} />
+            {creating ? "Cancel" : "Add new"}
+          </button>
+        </div>
       }
     />
     <div className="tab-bar" style={{ marginBottom: 18 }}>{tabs.map(({ key, label, icon: Icon }) => <button key={key} className={`tab-item ${tab === key ? "active" : ""}`} onClick={() => { setTab(key); setCreating(false); }}><Icon size={16} />{label}</button>)}</div>

@@ -20,7 +20,10 @@ import { ArchiveDialog } from "@/components/ui/confirmation-dialog";
 import { DependencyDialog, depIcon, type DependencyReport } from "@/components/ui/dependency-dialog";
 import { PermanentDeleteDialog } from "@/components/ui/permanent-delete-dialog";
 import { StatusBadge } from "@/components/status-badge";
-import { PEOPLE_BACKUPS_ENDPOINT } from "@/features/people/people-api";
+import {
+  PEOPLE_BACKUPS_ENDPOINT,
+  isRestoreTestedPreDeletionBackup,
+} from "@/features/people/people-api";
 import { api } from "@/lib/api";
 import type { PageResponse } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
@@ -67,8 +70,10 @@ interface BackupListResponse {
   backups: Array<{
     id: string;
     status: string;
+    backupType: string;
     createdAt: string;
     completedAt?: string;
+    lastRestoreTest?: { status: string };
   }>;
 }
 
@@ -214,6 +219,12 @@ export default function PeopleManagementPage() {
 
   // ── Build action menu items ──
   function actions(p: PersonRow) {
+    const isPermanentCleanupEligible =
+      Boolean(p.studentProfile) &&
+      !p.staffProfile &&
+      p.roles.every(({ role }) =>
+        ["STUDENT", "CLASS_REPRESENTATIVE"].includes(role.code),
+      );
     const items = [
       {
         label: "View Profile",
@@ -245,7 +256,11 @@ export default function PeopleManagementPage() {
         onClick: () => archiveMutation.mutate({ id: p.publicId, status: "ACTIVE", reason: "Restored by admin" }),
       });
     }
-    if (canDeletePermanently && p.status === "ARCHIVED") {
+    if (
+      canDeletePermanently &&
+      p.status === "ARCHIVED" &&
+      isPermanentCleanupEligible
+    ) {
       items.push({
         label: "View Dependencies",
         icon: <Search size={16} />,
@@ -254,7 +269,11 @@ export default function PeopleManagementPage() {
     }
 
     const dangerItems = [];
-    if (canDeletePermanently && p.status === "ARCHIVED") {
+    if (
+      canDeletePermanently &&
+      p.status === "ARCHIVED" &&
+      isPermanentCleanupEligible
+    ) {
       dangerItems.push({
         label: "Permanently Delete",
         icon: <Trash2 size={16} />,
@@ -274,7 +293,7 @@ export default function PeopleManagementPage() {
   const pageSize = 25;
   const totalPages = Math.ceil(total / pageSize);
   const verifiedBackup = backups.data?.backups.find((backup) =>
-    ["COMPLETED", "RESTORE_TESTED"].includes(backup.status),
+    isRestoreTestedPreDeletionBackup(backup, deleteTarget?.archivedAt),
   );
 
   // ── Dependency report → dialog model ──

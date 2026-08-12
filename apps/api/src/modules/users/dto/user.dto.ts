@@ -13,9 +13,15 @@ export class StudentProfileDto {
   @ApiProperty() @IsUUID() departmentId!: string;
   @ApiProperty() @IsUUID() programmeId!: string;
   @ApiProperty() @IsUUID() sectionId!: string;
-  @ApiProperty() @IsString() @Length(2, 60) studentId!: string;
-  @ApiProperty() @IsInt() @Min(1990) @Max(2200) admissionYear!: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(2, 60) studentId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1990) @Max(2200) admissionYear?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(60) rollNumber?: string;
+  @ApiProperty() @IsString() @Length(2, 60) registerNumber!: string;
+  @ApiProperty() @IsUUID() academicYearId!: string;
+  @ApiProperty() @IsInt() @Min(1) @Max(10) studyYear!: number;
+  @ApiProperty() @IsUUID() semesterId!: string;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() dateOfBirth?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(30) gender?: string;
 }
 
 export class StaffProfileDto {
@@ -35,6 +41,7 @@ export class CreateUserDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(30) whatsappNumber?: string;
   @ApiProperty({ minLength: 12 }) @IsString() @MinLength(12) @MaxLength(200) @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/, { message: "temporaryPassword must include uppercase, lowercase, number and special character." }) temporaryPassword!: string;
   @ApiPropertyOptional({ enum: AccountStatus, default: AccountStatus.ACTIVE }) @IsOptional() @IsEnum(AccountStatus) accountStatus?: AccountStatus;
+  @ApiPropertyOptional({ default: true }) @IsOptional() @IsBoolean() mustChangePassword?: boolean;
   @ApiProperty({ type: [String] }) @IsArray() @ArrayMinSize(1) @ArrayMaxSize(10) @IsString({ each: true }) roleCodes!: string[];
   @ApiProperty({ type: [UserScopeDto] }) @IsArray() @ArrayMinSize(1) @ArrayMaxSize(30) @ValidateNested({ each: true }) @Type(() => UserScopeDto) scopes!: UserScopeDto[];
   @ApiPropertyOptional({ type: StudentProfileDto }) @IsOptional() @ValidateNested() @Type(() => StudentProfileDto) studentProfile?: StudentProfileDto;

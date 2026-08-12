@@ -12,7 +12,6 @@ import {
   CreateSectionDto,
   UpdateSectionDto,
   ArchiveDepartmentDto,
-  AssignSectionStudentDto,
 } from "./dto/academic.dto";
 
 @ApiTags("departments")
@@ -34,6 +33,7 @@ export class DepartmentsController {
     return this.academic.departments(user);
   }
 
+  @Permissions("academic.manage")
   @Get(":id")
   getOne(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string) {
     return this.academic.department(user, id);
@@ -64,9 +64,9 @@ export class DepartmentsController {
   }
 
   @Permissions("academic.manage")
-  @Post(":id/students")
-  assignStudent(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: AssignSectionStudentDto, @CurrentRequestId() requestId: string) {
-    return this.academic.assignStudent(user, id, input, requestId);
+  @Get(":id/dependencies")
+  dependencies(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string) {
+    return this.academic.departmentDependencies(user, id);
   }
 }
 
@@ -103,6 +103,7 @@ export class SectionsController {
     return this.academic.sections(user, semesterId);
   }
 
+  @Permissions("academic.manage")
   @Get(":id")
   getOne(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string) {
     return this.academic.section(user, id);
@@ -112,5 +113,29 @@ export class SectionsController {
   @Patch(":id")
   update(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: UpdateSectionDto, @CurrentRequestId() requestId: string) {
     return this.academic.updateSection(user, id, input, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Get(":id/dependencies")
+  dependencies(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string) {
+    return this.academic.sectionDependencies(user, id);
+  }
+
+  @Permissions("academic.manage")
+  @Post(":id/archive")
+  archive(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: ArchiveDepartmentDto, @CurrentRequestId() requestId: string) {
+    return this.academic.archiveSection(user, id, input.reason, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Post(":id/restore")
+  restore(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
+    return this.academic.restoreSection(user, id, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Delete(":id")
+  remove(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
+    return this.academic.deleteSection(user, id, requestId);
   }
 }

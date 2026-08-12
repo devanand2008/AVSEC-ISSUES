@@ -14,7 +14,7 @@ describe("visibleNavigation", () => {
       "issue_config.manage",
     ]).map((item) => item.href);
     expect(routes).toContain("/assigned");
-    expect(routes).toContain("/admin/academic");
+    expect(routes).toContain("/admin/academic/departments-sections");
     expect(routes).toContain("/admin/categories");
     expect(routes).not.toContain("/admin/settings");
   });

@@ -90,7 +90,7 @@ export class AttendanceService {
     return this.users.create(user, {
       collegeIdentityId: input.studentId.trim(),
       fullName: input.fullName.trim(),
-      ...(input.email ? { email: input.email.trim() } : {}),
+      email: input.email.trim(),
       ...(input.mobile ? { mobile: input.mobile.trim() } : {}),
       temporaryPassword: input.temporaryPassword,
       roleCodes: ["STUDENT"],
@@ -100,8 +100,14 @@ export class AttendanceService {
         programmeId: section.semester.programmeId,
         sectionId: section.id,
         studentId: input.studentId.trim(),
-        admissionYear: input.admissionYear ?? new Date().getFullYear(),
+        registerNumber: input.registerNumber.trim(),
+        academicYearId: section.semester.academicYearId,
+        semesterId: section.semester.id,
+        studyYear: section.studyYear ?? Math.ceil(section.semester.number / 2),
+        admissionYear: input.admissionYear ?? section.semester.academicYear.startsOn.getUTCFullYear(),
         ...(input.rollNumber ? { rollNumber: input.rollNumber.trim() } : {}),
+        ...(input.dateOfBirth ? { dateOfBirth: input.dateOfBirth } : {}),
+        ...(input.gender ? { gender: input.gender.trim() } : {}),
       },
     }, requestId);
   }
@@ -503,8 +509,8 @@ export class AttendanceService {
 
   private async sectionForStudentEntry(user: AuthPrincipal, sectionId: string) {
     const section = await this.prisma.section.findFirst({
-      where: { id: sectionId, isActive: true, semester: { isActive: true, programme: { collegeId: user.collegeId, isActive: true }, academicYear: { collegeId: user.collegeId, isActive: true } } },
-      select: { id: true, semester: { select: { programmeId: true, programme: { select: { departmentId: true } } } } },
+      where: { id: sectionId, isActive: true, archivedAt: null, semester: { isActive: true, programme: { collegeId: user.collegeId, isActive: true, department: { isActive: true, archivedAt: null } }, academicYear: { collegeId: user.collegeId, isActive: true } } },
+      select: { id: true, studyYear: true, semester: { select: { id: true, number: true, academicYearId: true, academicYear: { select: { startsOn: true } }, programmeId: true, programme: { select: { departmentId: true } } } } },
     });
     if (!section) throw new BadRequestException("The selected class section is not active.");
     return section;

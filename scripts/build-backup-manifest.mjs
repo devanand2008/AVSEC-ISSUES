@@ -23,7 +23,7 @@ const files = await Promise.all(
 const tableCounts = parseJson(process.env.BACKUP_TABLE_COUNTS_JSON, {});
 const backupType = allowedValue(
   process.env.BACKUP_TYPE ?? "DAILY",
-  ["DAILY", "PRE_MIGRATION"],
+  ["DAILY", "PRE_MIGRATION", "PRE_DELETION"],
   "BACKUP_TYPE",
 );
 const backupStatus = allowedValue(

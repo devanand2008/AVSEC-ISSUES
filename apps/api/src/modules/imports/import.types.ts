@@ -24,11 +24,13 @@ export const IMPORT_MODES = [
 ] as const;
 
 export type ImportMode = (typeof IMPORT_MODES)[number];
+export type ImportStudyYear = "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8";
 
 export interface ImportRow {
   [key: string]: string;
   first_name: string; last_name: string; legacy_path: string;
   source_sheet: string; source_row_number: string; source_department_code: string; password_status: string;
+  official_email: string; college_id: string; register_number: string; study_year: string; section: string;
   college_identity_id: string; full_name: string; temporary_password: string; role_codes: string;
   email: string; mobile: string; whatsapp_number: string; scope_type: string; scope_code: string;
   account_status: string; user_id: string; employee_or_student_id: string; gender: string; date_of_birth: string;
@@ -51,6 +53,7 @@ export interface ImportTemplate {
   permission: string;
   required: string[];
   optional: string[];
+  downloadHeaders?: string[];
   example: Partial<ImportRow>;
 }
 
@@ -100,9 +103,10 @@ export const IMPORT_TEMPLATES: Record<ImportEntityType, ImportTemplate> = {
   STUDENTS: {
     entityType: "STUDENTS",
     permission: "users.import",
-    required: ["email", "temporary_password"],
-    optional: ["first_name", "last_name", "full_name", "department_code", "role_codes", "college_identity_id", "student_id", "email", "mobile", "whatsapp_number", "roll_number", "legacy_id", "legacy_path", "programme_code", "section_code", "academic_year", "year", "semester_number", "admission_year", "account_status", "admission_number", "gender", "date_of_birth", "parent_name", "parent_mobile_number", "blood_group", "address", "profile_photo_url", "batch", "source_sheet", "source_row_number", "source_department_code", "password_status"],
-    example: { full_name: "Sample Student One", email: "sample1@example.edu", temporary_password: "001234", department_code: "CSE-AIML", account_status: "ACTIVE" },
+    required: ["full_name", "email", "college_identity_id", "register_number", "department_code", "academic_year", "year", "semester_number", "section_code", "temporary_password"],
+    optional: ["first_name", "last_name", "role_codes", "student_id", "mobile", "whatsapp_number", "roll_number", "legacy_id", "legacy_path", "programme_code", "admission_year", "account_status", "admission_number", "gender", "date_of_birth", "parent_name", "parent_mobile_number", "blood_group", "address", "profile_photo_url", "batch", "source_sheet", "source_row_number", "source_department_code", "password_status"],
+    downloadHeaders: ["full_name", "official_email", "college_id", "register_number", "department_code", "programme_code", "academic_year", "study_year", "semester", "section", "temporary_password", "mobile"],
+    example: { full_name: "Sample Student One", official_email: "sample1@example.edu", college_id: "AVS26CSE001", register_number: "620124104001", department_code: "CSE", programme_code: "BTECH-CSE", academic_year: "2026-27", study_year: "3", semester: "5", section: "A", temporary_password: "AvsTemp@2026!", mobile: "9876543210" },
   },
   STAFF: {
     entityType: "STAFF",
@@ -127,7 +131,7 @@ export const IMPORT_TEMPLATES: Record<ImportEntityType, ImportTemplate> = {
     entityType: "CLASSES",
     permission: "academic.manage",
     required: ["programme_code", "academic_year", "semester_number", "code", "name"], optional: ["capacity"],
-    example: { programme_code: "BTECH-CSE", academic_year: "2026-27", semester_number: "1", code: "A", name: "Section A", capacity: "60" },
+    example: { programme_code: "BTECH-CSE", academic_year: "2026-27", semester_number: "1", code: "A", name: "Section A", capacity: "70" },
   },
   ATTENDANCE: {
     entityType: "ATTENDANCE",

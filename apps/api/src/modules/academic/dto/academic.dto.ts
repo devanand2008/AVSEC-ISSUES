@@ -1,8 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsBoolean, IsDateString, IsEmail, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min } from "class-validator";
+import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsEmail, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min } from "class-validator";
 
 export class CreateDepartmentDto {
-  @ApiProperty() @IsUUID() campusId!: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() campusId?: string;
   @ApiProperty() @IsString() @Length(1, 30) code!: string;
   @ApiProperty() @IsString() @Length(2, 180) name!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(60) shortName?: string;
@@ -12,9 +12,11 @@ export class CreateDepartmentDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(30) contactNumber?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(180) location?: string;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(10_000) sortOrder?: number;
+  @ApiPropertyOptional({ default: true }) @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
 export class UpdateDepartmentDto {
+  @ApiPropertyOptional() @IsOptional() @IsUUID() campusId?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 30) code?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(2, 180) name?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(60) shortName?: string | null;
@@ -36,6 +38,7 @@ export class CreateProgrammeDto {
 }
 
 export class UpdateProgrammeDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 30) code?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(2, 180) name?: string;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(10) durationYears?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(80) degreeType?: string | null;
@@ -67,6 +70,8 @@ export class CreateSectionDto {
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(70) capacity?: number;
   @ApiPropertyOptional() @IsOptional() @IsUUID() coordinatorPublicId?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsUUID() representativePublicId?: string | null;
+  @ApiPropertyOptional({ default: true }) @IsOptional() @IsBoolean() isActive?: boolean;
+  @ApiPropertyOptional({ type: [String] }) @IsOptional() @IsArray() @ArrayMaxSize(20) @IsUUID(undefined, { each: true }) prospectiveClassStaffPublicIds?: string[];
 }
 
 export class UpdateSectionDto {
@@ -80,6 +85,7 @@ export class UpdateSectionDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsUUID() coordinatorPublicId?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsUUID() representativePublicId?: string | null;
+  @ApiPropertyOptional({ type: [String] }) @IsOptional() @IsArray() @ArrayMaxSize(20) @IsUUID(undefined, { each: true }) prospectiveClassStaffPublicIds?: string[];
 }
 
 export class ArchiveDepartmentDto {

@@ -24,8 +24,14 @@ export type CreatePersonField =
   | "scopes"
   | "departmentId"
   | "programmeId"
+  | "academicYearId"
+  | "studyYear"
+  | "semesterId"
   | "sectionId"
   | "studentId"
+  | "registerNumber"
+  | "dateOfBirth"
+  | "gender"
   | "admissionYear"
   | "employeeId";
 
@@ -41,14 +47,21 @@ export interface CreatePersonFormState {
   mobile: string;
   whatsappNumber: string;
   temporaryPassword: string;
+  mustChangePassword: boolean;
   accountStatus: "ACTIVE" | "PENDING";
   roleCodes: string[];
   scopes: ScopeRow[];
   profileType: ProfileType;
   departmentId: string;
   programmeId: string;
+  academicYearId: string;
+  studyYear: string;
+  semesterId: string;
   sectionId: string;
   studentId: string;
+  registerNumber: string;
+  dateOfBirth: string;
+  gender: string;
   admissionYear: string;
   rollNumber: string;
   employeeId: string;
@@ -62,6 +75,7 @@ export interface CreatePersonPayload {
   mobile?: string;
   whatsappNumber?: string;
   temporaryPassword: string;
+  mustChangePassword: boolean;
   accountStatus: "ACTIVE" | "PENDING";
   roleCodes: string[];
   scopes: Array<{
@@ -72,8 +86,14 @@ export interface CreatePersonPayload {
   studentProfile?: {
     departmentId: string;
     programmeId: string;
+    academicYearId: string;
+    studyYear: number;
+    semesterId: string;
     sectionId: string;
     studentId: string;
+    registerNumber: string;
+    dateOfBirth?: string;
+    gender?: string;
     admissionYear: number;
     rollNumber?: string;
   };
@@ -104,14 +124,21 @@ export function createBlankPersonForm(): CreatePersonFormState {
     mobile: "",
     whatsappNumber: "",
     temporaryPassword: "",
+    mustChangePassword: true,
     accountStatus: "ACTIVE",
     roleCodes: ["STUDENT"],
     scopes: [{ type: "SECTION", targetId: "" }],
     profileType: "student",
     departmentId: "",
     programmeId: "",
+    academicYearId: "",
+    studyYear: "",
+    semesterId: "",
     sectionId: "",
     studentId: "",
+    registerNumber: "",
+    dateOfBirth: "",
+    gender: "",
     admissionYear: String(new Date().getFullYear()),
     rollNumber: "",
     employeeId: "",
@@ -205,11 +232,40 @@ export function validateCreatePersonForm(
   }
 
   if (form.profileType === "student") {
-    if (!form.departmentId || !form.programmeId || !form.sectionId) {
-      return "Select the student's department, programme, and section.";
+    if (!form.email.trim()) {
+      return "Official college email is required for a student.";
+    }
+    if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) {
+      return "Official college email must be a valid email address.";
+    }
+    if (
+      !form.departmentId ||
+      !form.programmeId ||
+      !form.academicYearId ||
+      !form.studyYear ||
+      !form.semesterId ||
+      !form.sectionId
+    ) {
+      return "Select the student's department, programme, academic year, study year, semester, and section.";
     }
     if ((form.studentId || form.collegeIdentityId).trim().length < 2) {
       return "Student ID must contain at least 2 characters.";
+    }
+    if (form.registerNumber.trim().length < 2) {
+      return "Register number must contain at least 2 characters.";
+    }
+    const studyYear = Number(form.studyYear);
+    if (!Number.isInteger(studyYear) || studyYear < 1 || studyYear > 8) {
+      return "Study year must be a whole number from 1 to 8.";
+    }
+    if (form.dateOfBirth) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(form.dateOfBirth)) {
+        return "Date of birth must be a valid date.";
+      }
+      const dateOfBirth = new Date(`${form.dateOfBirth}T00:00:00Z`);
+      if (Number.isNaN(dateOfBirth.getTime()) || dateOfBirth > new Date()) {
+        return "Date of birth must be a valid date that is not in the future.";
+      }
     }
     const admissionYear = Number(form.admissionYear);
     if (
@@ -250,6 +306,9 @@ export function createPersonErrorField(
   if (value.includes("scope")) return "scopes";
   if (value.includes("department")) return "departmentId";
   if (value.includes("programme")) return "programmeId";
+  if (value.includes("academic year")) return "academicYearId";
+  if (value.includes("study year")) return "studyYear";
+  if (value.includes("semester")) return "semesterId";
   if (value.includes("section")) return "sectionId";
   if (value.includes("student id") || value.includes("studentid")) {
     return "studentId";
@@ -257,6 +316,13 @@ export function createPersonErrorField(
   if (value.includes("admission year") || value.includes("admissionyear")) {
     return "admissionYear";
   }
+  if (value.includes("register number") || value.includes("registernumber")) {
+    return "registerNumber";
+  }
+  if (value.includes("date of birth") || value.includes("dateofbirth")) {
+    return "dateOfBirth";
+  }
+  if (value.includes("gender")) return "gender";
   if (value.includes("employee id") || value.includes("employeeid")) {
     return "employeeId";
   }
@@ -283,6 +349,7 @@ export function buildCreatePersonPayload(
     mobile: optional(form.mobile),
     whatsappNumber: optional(form.whatsappNumber),
     temporaryPassword: form.temporaryPassword,
+    mustChangePassword: form.mustChangePassword,
     accountStatus: form.accountStatus,
     roleCodes: [...form.roleCodes],
     scopes,
@@ -291,8 +358,18 @@ export function buildCreatePersonPayload(
           studentProfile: {
             departmentId: form.departmentId,
             programmeId: form.programmeId,
+            academicYearId: form.academicYearId,
+            studyYear: Number(form.studyYear),
+            semesterId: form.semesterId,
             sectionId: form.sectionId,
             studentId: (form.studentId || form.collegeIdentityId).trim(),
+            registerNumber: form.registerNumber.trim(),
+            ...(optional(form.dateOfBirth)
+              ? { dateOfBirth: optional(form.dateOfBirth) }
+              : {}),
+            ...(optional(form.gender)
+              ? { gender: optional(form.gender) }
+              : {}),
             admissionYear: Number(form.admissionYear),
             ...(optional(form.rollNumber)
               ? { rollNumber: optional(form.rollNumber) }

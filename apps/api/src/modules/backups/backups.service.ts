@@ -188,7 +188,11 @@ export class BackupsService {
       take: 100,
       include: {
         restoreTests: {
-          orderBy: { createdAt: "desc" },
+          orderBy: [
+            { completedAt: "desc" },
+            { createdAt: "desc" },
+            { id: "desc" },
+          ],
           take: 1,
         },
       },
@@ -703,7 +707,14 @@ export class BackupsService {
       where: { id, collegeId: user.collegeId, deletedAt: null },
       include: {
         manifest: true,
-        restoreTests: { orderBy: { createdAt: "desc" }, take: 10 },
+        restoreTests: {
+          orderBy: [
+            { completedAt: "desc" },
+            { createdAt: "desc" },
+            { id: "desc" },
+          ],
+          take: 10,
+        },
       },
     });
     if (!backup) throw new Error("Backup was not found.");
@@ -1326,15 +1337,11 @@ export class BackupsService {
     );
     const sourceRecordCounts = verifiedRecordCounts(record.recordCounts);
     const startedAt = new Date();
-    const restoreRecord = await this.prisma.backupRestoreTest.create({
-      data: {
-        collegeId: user.collegeId,
-        backupId: record.id,
-        requestedById: user.id,
-        status: "PENDING",
-        startedAt,
-      },
-    });
+    const restoreRecord = await this.startDatabaseRestoreTest(
+      user,
+      record.id,
+      startedAt,
+    );
     let artifactPath = localArtifactPath;
     let downloaded = false;
     try {
@@ -1439,18 +1446,12 @@ export class BackupsService {
       });
       return result;
     } catch (error) {
-      await this.prisma.backupRestoreTest
-        .update({
-          where: { id: restoreRecord.id },
-          data: {
-            status: "FAILED",
-            failureCode: this.failureCode(error),
-            failureMessage:
-              "The isolated restore test failed. Review the protected server logs using the request ID.",
-            completedAt: new Date(),
-          },
-        })
-        .catch(() => undefined);
+      await this.markDatabaseRestoreTestFailed(
+        record.id,
+        restoreRecord.id,
+        error,
+        "The isolated restore test failed. Review the protected server logs using the request ID.",
+      ).catch(() => undefined);
       throw error;
     } finally {
       await Promise.all([
@@ -1492,15 +1493,11 @@ export class BackupsService {
     const temporarySql = join(directory, `.${id}.${suffix}.restore.sql`);
     const sourceRecordCounts = verifiedRecordCounts(record.recordCounts);
     const startedAt = new Date();
-    const restoreRecord = await this.prisma.backupRestoreTest.create({
-      data: {
-        collegeId: user.collegeId,
-        backupId: record.id,
-        requestedById: user.id,
-        status: "PENDING",
-        startedAt,
-      },
-    });
+    const restoreRecord = await this.startDatabaseRestoreTest(
+      user,
+      record.id,
+      startedAt,
+    );
     let artifactPath = localArtifactPath;
     let downloaded = false;
     try {
@@ -1604,18 +1601,12 @@ export class BackupsService {
       });
       return result;
     } catch (error) {
-      await this.prisma.backupRestoreTest
-        .update({
-          where: { id: restoreRecord.id },
-          data: {
-            status: "FAILED",
-            failureCode: this.failureCode(error),
-            failureMessage:
-              "The isolated restore test failed. Review protected logs using the request ID.",
-            completedAt: new Date(),
-          },
-        })
-        .catch(() => undefined);
+      await this.markDatabaseRestoreTestFailed(
+        record.id,
+        restoreRecord.id,
+        error,
+        "The isolated restore test failed. Review protected logs using the request ID.",
+      ).catch(() => undefined);
       throw error;
     } finally {
       await Promise.all(
@@ -1683,6 +1674,55 @@ export class BackupsService {
         ),
       },
     };
+  }
+
+  private async markDatabaseRestoreTestFailed(
+    backupId: string,
+    restoreTestId: string,
+    error: unknown,
+    failureMessage: string,
+  ) {
+    const completedAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.backupRestoreTest.update({
+        where: { id: restoreTestId },
+        data: {
+          status: "FAILED",
+          failureCode: this.failureCode(error),
+          failureMessage,
+          completedAt,
+        },
+      });
+      await tx.databaseBackup.updateMany({
+        where: { id: backupId, status: "RESTORE_TESTED" },
+        data: { status: "COMPLETED" },
+      });
+    });
+  }
+
+  private async startDatabaseRestoreTest(
+    user: BackupActor,
+    backupId: string,
+    startedAt: Date,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const restoreRecord = await tx.backupRestoreTest.create({
+        data: {
+          collegeId: user.collegeId,
+          backupId,
+          requestedById: user.id,
+          status: "PENDING",
+          startedAt,
+        },
+      });
+      // A new test supersedes the previous proof immediately. It must earn
+      // RESTORE_TESTED again by completing successfully.
+      await tx.databaseBackup.updateMany({
+        where: { id: backupId, status: "RESTORE_TESTED" },
+        data: { status: "COMPLETED" },
+      });
+      return restoreRecord;
+    });
   }
 
   private async findRecord(

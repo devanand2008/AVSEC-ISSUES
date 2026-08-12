@@ -55,6 +55,17 @@ const importModes = [
   { value: "UPDATE_ONLY", label: "Update existing users only" },
 ];
 
+const studyYearOptions = [
+  { value: "1", label: "First Year" },
+  { value: "2", label: "Second Year" },
+  { value: "3", label: "Third Year" },
+  { value: "4", label: "Fourth Year" },
+  { value: "5", label: "Fifth Year" },
+  { value: "6", label: "Sixth Year" },
+  { value: "7", label: "Seventh Year" },
+  { value: "8", label: "Eighth Year" },
+];
+
 const userTypeOptions = [
   { value: "STUDENT", label: "Student" },
   { value: "FACULTY", label: "Faculty" },
@@ -105,6 +116,7 @@ const systemFields = [
   "blood_group",
   "address",
   "profile_photo_url",
+  "register_number",
   "roll_number",
   "batch",
   "designation",
@@ -168,8 +180,9 @@ interface Preview {
     mappedDepartmentCode?: string;
     status: "READY" | "HEADER_NOT_FOUND" | "EMPTY";
   }>;
-  detectedStudyYear?: "2" | "3";
+  detectedStudyYear?: "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8";
   passwordWarnings: number;
+  duplicateRowCount: number;
   duplicateGroups: Array<{
     normalizedEmail: string;
     locations: Array<{
@@ -179,6 +192,11 @@ interface Preview {
     }>;
   }>;
   duplicateResolution: "KEEP_FIRST" | "SKIP_ALL";
+  departmentMappings: Record<string, string>;
+  unresolvedDepartmentMappings: Array<{
+    sourceCode: string;
+    rowCount: number;
+  }>;
   departmentOptions: Array<{
     id: string;
     code: string;
@@ -289,16 +307,7 @@ export default function ImportsPage() {
       setColumnMapping(data.columnMapping);
       setDetectedStudyYear(data.detectedStudyYear ?? "");
       setDuplicateResolution(data.duplicateResolution);
-      setDepartmentMappings(
-        Object.fromEntries(
-          data.sheetInspections
-            .filter((sheet) => sheet.mappedDepartmentCode)
-            .map((sheet) => [
-              sheet.sourceDepartmentCode,
-              sheet.mappedDepartmentCode!,
-            ]),
-        ),
-      );
+      setDepartmentMappings(data.departmentMappings ?? {});
       setMessage(
         "Validation complete. Review the preview and row errors before confirming.",
       );
@@ -486,9 +495,12 @@ export default function ImportsPage() {
                     setPreview(null);
                   }}
                 >
-                  <option value="">Detect from filename</option>
-                  <option value="2">Second Year</option>
-                  <option value="3">Third Year</option>
+                  <option value="">Detect from filename or column</option>
+                  {studyYearOptions.map((option) => (
+                    <option value={option.value} key={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="field">
@@ -594,8 +606,7 @@ export default function ImportsPage() {
             <div>
               <h2>2. Review preview</h2>
               <p>
-                {preview.job.validRows} valid rows; {preview.job.errorRows} rows
-                need correction. Only valid rows will be imported.
+                Valid rows: {preview.job.validRows} · Invalid rows: {preview.job.errorRows} · Duplicate rows: {preview.duplicateRowCount}. Only valid rows will be imported.
               </p>
             </div>
             <StatusBadge value={preview.job.status} />
@@ -607,11 +618,9 @@ export default function ImportsPage() {
                   <h3>Workbook inspection</h3>
                   <p className="muted" style={{ margin: "4px 0 0" }}>
                     {preview.sheetInspections.length} sheets,{" "}
-                    {preview.detectedStudyYear === "2"
-                      ? "Second Year"
-                      : preview.detectedStudyYear === "3"
-                        ? "Third Year"
-                        : "study year not detected"}
+                    {studyYearOptions.find(
+                      (option) => option.value === preview.detectedStudyYear,
+                    )?.label ?? "study year not detected"}
                     , {preview.passwordWarnings} exact numeric password{" "}
                     {preview.passwordWarnings === 1 ? "check" : "checks"}.
                   </p>
@@ -685,6 +694,46 @@ export default function ImportsPage() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+          {preview.unresolvedDepartmentMappings.length > 0 && (
+            <div className="column-map-panel">
+              <div className="section-title" style={{ margin: "0 0 12px" }}>
+                <div>
+                  <h3>Confirm department mappings</h3>
+                  <p className="muted" style={{ margin: "4px 0 0" }}>
+                    These source values were not matched automatically. Select an exact active department; similar names are never guessed.
+                  </p>
+                </div>
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  disabled={previewMutation.isPending || preview.unresolvedDepartmentMappings.some((item) => !departmentMappings[item.sourceCode])}
+                  onClick={() => previewMutation.mutate()}
+                >
+                  <RefreshCw size={16} />
+                  Apply department mappings
+                </button>
+              </div>
+              <div className="column-map-grid">
+                {preview.unresolvedDepartmentMappings.map((item) => (
+                  <label className="field" key={item.sourceCode}>
+                    <span>{item.sourceCode} · {item.rowCount} {item.rowCount === 1 ? "row" : "rows"}</span>
+                    <select
+                      className="input"
+                      value={departmentMappings[item.sourceCode] ?? ""}
+                      onChange={(event) => setDepartmentMappings({ ...departmentMappings, [item.sourceCode]: event.target.value })}
+                    >
+                      <option value="">Select department</option>
+                      {preview.departmentOptions.map((department) => (
+                        <option key={department.id} value={department.code}>
+                          {department.code} - {department.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
             </div>
           )}
           {preview.sheetNames.length > 0 &&
@@ -845,7 +894,9 @@ export default function ImportsPage() {
                 className="btn btn-primary"
                 type="button"
                 disabled={
-                  preview.job.validRows === 0 || confirmMutation.isPending
+                  preview.job.validRows === 0 ||
+                  preview.unresolvedDepartmentMappings.length > 0 ||
+                  confirmMutation.isPending
                 }
                 onClick={() => confirmMutation.mutate(preview.job.id)}
               >

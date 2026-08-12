@@ -12,6 +12,7 @@ on:
         type: choice
         options:
           - pre-migration
+          - pre-deletion
           - daily
 
 permissions:
@@ -35,8 +36,8 @@ jobs:
       GOOGLE_DRIVE_BACKUP_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_BACKUP_FOLDER_ID }}
       GOOGLE_DRIVE_OWNER_EMAIL: devanand.s2008@gmail.com
       BACKUP_ENCRYPTION_KEY_VERSION: "1"
-      BACKUP_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.purpose == 'pre-migration' && 'PRE_MIGRATION' || 'DAILY' }}
-      BACKUP_STATUS: ${{ github.event_name == 'workflow_dispatch' && inputs.purpose == 'pre-migration' && 'RESTORE_TESTED' || 'COMPLETED' }}
+      BACKUP_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.purpose == 'pre-migration' && 'PRE_MIGRATION' || github.event_name == 'workflow_dispatch' && inputs.purpose == 'pre-deletion' && 'PRE_DELETION' || 'DAILY' }}
+      BACKUP_STATUS: ${{ github.event_name == 'workflow_dispatch' && inputs.purpose != 'daily' && 'RESTORE_TESTED' || 'COMPLETED' }}
       POSTGRES_CLIENT_MAJOR: "17"
 
     steps:
@@ -105,6 +106,7 @@ jobs:
           echo "MANIFEST=$work_dir/avs_portal_manifest_${timestamp}_IST.json" >> "$GITHUB_ENV"
           echo "CHECKSUM=$work_dir/avs_portal_checksum_${timestamp}_IST.sha256" >> "$GITHUB_ENV"
           echo "BACKUP_LOG=$work_dir/avs_portal_backup_log_${timestamp}_IST.json" >> "$GITHUB_ENV"
+          echo "RESTORE_METADATA=$work_dir/avs_portal_restore_metadata_${timestamp}_IST.json" >> "$GITHUB_ENV"
 
       - name: Generate readable full and schema SQL
         shell: bash
@@ -119,11 +121,12 @@ jobs:
           grep -Eq 'CREATE (TABLE|SCHEMA)' "$SCHEMA_SQL"
           grep -Eq '^(COPY|INSERT INTO) ' "$FULL_SQL"
 
-      - name: Capture migration and table-count metadata
+      - name: Capture daily backup metadata
+        if: env.BACKUP_TYPE == 'DAILY'
         shell: bash
         run: |
           set -euo pipefail
-          migration="$(psql "$BACKUP_DATABASE_URL" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=on --command='SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY finished_at DESC LIMIT 1')"
+          migration="$(psql "$BACKUP_DATABASE_URL" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=on --command='SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY finished_at DESC, migration_name DESC LIMIT 1')"
           counts="$(psql "$BACKUP_DATABASE_URL" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=on --command="
             SELECT json_object_agg(tablename, row_count ORDER BY tablename)::text
             FROM (
@@ -143,11 +146,11 @@ jobs:
             ) AS table_counts
           ")"
           test -n "$migration"
-          node -e "const counts=JSON.parse(process.argv[1]);const values=Object.values(counts);if(!Number.isSafeInteger(counts._prisma_migrations)||values.length<1||values.some((value)=>!Number.isSafeInteger(value)||value<0))process.exit(1)" "$counts"
+          node -e "const counts=JSON.parse(process.argv[1]);const values=Object.values(counts);if(!Number.isSafeInteger(counts._prisma_migrations)||counts._prisma_migrations<1||values.length<1||values.some((value)=>!Number.isSafeInteger(value)||value<0))process.exit(1)" "$counts"
           echo "PRISMA_MIGRATION_VERSION=$migration" >> "$GITHUB_ENV"
           echo "BACKUP_TABLE_COUNTS_JSON=$counts" >> "$GITHUB_ENV"
 
-      - name: Compress, encrypt, checksum, and build manifest
+      - name: Compress, encrypt, and checksum
         shell: bash
         run: |
           set -euo pipefail
@@ -155,10 +158,8 @@ jobs:
           gzip -9 -c "$FULL_SQL" > "$FULL_GZIP"
           node scripts/backup-crypto.mjs encrypt "$FULL_GZIP" "$FULL_ENCRYPTED"
           sha256sum "$FULL_SQL" "$FULL_ENCRYPTED" "$SCHEMA_SQL" > "$CHECKSUM"
-          node scripts/build-backup-manifest.mjs "$FULL_SQL" "$FULL_ENCRYPTED" "$SCHEMA_SQL" "$CHECKSUM" "$MANIFEST"
           test -s "$FULL_ENCRYPTED"
           test -s "$CHECKSUM"
-          test -s "$MANIFEST"
 
       - name: Verify encrypted round trip
         shell: bash
@@ -172,12 +173,56 @@ jobs:
           grep -Eq 'CREATE (TABLE|SCHEMA)' "$verify_sql"
           rm -f "$verify_gzip" "$verify_sql"
 
-      - name: Verify pre-migration backup with an isolated restore
-        if: env.BACKUP_TYPE == 'PRE_MIGRATION'
+      - name: Verify protected backup with an isolated restore
+        if: env.BACKUP_TYPE == 'PRE_MIGRATION' || env.BACKUP_TYPE == 'PRE_DELETION'
         shell: bash
         run: |
           set -euo pipefail
-          bash scripts/test-sql-restore.sh "$FULL_ENCRYPTED" "$BACKUP_DATABASE_URL"
+          bash scripts/test-sql-restore.sh "$FULL_ENCRYPTED" "$BACKUP_DATABASE_URL" "$RESTORE_METADATA"
+          test -s "$RESTORE_METADATA"
+          node <<'NODE'
+          const fs = require("node:fs");
+          const metadata = JSON.parse(
+            fs.readFileSync(process.env.RESTORE_METADATA, "utf8"),
+          );
+          const migration = metadata.prismaMigrationVersion;
+          const counts = metadata.tableCounts;
+          if (
+            typeof migration !== "string" ||
+            migration.length === 0 ||
+            migration.length > 500 ||
+            /[\r\n]/u.test(migration) ||
+            !counts ||
+            typeof counts !== "object" ||
+            Array.isArray(counts) ||
+            !Number.isSafeInteger(counts._prisma_migrations) ||
+            counts._prisma_migrations < 1 ||
+            Object.keys(counts).length < 1 ||
+            Object.entries(counts).some(
+              ([table, value]) =>
+                !table ||
+                /[\r\n]/u.test(table) ||
+                !Number.isSafeInteger(value) ||
+                value < 0,
+            )
+          ) {
+            throw new Error("The isolated restore metadata is invalid.");
+          }
+          fs.appendFileSync(
+            process.env.GITHUB_ENV,
+            `PRISMA_MIGRATION_VERSION=${migration}\nBACKUP_TABLE_COUNTS_JSON=${JSON.stringify(counts)}\n`,
+          );
+          NODE
+
+      - name: Build immutable backup manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$PRISMA_MIGRATION_VERSION"
+          test -n "$BACKUP_TABLE_COUNTS_JSON"
+          node scripts/build-backup-manifest.mjs "$FULL_SQL" "$FULL_ENCRYPTED" "$SCHEMA_SQL" "$CHECKSUM" "$MANIFEST"
+          test -s "$MANIFEST"
 
       - name: Record verified backup outcome
         shell: bash

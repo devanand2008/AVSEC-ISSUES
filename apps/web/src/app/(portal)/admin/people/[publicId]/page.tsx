@@ -17,7 +17,11 @@ import { DependencyDialog, depIcon, type DependencyReport } from "@/components/u
 import { PermanentDeleteDialog } from "@/components/ui/permanent-delete-dialog";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { ErrorState } from "@/components/ui/error-state";
-import { PEOPLE_BACKUPS_ENDPOINT } from "@/features/people/people-api";
+import {
+  PEOPLE_BACKUPS_ENDPOINT,
+  isRestoreTestedPreDeletionBackup,
+} from "@/features/people/people-api";
+import { StudentSectionMove } from "@/features/people/student-section-move";
 import { api } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -36,15 +40,28 @@ interface PersonDetail {
   archivedAt: string | null;
   roles: Array<{ role: { code: string; name: string }; isPrimary?: boolean }>;
   studentProfile: {
+    departmentId: string;
+    programmeId: string;
+    sectionId: string;
     studentId: string;
+    registerNumber: string | null;
     rollNumber: string | null;
+    studyYear: number | null;
+    dateOfBirth: string | null;
+    gender: string | null;
     admissionYear: number;
     parentName: string | null;
     parentMobileNumber: string | null;
     emergencyContact: string | null;
     department: { name: string; code: string };
     programme: { name: string; code: string };
-    section: { name: string; code: string };
+    section: {
+      id: string;
+      name: string;
+      code: string;
+      semesterId: string;
+      studyYear: number | null;
+    };
   } | null;
   staffProfile: {
     employeeId: string;
@@ -73,8 +90,10 @@ interface BackupListResponse {
   backups: Array<{
     id: string;
     status: string;
+    backupType: string;
     createdAt: string;
     completedAt?: string;
+    lastRestoreTest?: { status: string };
   }>;
 }
 
@@ -89,6 +108,8 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const canSuspend = user?.permissions.includes("users.suspend") ?? false;
+  const canManageAcademic =
+    user?.permissions.includes("academic.manage") ?? false;
   const canDeletePermanently = user?.permissions.includes("users.delete_permanent") ?? false;
   const canManageBackups = user?.permissions.includes("backups.manage") ?? false;
 
@@ -151,6 +172,12 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
   const p = person.data;
   const isStudent = !!p.studentProfile;
   const isArchived = p.status === "ARCHIVED";
+  const canCleanStudentPermanently =
+    isStudent &&
+    !p.staffProfile &&
+    p.roles.every(({ role }) =>
+      ["STUDENT", "CLASS_REPRESENTATIVE"].includes(role.code),
+    );
   const depReport: DependencyReport | null = deps.data ? {
     userId: deps.data.userId,
     userName: deps.data.userName,
@@ -164,7 +191,7 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
     ].filter((c) => c.items.length > 0),
   } : null;
   const verifiedBackup = backups.data?.backups.find((backup) =>
-    ["COMPLETED", "RESTORE_TESTED"].includes(backup.status),
+    isRestoreTestedPreDeletionBackup(backup, p.archivedAt),
   );
 
   return (
@@ -204,7 +231,7 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
                 <RotateCcw size={16} /> Restore
               </button>
             )}
-            {canDeletePermanently && isArchived && (
+            {canDeletePermanently && isArchived && canCleanStudentPermanently && (
               <button className="avs-btn avs-btn-danger-outline" onClick={() => setDepOpen(true)} type="button">
                 <Database size={16} /> Dependencies
               </button>
@@ -254,26 +281,39 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
       )}
 
       {activeTab === "academic" && (
-        <div className="grid grid-auto-fit gap-4">
-          {isStudent && (
-            <>
-              <DetailTile label="Student ID" value={p.studentProfile!.studentId} icon={<User size={16} />} />
-              <DetailTile label="Roll Number" value={p.studentProfile!.rollNumber ?? "N/A"} icon={<FileText size={16} />} />
-              <DetailTile label="Admission Year" value={String(p.studentProfile!.admissionYear)} icon={<Calendar size={16} />} />
-              <DetailTile label="Department" value={p.studentProfile!.department.name} icon={<Building2 size={16} />} />
-              <DetailTile label="Programme" value={p.studentProfile!.programme.name} icon={<BookOpen size={16} />} />
-              <DetailTile label="Section" value={p.studentProfile!.section.name} icon={<Users size={16} />} />
-            </>
+        <>
+          <div className="grid grid-auto-fit gap-4">
+            {isStudent && (
+              <>
+                <DetailTile label="Student ID" value={p.studentProfile!.studentId} icon={<User size={16} />} />
+                <DetailTile label="Register Number" value={p.studentProfile!.registerNumber ?? "N/A"} icon={<FileText size={16} />} />
+                <DetailTile label="Internal Roll Number" value={p.studentProfile!.rollNumber ?? "N/A"} icon={<FileText size={16} />} />
+                <DetailTile label="Admission Year" value={String(p.studentProfile!.admissionYear)} icon={<Calendar size={16} />} />
+                <DetailTile label="Study Year" value={p.studentProfile!.studyYear ? `Year ${p.studentProfile!.studyYear}` : "N/A"} icon={<Calendar size={16} />} />
+                <DetailTile label="Department" value={p.studentProfile!.department.name} icon={<Building2 size={16} />} />
+                <DetailTile label="Programme" value={p.studentProfile!.programme.name} icon={<BookOpen size={16} />} />
+                <DetailTile label="Section" value={p.studentProfile!.section.name} icon={<Users size={16} />} />
+                <DetailTile label="Gender" value={formatGender(p.studentProfile!.gender)} icon={<User size={16} />} />
+                <DetailTile label="Date of Birth" value={formatDate(p.studentProfile!.dateOfBirth)} icon={<Calendar size={16} />} />
+              </>
+            )}
+            {!isStudent && p.staffProfile && (
+              <>
+                <DetailTile label="Employee ID" value={p.staffProfile.employeeId} icon={<User size={16} />} />
+                <DetailTile label="Designation" value={p.staffProfile.designation ?? "Staff"} icon={<FileText size={16} />} />
+                <DetailTile label="Specialization" value={p.staffProfile.specialization ?? "General"} icon={<BookOpen size={16} />} />
+                <DetailTile label="Department" value={p.staffProfile.department?.name ?? "General"} icon={<Building2 size={16} />} />
+              </>
+            )}
+          </div>
+          {p.studentProfile && canManageAcademic && !isArchived && (
+            <StudentSectionMove
+              studentPublicId={p.publicId}
+              studentName={p.fullName}
+              profile={p.studentProfile}
+            />
           )}
-          {!isStudent && p.staffProfile && (
-            <>
-              <DetailTile label="Employee ID" value={p.staffProfile.employeeId} icon={<User size={16} />} />
-              <DetailTile label="Designation" value={p.staffProfile.designation ?? "Staff"} icon={<FileText size={16} />} />
-              <DetailTile label="Specialization" value={p.staffProfile.specialization ?? "General"} icon={<BookOpen size={16} />} />
-              <DetailTile label="Department" value={p.staffProfile.department?.name ?? "General"} icon={<Building2 size={16} />} />
-            </>
-          )}
-        </div>
+        </>
       )}
 
       {activeTab === "history" && (
@@ -321,7 +361,7 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
                   <button className="avs-btn avs-btn-secondary" onClick={() => setDepOpen(true)} type="button">
                     <Database size={16} /> View Dependency Analysis
                   </button>
-                  {canDeletePermanently && (
+                  {canDeletePermanently && canCleanStudentPermanently && (
                     <button className="avs-btn avs-btn-danger" onClick={() => setDeleteOpen(true)} type="button">
                       <Trash2 size={16} /> Permanently Delete Student Data
                     </button>
@@ -380,4 +420,19 @@ function DetailTile({ label, value, icon }: { label: string; value: string; icon
       <div style={{ fontSize: "var(--text-base)", fontWeight: 600, color: "var(--avs-text)" }}>{value}</div>
     </div>
   );
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "N/A";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "N/A" : date.toLocaleDateString();
+}
+
+function formatGender(value: string | null): string {
+  if (!value) return "N/A";
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
