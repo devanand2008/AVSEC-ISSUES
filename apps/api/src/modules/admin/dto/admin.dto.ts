@@ -1,9 +1,9 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { Type } from "class-transformer";
-import { IsDateString, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min } from "class-validator";
+import { IsDateString, IsDefined, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min } from "class-validator";
 
 export class UpdateSettingDto {
-  @ApiProperty() value!: unknown;
+  @ApiProperty() @IsDefined() value!: unknown;
 }
 
 export class SearchDto {
