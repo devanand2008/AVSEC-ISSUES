@@ -1061,7 +1061,7 @@
   flex-wrap: nowrap;
 }
 
-@container (max-width: 720px) {
+@container (max-width: 840px) {
   .academic-section-card {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-3);

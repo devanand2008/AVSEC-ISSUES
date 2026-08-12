@@ -13,10 +13,10 @@ describe("academic workspace responsive styles", () => {
       /\.academic-department-detail\s*\{[^}]*container-type:\s*inline-size;/su,
     );
     expect(css).toMatch(
-      /@container\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.academic-section-card\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/u,
+      /@container\s*\(max-width:\s*840px\)\s*\{[\s\S]*?\.academic-section-card\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/u,
     );
     expect(css).toMatch(
-      /@container\s*\(max-width:\s*720px\)[\s\S]*?\.academic-section-actions\s*\{[^}]*flex-wrap:\s*wrap;/u,
+      /@container\s*\(max-width:\s*840px\)[\s\S]*?\.academic-section-actions\s*\{[^}]*flex-wrap:\s*wrap;/u,
     );
   });
 });
