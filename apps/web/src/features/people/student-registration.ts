@@ -1,7 +1,4 @@
-import type {
-  CreatePersonField,
-  CreatePersonFormState,
-} from "./create-person";
+import type { CreatePersonField, CreatePersonFormState } from "./create-person";
 
 export const ENGINEERING_STUDY_YEARS = [1, 2, 3, 4] as const;
 
@@ -140,19 +137,33 @@ export function currentAcademicYearId(
 export function academicYearGroups(
   years: RegistrationAcademicYearOption[],
 ): AcademicYearGroups {
-  const current = years.filter((year) => year.isCurrent && !year.archivedAt);
+  const byStartDate = (
+    left: RegistrationAcademicYearOption,
+    right: RegistrationAcademicYearOption,
+  ) => {
+    const dateDifference =
+      Date.parse(left.startsOn) - Date.parse(right.startsOn);
+    return dateDifference || left.name.localeCompare(right.name);
+  };
+  const current = years
+    .filter((year) => year.isCurrent && !year.archivedAt)
+    .sort(byStartDate);
   const currentStart = current[0]
     ? Date.parse(current[0].startsOn)
     : Date.now();
   const selectable = years.filter((year) => !year.archivedAt);
   return {
-    previous: selectable.filter(
-      (year) => !year.isCurrent && Date.parse(year.startsOn) < currentStart,
-    ),
+    previous: selectable
+      .filter(
+        (year) => !year.isCurrent && Date.parse(year.startsOn) < currentStart,
+      )
+      .sort(byStartDate),
     current,
-    future: selectable.filter(
-      (year) => !year.isCurrent && Date.parse(year.startsOn) >= currentStart,
-    ),
+    future: selectable
+      .filter(
+        (year) => !year.isCurrent && Date.parse(year.startsOn) >= currentStart,
+      )
+      .sort(byStartDate),
   };
 }
 

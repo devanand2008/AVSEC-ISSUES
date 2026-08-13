@@ -98,7 +98,7 @@ describe("student registration academic helpers", () => {
 
   it("keeps previous, current, and future configured academic years", () => {
     expect(currentAcademicYearId(years)).toBe("year-current");
-    expect(academicYearGroups(years)).toEqual({
+    expect(academicYearGroups([...years].reverse())).toEqual({
       previous: [years[0]],
       current: [years[1]],
       future: [years[2]],
@@ -177,7 +177,9 @@ describe("student registration academic helpers", () => {
       sectionId: "",
       expectedGraduationYear: "",
     });
-    expect(studentFormAfterAcademicYearChange(form, "year-future")).toMatchObject({
+    expect(
+      studentFormAfterAcademicYearChange(form, "year-future"),
+    ).toMatchObject({
       academicYearId: "year-future",
       semesterId: "",
       sectionId: "",
