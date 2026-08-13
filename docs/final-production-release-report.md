@@ -2,9 +2,9 @@
 
 # Final Production Release Report
 
-**Report state:** DEPLOYED - VERIFIED WEB RELEASE WITH DOCUMENTED LIMITS
+**Report state:** LIVE - ACADEMIC HIERARCHY DEPLOYED AND VERIFIED
 
-**Last updated:** 2026-08-11 (Asia/Kolkata)
+**Last updated:** 2026-08-13 (Asia/Kolkata)
 
 **Public URL:** https://avs-college-portal.onrender.com/
 
@@ -12,246 +12,297 @@
 
 ## Release Identity
 
-| Item                               | Verified value                                                        |
-| ---------------------------------- | --------------------------------------------------------------------- |
-| Executable release commit          | `4c64bc1216c7370fc79bcfd7b1cf60fe00f4e442`                            |
-| Initial acceptance deployment      | `dep-d9t15k8ae00c73b61g00`                                            |
-| Same-commit persistence deployment | `dep-d9t19legekts739hhtn0`                                            |
-| Current live commit                | `34cca0a3e2caacb407deb6ab35219ef4fb37379f`                            |
-| Current live deployment            | `dep-d9t22r7avr4c7397kdeg` (`live`)                                   |
-| Full clear-cache redeploy          | PASS                                                                  |
-| Render service                     | Existing `avs-college-portal` service; no replacement service created |
-| Database mode                      | `EXTERNAL_PERSISTENT`                                                 |
-| Production database                | `avs_college_import_20260806`                                         |
+| Item                               | Verified value                                            |
+| ---------------------------------- | --------------------------------------------------------- |
+| Current release commit             | `78762683ee43c3082784e654d510b70f0335df57`                |
+| Initial corrected deployment       | `dep-d9uadv5bedkc7394aibg`                                |
+| Same-commit persistence deployment | `dep-d9uaqi9t0dsc73cvoqpg` (`live`)                       |
+| Existing Render service            | `avs-college-portal`; no replacement service created      |
+| Database mode                      | `EXTERNAL_PERSISTENT`                                     |
+| Production database                | `avs_college_import_20260806` on Supabase PostgreSQL      |
+| Current migration state            | 41 applied, 4 historical rolled back, 0 failed, 0 pending |
 
-The tested application commit was deployed to the existing Render service. A
-second Render deployment of the exact same commit was used to prove PostgreSQL
-persistence. The later documentation-only commits changed no executable source.
-At the user's request, the latest `main` commit received a full clear-cache
-Render rebuild and deployment, followed by health, Main Admin login/logout,
-Profile, Reports, mobile, database, storage, and runtime-log checks. No database
-reset, force-reset, destructive storage mirror, or new Render service was used.
+Local `HEAD`, `origin/main`, the current Render deployment, the tested browser
+release, and the backup-gated acceptance flow all reference the same release
+commit. A first rollout attempt applied the academic uniqueness migration but
+failed before startup because a seed dependency was missing from the runtime
+image. The image packaging was corrected and covered with a build-time import
+check. PostgreSQL was not reset and the already-applied migration was not
+force-replayed.
 
-## Production Outcome
+## Academic Hierarchy Delivered
 
-The web application is live and operational. The previously reported mobile
-Profile and Reports 404 errors are fixed: Profile opens `/profile`, Reports opens
-`/admin/exports`, and both render successfully while authenticated. The empty
-feedback-filter 400 errors, backup inventory 500, invalid-origin CORS 500,
-Supabase signed-download endpoint issue, announcement audience leaks, logout
-session-cache window, and identified responsive-layout defects were also fixed.
+Production now contains the required normalized hierarchy. Department codes and
+professional names are stored separately, and sections are child records rather
+than malformed department names.
 
-At the final 2026-08-11 health check:
+| Department | Professional name                            | Sections |
+| ---------- | -------------------------------------------- | -------- |
+| AI & ML    | Artificial Intelligence and Machine Learning | A        |
+| AI & DS    | Artificial Intelligence and Data Science     | A, B, C  |
+| CSE        | Computer Science and Engineering             | A, B, C  |
+| IT         | Information Technology                       | A, B     |
+| ECE        | Electronics and Communication Engineering    | A, B     |
+| EEE        | Electrical and Electronics Engineering       | A        |
+| MECH       | Mechanical Engineering                       | A        |
+| BME        | Biomedical Engineering                       | A        |
 
-| Endpoint                     | Result                                           |
-| ---------------------------- | ------------------------------------------------ |
-| `/health`                    | HTTP 200, `ready`, `EXTERNAL_PERSISTENT`         |
-| `/health/live`               | HTTP 200, `ok`                                   |
-| `/health/ready`              | HTTP 200, PostgreSQL `up`, configuration `valid` |
-| `/health/ready/dependencies` | HTTP 200, `ready`                                |
+Read-only PostgreSQL verification confirmed:
 
-HSTS is present on API, frontend, manifest, service worker, and offline assets.
-Disallowed CORS origins return HTTP 403 without an allow-origin header instead of
-the previous HTTP 500.
+- 8 departments, 8 programmes, 1 current academic year, 8 semesters, and 14
+  sections.
+- Every section is active, unarchived, and has a maximum capacity of 70.
+- Zero duplicate department codes or names after normalized comparison.
+- Zero duplicate programmes, academic years, semesters, section codes, or
+  section names within their database scopes.
+- Zero malformed legacy departments, hierarchy relationship mismatches, or
+  over-capacity sections.
+- Database constraints enforce normalized per-college department uniqueness,
+  normalized per-department programme uniqueness, normalized per-semester
+  section uniqueness, and section capacity between 1 and 70.
 
-Across 1,635 retained rows for the executable acceptance deployment, there were
-no level-50 application errors and no HTTP 5xx responses. The non-error signals
-were three known Nest route-conversion warnings, four transient gateway
-connection retries while ports 3000/4000 started, and expected
-authentication/logout HTTP 401s. The exact post-ready audit for the final full
-redeployment covered 146 log rows without pagination: zero error-level rows,
-zero warning-level rows, zero fatal signals, zero HTTP 5xx responses, and zero
-database, Redis, storage, crash, or unhandled-error signals. The HTTP 401 rows
-were expected invalidated-token and unauthenticated `/auth/me` checks.
+Safe, explicitly configured import aliases are active for the approved variants,
+including `AIDS`, `AI&DS`, `AI-DS`, `AIML`, `AI&ML`, `AI-ML`, spaced forms, the
+legacy `CSE(AI&ML)` label, and `ME` to `MECH`. Dangerous fuzzy matching is not
+used.
+
+## Admin Data Entry and Lifecycle
+
+The authenticated Academic Setup workspace is available at:
+
+`/admin/academic/departments-sections`
+
+It provides a desktop department master-detail layout and phone department cards
+with section counts. Authorized administrators can add and edit departments and
+sections, manage active/archive state, restore records after ancestor validation,
+view dependencies, and use guarded safe deletion. Section setup supports the
+academic year, study year, semester, capacity, room, coordinator, and prospective
+class staff fields.
+
+The student-entry workflow at `/admin/people/new` now includes student-specific
+personal, academic, and account fields. Department, programme, academic year,
+study year, semester, and section choices cascade, and inactive or archived
+sections are excluded. The backend serializes placement against hierarchy
+lifecycle and capacity changes, rechecks active ancestors inside the transaction,
+and rejects student 71 with a section-full response rather than relying on the
+browser.
+
+The Students flow in `/admin/imports` supports preview-before-confirmation with
+the requested template columns:
+
+`full_name`, `official_email`, `college_id`, `register_number`,
+`department_code`, `academic_year`, `study_year`, `semester`, `section`,
+`temporary_password`, and `mobile`.
+
+Programme inference is allowed only when a department has one unambiguous active
+programme. Preview and queued confirmation use the same parser-invalid and
+transactional capacity rules; invalid rows cannot reserve seats from later valid
+rows. Imported students use the same canonical placement service as manual
+entry.
+
+Department, programme, semester, academic-year, and section lifecycle mutations
+share deterministic hierarchy locks with student placement. Archive, restore,
+status, capacity, and safe-delete operations re-read their state inside the
+transaction to prevent placement and deletion races.
+
+## Live Academic Acceptance
+
+A uniquely marked TEST student was used only for the authorized acceptance flow.
+The full sequence passed:
+
+1. Main Admin login and authorization.
+2. Exact 8-department/14-section UI verification on desktop and at 320px.
+3. Creation through the production student form into CSE-A.
+4. PostgreSQL verification of the user, STUDENT role, SECTION scope, profile,
+   and active membership.
+5. Browser refresh and a Render redeploy of the exact same commit.
+6. Verification that the same database identity and creation timestamp persisted.
+7. UI move from CSE-A to CSE-B, including count and membership-history checks.
+8. UI archive with active capacity released.
+9. A fresh post-archive `PRE_DELETION`, `RESTORE_TESTED` backup.
+10. Safe permanent cleanup through the application endpoint.
+
+Cleanup removed the TEST account's credential, roles, scopes, contacts, and raw
+student identifiers. Both historical section memberships are inactive and ended.
+A database-wide scan found zero occurrences of the raw TEST identifier prefixes
+in text or JSON columns. One archived, anonymized student profile and its two
+ended memberships remain intentionally as historical integrity records; there is
+no active TEST student and no TEST authentication path.
+
+## Current Production Data State
+
+The previous report described the database before the user's separately
+authorized non-admin data purge. It must not be used as the current count
+baseline. The final repeatable-read production snapshot is:
+
+| Data                                  |                   Current count |
+| ------------------------------------- | ------------------------------: |
+| Public PostgreSQL tables              |                             143 |
+| Total rows at fact-check snapshot     |                           3,128 |
+| Users                                 |                               5 |
+| Active users                          |                               4 |
+| Archived anonymized TEST tombstones   |                               1 |
+| Credentials                           |                               4 |
+| Active Main Admin accounts            |                               1 |
+| Staff profiles                        |                               3 |
+| Student profiles                      | 1 anonymized historical profile |
+| Active students                       |                               0 |
+| Active section memberships            |                               0 |
+| Ended TEST membership history         |                               2 |
+| Roles / permissions                   |                        19 / 104 |
+| Issues                                |                               0 |
+| Conversations / messages              |                          33 / 0 |
+| Announcements                         |                               0 |
+| Attendance sessions / records         |                           0 / 0 |
+| Skill courses / modules / lessons     |                   17 / 34 / 513 |
+| Assessments / progress / certificates |                   1,019 / 0 / 0 |
+| Audit logs at fact-check snapshot     |                             152 |
+
+The four active accounts predate this academic acceptance run and were not
+modified or removed by its cleanup. Production currently has no real active
+student record to migrate or delete. The acceptance workflow added no remaining
+active user or credential. Total rows, audit logs, sessions, and request metadata
+are operationally volatile; the figures above are the final read-only snapshot,
+not immutable quotas.
+
+## Current Object Storage
+
+The user's separately authorized purge also superseded the old 108-object storage
+baseline. Final read-only enumeration found 3 private objects totaling 3,453,098
+bytes. The current database contains one storage reference, that reference is
+present, and there are zero missing referenced objects. No object key or signed
+URL is included in this report.
 
 ## Main Admin Authentication
 
-| Check                                      | Result                                                    |
-| ------------------------------------------ | --------------------------------------------------------- |
-| Account identity                           | `deva1253@college.com`                                    |
-| Status and role                            | `ACTIVE`, `MAIN_ADMIN`                                    |
-| Forced password change                     | Disabled after controlled rotation                        |
-| Replacement credential                     | Stored outside Git in the protected local credential file |
-| Fresh login and `/auth/me`                 | PASS                                                      |
-| Profile API                                | PASS                                                      |
-| Backup inventory API                       | HTTP 200                                                  |
-| Logout                                     | HTTP 204                                                  |
-| Same access token immediately after logout | HTTP 401                                                  |
+| Check                          | Result                             |
+| ------------------------------ | ---------------------------------- |
+| Account status and role        | `ACTIVE`, `MAIN_ADMIN`             |
+| Forced password change         | Disabled after controlled rotation |
+| Replacement credential storage | Protected local file outside Git   |
+| Fresh login                    | HTTP 200                           |
+| Authenticated identity lookup  | HTTP 200; identity matched         |
+| Logout                         | HTTP 204                           |
+| Same access token after logout | HTTP 401                           |
 
-The publicly exposed old password was invalidated. It is not the live password
-and must not be restored. The replacement secret is intentionally not included
-in this report, source control, logs, or chat.
+The previously exposed password is not the live password. No password, hash,
+session token, signed URL, or other secret is included in this report, source
+control, logs, or chat.
 
-## Database Cutover and Integrity
-
-The original 7,425-row figure is the exact authoritative source snapshot before
-the documented transient cleanup. That cleanup removed 671 refresh tokens, 452
-sessions, 12 password-reset tokens, 32 idempotency records, and 25 pending outbox
-records. It is therefore not the expected live total after cutover.
-
-The final read-only production snapshot contained 143 public tables and 6,887
-rows. It is not bootstrap-like, no protected baseline table is below its
-post-cleanup floor, and the live database is the intended restored Supabase
-database.
-
-| Data                          | Final live count |
-| ----------------------------- | ---------------: |
-| Users / credentials           |          45 / 45 |
-| Student / staff profiles      |          13 / 13 |
-| Roles / permissions           |         19 / 104 |
-| Issues / issue attachments    |          23 / 29 |
-| Conversations / messages      |          24 / 70 |
-| Announcements                 |                4 |
-| Attendance sessions / records |            3 / 5 |
-| AVS Skill courses             |               17 |
-| Modules / lessons             |         34 / 513 |
-| Assessments                   |            1,019 |
-| Student progress              |               45 |
-| Learning certificates         |                2 |
-| Audit logs                    |            1,052 |
-
-Migration state is clean: 40 local migration directories, 40 applied migrations,
-four retained rolled-back audit records, zero failed migrations, zero pending
-local migrations, and zero database-only migration directories.
-
-### Source-to-live progress variance
-
-The source snapshot contained 46 `student_progress` rows. An exact identifier and
-natural-key comparison found 45 unchanged rows live, no extra rows, and one
-removed completion belonging to the active Main Admin. The related account,
-course, and lesson remain intact, and that user retains 23 other progress rows.
-The application deliberately supports marking a completed lesson incomplete,
-which deletes that one progress row. Render retained one successful authenticated
-`POST /api/v1/learn/progress` mutation after the isolated restore; this is strong
-evidence that the difference is a user "mark incomplete" action, but request-body
-auditing is unavailable, so it is an inference rather than direct proof. A stale
-completion was not reinserted because doing so would overwrite mutable user state
-without evidence that the removal was accidental.
-
-## Controlled Live Transaction and Persistence
-
-A uniquely marked TEST student was created through the production API with an
-ACTIVE STUDENT role, coherent department/programme/semester/section assignment,
-student profile, and SECTION scope. Its public identifier and creation timestamp
-were unchanged after the same executable commit was redeployed.
-
-A selected-recipient TEST announcement was created and published. It reached
-exactly one recipient, remained published across the same-commit redeployment,
-and retained the same database identity. Both issue and attendance CSV exports
-returned their corrected endpoints and produced exact request-linked audit rows.
-
-Cleanup completed safely:
-
-- The TEST announcement is `ARCHIVED`.
-- Its notification recipient residue is absent.
-- The final TEST student is `ARCHIVED`.
-- Acceptance sessions were closed; no transaction-specific sessions remain.
-- Permanent anonymization was correctly refused because the verified backup
-  predates the test-user creation. The archived record was not bypass-deleted by
-  direct SQL.
-
-Earlier repair attempts also left four clearly marked archived TEST users. They
-remain non-active because no post-creation restore-tested backup exists to satisfy
-the application's permanent-deletion safety gate.
-
-## Object Storage
-
-| Check                               | Result    |
-| ----------------------------------- | --------- |
-| Supabase private objects            | 108       |
-| Total bytes                         | 2,686,456 |
-| Unique database references          | 102       |
-| Present references                  | 98        |
-| Known historical missing references | 4         |
-| New reference regression            | None      |
-
-All 108 objects were read and matched their stored size, MIME metadata, and
-SHA-256. The four absent references predate this release: two READY import
-sources, one COMPLETED import source, and one abandoned UPLOADING message
-attachment. A live application-signed attachment download used the Supabase
-origin, returned HTTP 200, and matched its stored byte count and SHA-256; it did
-not point to the Render host on port 9000.
-
-## Backup and Recovery
+## Backup and Cleanup Gate
 
 GitHub Actions run
-https://github.com/devanand2008/AVSEC-ISSUES/actions/runs/31415240902 completed
-successfully as a production pre-migration backup.
+https://github.com/devanand2008/AVSEC-ISSUES/actions/runs/31616042796
+completed successfully before the initial academic rollout and verified an
+isolated restore.
 
-| Backup gate                 | Result                            |
-| --------------------------- | --------------------------------- |
-| PostgreSQL client           | 17                                |
-| Backup format               | PostgreSQL custom archive         |
-| Ownership/privileges        | Excluded                          |
-| Public table-count manifest | 143 entries                       |
-| Encryption                  | AES-256-GCM                       |
-| Decryption round trip       | PASS                              |
-| Isolated restore            | PASS                              |
-| Exact restored table counts | PASS                              |
-| Database metadata           | `PRE_MIGRATION`, `RESTORE_TESTED` |
-| Encrypted GitHub artifact   | `avs-2026-08-10_23-11-21-IST`     |
-| Artifact retention          | Through 2026-09-09                |
+After the TEST student was archived, run
+https://github.com/devanand2008/AVSEC-ISSUES/actions/runs/31623250036
+created the backup that authorized safe cleanup.
 
-The database payload is AES-256-GCM encrypted and its encryption key is retained
-outside Git in the protected local backup-key file. The repository is public, so
-the GitHub-hosted artifact itself is not described as private; eligible GitHub
-users may be able to download the ciphertext, but cannot decrypt it without the
-separate key. This successful run was manually dispatched. A daily cron is
-configured, but a scheduled execution has not yet been observed. The in-app
-Google Drive provider and in-app scheduler remain disabled, so `/health/ready`
-intentionally reports backup readiness as degraded even though the separate
-restore-tested off-host artifact exists.
+| Post-archive backup gate              | Result                             |
+| ------------------------------------- | ---------------------------------- |
+| Type                                  | `PRE_DELETION`                     |
+| Workflow commit                       | Exact release commit `78762683...` |
+| PostgreSQL custom archive             | PASS                               |
+| AES-256-GCM encryption and round trip | PASS                               |
+| Isolated restore                      | PASS                               |
+| Immutable restored-table manifest     | PASS                               |
+| Latest restore test                   | `PASSED`                           |
+| Database status                       | `RESTORE_TESTED`                   |
+| Encrypted artifact                    | `avs-2026-08-12_23-04-20-IST`      |
+| Artifact size                         | 671,312 bytes                      |
+| Artifact expiry                       | 2026-09-11                         |
+| Temporary plaintext cleanup           | PASS                               |
+
+The safe-delete backend independently required the same-college, fresh
+`PRE_DELETION` backup and its latest restore test to be passed. An older passed
+test cannot override a later failed restore test.
+
+The encrypted artifact is GitHub-hosted. Because this repository is public, the
+ciphertext must not be described as private; the separate encryption key remains
+outside Git. Google Drive upload was skipped because that integration is
+disabled.
+
+The configured daily schedule has also executed successfully. Scheduled run
+https://github.com/devanand2008/AVSEC-ISSUES/actions/runs/31641202321 ran on the
+exact release commit, verified the encryption round trip, and retained encrypted
+artifact `avs-2026-08-13_02-40-00-IST` (671,867 bytes) through 2026-09-11. Daily
+scheduled runs intentionally do not perform an isolated restore. Restore
+assurance therefore relies on protected, manually dispatched restore-tested runs
+such as `31623250036`.
 
 ## Automated Quality Gates
 
-| Gate                                        | Result                      |
-| ------------------------------------------- | --------------------------- |
-| API tests                                   | 59 suites, 468 tests passed |
-| Web tests                                   | 19 files, 120 tests passed  |
-| API typecheck, lint, production build       | PASS                        |
-| Web typecheck, lint, production build       | PASS; 85 routes generated   |
-| Production dependency audit                 | 0 vulnerabilities           |
-| Sensitive-file/security scan                | PASS                        |
-| Prisma generation and migration safety gate | PASS                        |
-| Production migrations                       | PASS; zero pending/failed   |
+All final gates ran on Node.js 22.23.2 against the exact released tree.
 
-## Browser, PWA, and Responsive Acceptance
+| Gate                               | Result                             |
+| ---------------------------------- | ---------------------------------- |
+| API Jest                           | 67/67 suites, 529/529 tests passed |
+| Web Vitest                         | 23/23 files, 145/145 tests passed  |
+| API typecheck and ESLint           | PASS; zero warnings/errors         |
+| Web typecheck and ESLint           | PASS; zero warnings/errors         |
+| API production build               | PASS                               |
+| Web production build               | PASS; 86/86 pages generated        |
+| Prisma validate/generate           | PASS                               |
+| Production dependency audit        | 0 vulnerabilities                  |
+| Dependency-tree security assertion | PASS                               |
+| Sensitive-file scan                | PASS                               |
 
-Chrome and Edge public smoke checks passed. The service worker registered,
-activated, and controlled scope `/`; the offline page and manifest icons loaded;
-API requests were not replayed from the PWA cache. The installed-app prompt,
-bottom navigation, drawer, and AVS Bot were tested for overlap and viewport fit.
+Focused coverage includes the exact AVS matrix, normalized duplicates, same
+section names in different departments, transactional capacity, student 71
+rejection, manual and import placement, section filtering, archive/restore and
+safe-delete dependencies, hierarchy concurrency, backup-proof freshness, and
+responsive academic workspace styles.
 
-Authenticated route checks were executed at 320, 360, 375, 390, 412, 430, and
-768 pixel widths across the available route sets. Final targeted checks at
-430x932 and 768x1024 reported HTTP 200, no 404 body, no horizontal document
-overflow, no incomplete loading state, no runtime error, and verified logout.
-Public/login responsive checks also covered 1024, 1366, and 1440 pixel widths.
-Profile, Reports, feedback, imports, storage/backups, announcements, settings,
-and Report Issue were included in the repaired mobile coverage.
+## Live Runtime Verification
 
-## Remaining Assurance Limits
+At the final independent check:
 
-These are not known live web regressions, but they prevent an unconditional
-all-platform sign-off:
+| Endpoint                     | Result                                       |
+| ---------------------------- | -------------------------------------------- |
+| `/health`                    | HTTP 200, ready, `EXTERNAL_PERSISTENT`       |
+| `/health/live`               | HTTP 200                                     |
+| `/health/ready`              | HTTP 200, PostgreSQL up, configuration valid |
+| `/health/ready/dependencies` | HTTP 200, ready                              |
 
-1. Google Drive integration and the in-app backup scheduler remain disabled;
-   recovery currently relies on the verified encrypted GitHub Actions artifact,
-   and the configured daily cron has not yet completed a scheduled run.
-2. A physical-device camera/QR run, a downloaded installed-PWA login, and Firefox
-   testing were not available in this environment.
-3. A controlled production load test was not run.
-4. Five archived TEST users remain under the application's fail-closed deletion
-   policy until a qualifying post-creation restore-tested backup exists.
-5. The one mutable Main Admin learning-progress difference from the pre-cutover
-   source snapshot cannot be proven intentional from retained audit data and was
-   therefore disclosed rather than overwritten.
+Sanitized Render logs from cleanup completion through the final independent check
+covered 128 rows across two fully exhausted pages: zero errors, zero warnings,
+zero application-emitted HTTP 5xx, zero database errors, and zero process
+crashes.
+
+A temporary Render edge HTTP 503 was consistent with the free-tier service waking
+from an idle spin-down. Sanitized logs showed a normal cold-start sequence rather
+than an application crash: no application-emitted 5xx, OOM, process exit,
+database failure, or Redis failure was recorded, and the existing deployment
+recovered without a restart or redeploy. The wake took approximately 82 seconds
+for the gateway, migration/bootstrap checks, API, and web process to become
+ready.
+
+## Remaining Operational Limits
+
+1. The Render service uses the free tier and can spin down after inactivity.
+   Eliminating cold-start delays requires an always-on paid Render instance.
+2. Google Drive backup integration and the in-app backup scheduler remain
+   disabled. GitHub Actions scheduled backups are operating successfully and
+   verify encryption integrity, while isolated-restore assurance relies on
+   manually dispatched restore-tested backups.
+3. Physical-device camera/QR testing, installed-PWA testing, a full Firefox
+   matrix, and controlled production load testing remain outside the available
+   environment.
+4. The archived acceptance profile is intentionally retained in anonymized form
+   for referential and audit history; it has no credential or authorization.
 
 ## Release Decision
 
-**Operational web deployment: LIVE AND VERIFIED**
+**Academic hierarchy and web data-entry release: LIVE AND VERIFIED.**
 
-**Formal unconditional production approval: BLOCKED by the remaining assurance
-limits above.** No unresolved blocker is known for ordinary web login, Profile,
-Reports, mobile navigation, database persistence, object downloads, or the tested
-production transactions.
+The Department -> Programme -> Academic Year -> Semester -> Section hierarchy,
+responsive administration workspace, manual student entry, import flow,
+transactional capacity protection, Supabase persistence, same-commit redeploy,
+student movement, archive, and backup-gated cleanup all passed production
+acceptance.
+
+**Formal unconditional cross-platform/disaster-recovery certification remains
+limited by the operational items above.** No unresolved blocker is known for the
+tested web academic workflows or Main Admin authentication.
