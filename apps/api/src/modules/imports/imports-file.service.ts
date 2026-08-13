@@ -43,6 +43,7 @@ const ALLOWED_MIME_TYPES = new Set([
 const INTEGER_FIELDS = new Set([
   "admission_year",
   "duration_years",
+  "total_semesters",
   "semester_number",
   "period_number",
   "capacity",
@@ -98,6 +99,9 @@ const HEADER_ALIASES: Record<string, string> = {
   department_name: "department_code",
   dept: "department_code",
   dept_code: "department_code",
+  degree_type: "degree_type_code",
+  degree_type_code: "degree_type_code",
+  degree_code: "degree_type_code",
   dob: "date_of_birth",
   employee_name: "full_name",
   employee_or_student_id: "employee_or_student_id",
@@ -725,7 +729,7 @@ export class ImportsFileService {
         errors.push({
           rowNumber,
           field: "year",
-          message: "study_year must be an integer from 1 to 8.",
+          message: "study_year must be an integer from 1 to 4.",
         });
       }
       if (entityType === "STUDENTS" && row.source_sheet && !row.first_name) {
@@ -739,7 +743,7 @@ export class ImportsFileService {
         errors.push({
           rowNumber,
           field: "year",
-          message: "Study year was not detected. Select a study year from 1 to 8 before confirming.",
+          message: "Study year was not detected. Select a study year from 1 to 4 before confirming.",
         });
       }
       if (
@@ -1410,16 +1414,12 @@ export class ImportsFileService {
       .replace(extname(value), "")
       .toUpperCase()
       .replace(/[_-]+/g, " ");
-    const words: ImportStudyYear[] = ["1", "2", "3", "4", "5", "6", "7", "8"];
+    const words: ImportStudyYear[] = ["1", "2", "3", "4"];
     const names = [
       "FIRST",
       "SECOND",
       "THIRD",
       "FOURTH",
-      "FIFTH",
-      "SIXTH",
-      "SEVENTH",
-      "EIGHTH",
     ];
     for (const [index, year] of words.entries()) {
       const ordinal = index === 0 ? "ST" : index === 1 ? "ND" : index === 2 ? "RD" : "TH";
@@ -1436,16 +1436,12 @@ export class ImportsFileService {
 
   private normalizedStudyYear(value: string): ImportStudyYear | undefined {
     const normalized = value.trim().toUpperCase().replace(/[\s-]+/g, "_");
-    if (/^[1-8]$/.test(normalized)) return normalized as ImportStudyYear;
+    if (/^[1-4]$/.test(normalized)) return normalized as ImportStudyYear;
     const aliases: Record<string, ImportStudyYear> = {
       "1ST": "1", "1ST_YEAR": "1", FIRST: "1", FIRST_YEAR: "1",
       "2ND": "2", "2RD": "2", "2ND_YEAR": "2", "2RD_YEAR": "2", SECOND: "2", SECOND_YEAR: "2",
       "3RD": "3", "3RD_YEAR": "3", THIRD: "3", THIRD_YEAR: "3",
       "4TH": "4", "4TH_YEAR": "4", FOURTH: "4", FOURTH_YEAR: "4",
-      "5TH": "5", "5TH_YEAR": "5", FIFTH: "5", FIFTH_YEAR: "5",
-      "6TH": "6", "6TH_YEAR": "6", SIXTH: "6", SIXTH_YEAR: "6",
-      "7TH": "7", "7TH_YEAR": "7", SEVENTH: "7", SEVENTH_YEAR: "7",
-      "8TH": "8", "8TH_YEAR": "8", EIGHTH: "8", EIGHTH_YEAR: "8",
     };
     return aliases[normalized];
   }

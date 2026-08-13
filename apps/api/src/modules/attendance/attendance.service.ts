@@ -6,6 +6,11 @@ import type { AuthPrincipal } from "../../common/http/request-context";
 import { IdempotencyService } from "../../common/idempotency/idempotency.service";
 import { PrismaService } from "../../database/prisma.service";
 import { Prisma } from "../../generated/prisma/client";
+import {
+  AcademicMembershipStatus,
+  AccountStatus,
+  StudentAcademicStatus,
+} from "../../generated/prisma/enums";
 import { UsersService } from "../users/users.service";
 import type { AddClassStudentDto, CreateAttendanceSessionDto, RequestCorrectionDto, ReviewCorrectionDto, SubmitAttendanceDto } from "./dto/attendance.dto";
 import { attendanceCredit, attendanceParts } from "./attendance-value";
@@ -56,7 +61,7 @@ export class AttendanceService {
 
   async roster(user: AuthPrincipal, sessionId: string) {
     const session = await this.authorizedSession(user, sessionId, true);
-    const students = await this.prisma.studentProfile.findMany({ where: { sectionId: session.sectionId, user: { status: "ACTIVE" } }, include: { user: { select: { id: true, publicId: true, fullName: true } } }, orderBy: [{ rollNumber: "asc" }, { user: { fullName: "asc" } }] });
+    const students = await this.prisma.studentProfile.findMany({ where: this.activeRosterWhere(session.sectionId), include: { user: { select: { id: true, publicId: true, fullName: true } } }, orderBy: [{ rollNumber: "asc" }, { user: { fullName: "asc" } }] });
     const existing = await this.prisma.attendanceRecord.findMany({ where: { sessionId }, select: { id: true, studentUserId: true, status: true, morningStatus: true, afternoonStatus: true, effectiveAttendanceValue: true, note: true } });
     const byStudent = new Map(existing.map((record) => [record.studentUserId, record]));
     return {
@@ -68,7 +73,7 @@ export class AttendanceService {
   async classStudents(user: AuthPrincipal, sectionId: string) {
     await this.authorizedSection(user, sectionId);
     const students = await this.prisma.studentProfile.findMany({
-      where: { sectionId, user: { status: "ACTIVE" } },
+      where: this.activeRosterWhere(sectionId),
       include: { user: { select: { publicId: true, collegeIdentityId: true, fullName: true, email: true, mobile: true, status: true } } },
       orderBy: [{ rollNumber: "asc" }, { user: { fullName: "asc" } }],
     });
@@ -96,6 +101,7 @@ export class AttendanceService {
       roleCodes: ["STUDENT"],
       scopes: [{ type: "SECTION", id: section.id }],
       studentProfile: {
+        degreeTypeId: section.semester.programme.degreeTypeId,
         departmentId: section.semester.programme.departmentId,
         programmeId: section.semester.programmeId,
         sectionId: section.id,
@@ -115,7 +121,7 @@ export class AttendanceService {
   async saveDraft(user: AuthPrincipal, sessionId: string, input: SubmitAttendanceDto, requestId: string) {
     const session = await this.authorizedSession(user, sessionId, true);
     if (session.status !== "DRAFT") throw new ConflictException("Only a draft attendance session can be saved without submission.");
-    const roster = await this.prisma.studentProfile.findMany({ where: { sectionId: session.sectionId, user: { status: "ACTIVE" } }, select: { userId: true } });
+    const roster = await this.prisma.studentProfile.findMany({ where: this.activeRosterWhere(session.sectionId), select: { userId: true } });
     const allowed = new Set(roster.map((row) => row.userId));
     const submitted = new Set<string>();
     for (const record of input.records) {
@@ -156,7 +162,7 @@ export class AttendanceService {
     if (session.status === "SUBMITTED" && !user.permissions.includes("attendance.edit_window")) {
       throw new ConflictException("Submitted attendance requires an approved correction request.");
     }
-    const roster = await this.prisma.studentProfile.findMany({ where: { sectionId: session.sectionId, user: { status: "ACTIVE" } }, select: { userId: true } });
+    const roster = await this.prisma.studentProfile.findMany({ where: this.activeRosterWhere(session.sectionId), select: { userId: true } });
     const allowed = new Set(roster.map((row) => row.userId));
     const submitted = new Set<string>();
     for (const record of input.records) {
@@ -329,7 +335,7 @@ export class AttendanceService {
     const sessionIds = sessions.map((session) => session.id);
     const [students, records] = await Promise.all([
       this.prisma.studentProfile.findMany({
-        where: { sectionId, user: { status: "ACTIVE" } },
+        where: this.activeRosterWhere(sectionId),
         include: { user: { select: { publicId: true, collegeIdentityId: true, fullName: true, mobile: true, profilePhotoKey: true } }, department: { select: { name: true } }, section: { select: { code: true, name: true } } },
         orderBy: [{ rollNumber: "asc" }, { user: { fullName: "asc" } }],
       }),
@@ -348,6 +354,18 @@ export class AttendanceService {
     const where = await this.sessionWhere(user);
     const records = await this.prisma.attendanceRecord.findMany({
       where: {
+        student: {
+          status: AccountStatus.ACTIVE,
+          archivedAt: null,
+          studentProfile: { academicStatus: StudentAcademicStatus.ACTIVE },
+          sectionMemberships: {
+            some: {
+              isActive: true,
+              endsOn: null,
+              status: AcademicMembershipStatus.ACTIVE,
+            },
+          },
+        },
         session: {
           AND: [
             where,
@@ -510,7 +528,7 @@ export class AttendanceService {
   private async sectionForStudentEntry(user: AuthPrincipal, sectionId: string) {
     const section = await this.prisma.section.findFirst({
       where: { id: sectionId, isActive: true, archivedAt: null, semester: { isActive: true, programme: { collegeId: user.collegeId, isActive: true, department: { isActive: true, archivedAt: null } }, academicYear: { collegeId: user.collegeId, isActive: true } } },
-      select: { id: true, studyYear: true, semester: { select: { id: true, number: true, academicYearId: true, academicYear: { select: { startsOn: true } }, programmeId: true, programme: { select: { departmentId: true } } } } },
+      select: { id: true, studyYear: true, semester: { select: { id: true, number: true, academicYearId: true, academicYear: { select: { startsOn: true } }, programmeId: true, programme: { select: { departmentId: true, degreeTypeId: true } } } } },
     });
     if (!section) throw new BadRequestException("The selected class section is not active.");
     return section;
@@ -529,6 +547,25 @@ export class AttendanceService {
       required: this.numberSetting(value.requiredAttendancePercentage, 75),
       warning: this.numberSetting(value.attendanceWarningPercentage, 65),
       critical: this.numberSetting(value.attendanceCriticalPercentage, 50),
+    };
+  }
+
+  private activeRosterWhere(sectionId: string): Prisma.StudentProfileWhereInput {
+    return {
+      sectionId,
+      academicStatus: StudentAcademicStatus.ACTIVE,
+      user: {
+        status: AccountStatus.ACTIVE,
+        archivedAt: null,
+        sectionMemberships: {
+          some: {
+            sectionId,
+            isActive: true,
+            endsOn: null,
+            status: AcademicMembershipStatus.ACTIVE,
+          },
+        },
+      },
     };
   }
 

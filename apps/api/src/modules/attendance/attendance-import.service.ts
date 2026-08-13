@@ -6,6 +6,11 @@ import { AuditService } from "../audit/audit.service";
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
 import { Prisma } from "../../generated/prisma/client";
+import {
+  AcademicMembershipStatus,
+  AccountStatus,
+  StudentAcademicStatus,
+} from "../../generated/prisma/enums";
 import type { AttendanceImportUploadDto, AttendanceTemplateQueryDto } from "./dto/attendance-import.dto";
 
 interface ValidatedAttendanceRow {
@@ -37,7 +42,7 @@ export class AttendanceImportService {
     const { section, subject } = await this.requireAccess(user, input.sectionId, input.subjectId);
     const { dateFrom, dateTo } = this.dateRange(input.dateFrom, input.dateTo);
     const students = await this.prisma.studentProfile.findMany({
-      where: { sectionId: section.id, user: { status: "ACTIVE", archivedAt: null } },
+      where: this.activeRosterWhere(section.id),
       select: {
         userId: true,
         studentId: true,
@@ -218,7 +223,7 @@ export class AttendanceImportService {
     }
     if (!headerRow) throw new BadRequestException("Attendance header row was not found in the first 10 rows.");
     const roster = await this.prisma.studentProfile.findMany({
-      where: { sectionId, user: { status: "ACTIVE", archivedAt: null } },
+      where: this.activeRosterWhere(sectionId),
       select: { userId: true, studentId: true, registerNumber: true, user: { select: { publicId: true, collegeIdentityId: true, normalizedEmail: true } } },
     });
     const identity = new Map<string, typeof roster[number]>();
@@ -299,6 +304,25 @@ export class AttendanceImportService {
       if (!faculty && !coordinator) throw new ForbiddenException("You do not have attendance-import permission for this section and subject.");
     }
     return { section, subject };
+  }
+
+  private activeRosterWhere(sectionId: string): Prisma.StudentProfileWhereInput {
+    return {
+      sectionId,
+      academicStatus: StudentAcademicStatus.ACTIVE,
+      user: {
+        status: AccountStatus.ACTIVE,
+        archivedAt: null,
+        sectionMemberships: {
+          some: {
+            sectionId,
+            isActive: true,
+            endsOn: null,
+            status: AcademicMembershipStatus.ACTIVE,
+          },
+        },
+      },
+    };
   }
 
   private async requireBatch(user: AuthPrincipal, id: string) {

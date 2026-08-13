@@ -13,6 +13,7 @@ import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
 import {
   AccountStatus,
+  AcademicMembershipStatus,
   ProfileCompletionStatus,
   ScopeType,
 } from "../../generated/prisma/enums";
@@ -333,8 +334,36 @@ export class UsersService {
         input.studyYear,
         "Study year",
         1,
-        8,
+        4,
       );
+      const existingPlacement = await this.prisma.studentProfile.findUnique({
+        where: { userId: user.id },
+        select: {
+          departmentId: true,
+          programmeId: true,
+          sectionId: true,
+          studyYear: true,
+          section: {
+            select: {
+              semesterId: true,
+              semester: { select: { academicYearId: true } },
+            },
+          },
+        },
+      });
+      if (
+        existingPlacement &&
+        (existingPlacement.departmentId !== departmentId ||
+          existingPlacement.programmeId !== programmeId ||
+          existingPlacement.sectionId !== sectionId ||
+          existingPlacement.studyYear !== studyYear ||
+          existingPlacement.section.semesterId !== semesterId ||
+          existingPlacement.section.semester.academicYearId !== academicYearId)
+      ) {
+        throw new ForbiddenException(
+          "Students cannot change their academic placement. Contact an authorised administrator.",
+        );
+      }
       await this.prisma
         .$transaction(async (tx) => {
           await tx.user.update({
@@ -802,6 +831,22 @@ export class UsersService {
       throw new BadRequestException(
         "A student profile requires the STUDENT role.",
       );
+    if (input.studentProfile?.academicOverride) {
+      if (!actor.permissions.includes("academic.override_placement")) {
+        throw new ForbiddenException(
+          "You do not have permission to override academic placement.",
+        );
+      }
+      if (!input.studentProfile.academicOverrideReason?.trim()) {
+        throw new BadRequestException(
+          "Academic override reason is required.",
+        );
+      }
+    } else if (input.studentProfile?.academicOverrideReason?.trim()) {
+      throw new BadRequestException(
+        "Enable Advanced Academic Override before supplying an override reason.",
+      );
+    }
     const roles = await this.prisma.role.findMany({
       where: {
         code: { in: input.roleCodes },
@@ -924,6 +969,7 @@ export class UsersService {
               startsOn: this.dateOnly(new Date()),
               accountStatus: input.accountStatus ?? AccountStatus.ACTIVE,
               profile: {
+                degreeTypeId: input.studentProfile.degreeTypeId,
                 departmentId: input.studentProfile.departmentId,
                 programmeId: input.studentProfile.programmeId,
                 academicYearId: input.studentProfile.academicYearId,
@@ -940,6 +986,15 @@ export class UsersService {
                   "Date of Birth",
                 ),
                 gender: input.studentProfile.gender,
+                personalEmail: input.studentProfile.personalEmail,
+                admissionType: input.studentProfile.admissionType,
+                expectedGraduationYear:
+                  input.studentProfile.expectedGraduationYear,
+                academicStatus: input.studentProfile.academicStatus,
+                academicOverride: input.studentProfile.academicOverride,
+                academicOverrideReason:
+                  input.studentProfile.academicOverrideReason,
+                changedById: actor.id,
               },
             });
           }
@@ -1272,6 +1327,14 @@ export class UsersService {
           status: true,
           collegeIdentityId: true,
           studentProfile: { select: { sectionId: true } },
+          sectionMemberships: {
+            where: {
+              isActive: true,
+              status: AcademicMembershipStatus.ACTIVE,
+            },
+            select: { startsOn: true },
+            take: 1,
+          },
         },
       });
       if (!lockedTarget) throw new NotFoundException("User not found.");
@@ -1322,7 +1385,50 @@ export class UsersService {
           sectionId: lockedTarget.studentProfile.sectionId,
           startsOn: this.dateOnly(new Date()),
           accountStatus: AccountStatus.ACTIVE,
-          profile: {},
+          profile: {
+            changedById: actor.id,
+            academicOverrideReason: input.reason,
+          },
+        });
+      }
+      const terminalPlacementStatuses: AccountStatus[] = [
+        AccountStatus.ARCHIVED,
+        AccountStatus.GRADUATED,
+        AccountStatus.RESIGNED,
+        AccountStatus.DISABLED,
+      ];
+      const closesAcademicPlacement = terminalPlacementStatuses.includes(
+        input.status,
+      );
+      if (closesAcademicPlacement && lockedTarget.studentProfile) {
+        await this.placements.lockSection(
+          tx,
+          lockedTarget.studentProfile.sectionId,
+        );
+        const activeMembershipStartsOn =
+          lockedTarget.sectionMemberships[0]?.startsOn;
+        const membershipEndsOn = activeMembershipStartsOn
+          ? this.latestDate(this.dateOnly(now), activeMembershipStartsOn)
+          : this.dateOnly(now);
+        await tx.sectionMembership.updateMany({
+          where: {
+            studentUserId: target.id,
+            isActive: true,
+            status: AcademicMembershipStatus.ACTIVE,
+          },
+          data: {
+            isActive: false,
+            endsOn: membershipEndsOn,
+            status:
+              input.status === AccountStatus.GRADUATED
+                ? AcademicMembershipStatus.COMPLETED
+                : AcademicMembershipStatus.ARCHIVED,
+            changedById: actor.id,
+            reason: input.reason.trim(),
+          },
+        });
+        await tx.userScope.deleteMany({
+          where: { userId: target.id, scopeType: ScopeType.SECTION },
         });
       }
       const updated = await tx.user.update({
@@ -2307,24 +2413,36 @@ export class UsersService {
         where: {
           collegeId: user.collegeId,
           isActive: true,
+          archivedAt: null,
           department: { isActive: true, archivedAt: null },
+          degreeTypeMaster: { isActive: true, archivedAt: null },
         },
         select: { id: true, code: true, name: true, departmentId: true },
         orderBy: { name: "asc" },
       }),
       this.prisma.academicYear.findMany({
-        where: { collegeId: user.collegeId, isActive: true },
+        where: {
+          collegeId: user.collegeId,
+          isActive: true,
+          archivedAt: null,
+        },
         select: { id: true, name: true },
         orderBy: { startsOn: "desc" },
       }),
       this.prisma.semester.findMany({
         where: {
           isActive: true,
-          academicYear: { collegeId: user.collegeId, isActive: true },
+          academicYear: {
+            collegeId: user.collegeId,
+            isActive: true,
+            archivedAt: null,
+          },
           programme: {
             collegeId: user.collegeId,
             isActive: true,
+            archivedAt: null,
             department: { isActive: true, archivedAt: null },
+            degreeTypeMaster: { isActive: true, archivedAt: null },
           },
         },
         select: {
@@ -2342,11 +2460,17 @@ export class UsersService {
           archivedAt: null,
           semester: {
             isActive: true,
-            academicYear: { collegeId: user.collegeId, isActive: true },
+            academicYear: {
+              collegeId: user.collegeId,
+              isActive: true,
+              archivedAt: null,
+            },
             programme: {
               collegeId: user.collegeId,
               isActive: true,
+              archivedAt: null,
               department: { isActive: true, archivedAt: null },
+              degreeTypeMaster: { isActive: true, archivedAt: null },
             },
           },
         },
@@ -2359,9 +2483,11 @@ export class UsersService {
           capacity: true,
           _count: {
             select: {
-              studentProfiles: {
+              memberships: {
                 where: {
-                  user: { status: AccountStatus.ACTIVE, archivedAt: null },
+                  isActive: true,
+                  endsOn: null,
+                  status: AcademicMembershipStatus.ACTIVE,
                 },
               },
             },
@@ -2412,10 +2538,10 @@ export class UsersService {
         semesterId: section.semesterId,
         studyYear: section.studyYear,
         capacity: section.capacity,
-        currentStudentCount: section._count.studentProfiles,
+        currentStudentCount: section._count.memberships,
         availableSeats: Math.max(
           0,
-          section.capacity - section._count.studentProfiles,
+          section.capacity - section._count.memberships,
         ),
       })),
       blocks,
@@ -2584,6 +2710,10 @@ export class UsersService {
     );
   }
 
+  private latestDate(first: Date, second: Date) {
+    return first >= second ? first : second;
+  }
+
   private isPrismaUniqueError(error: unknown): boolean {
     return Boolean(
       error &&
@@ -2641,28 +2771,63 @@ export class UsersService {
           id: profile.sectionId,
           isActive: true,
           archivedAt: null,
-          OR: [{ studyYear: profile.studyYear }, { studyYear: null }],
+          ...(profile.academicOverride
+            ? {}
+            : { OR: [{ studyYear: profile.studyYear }, { studyYear: null }] }),
           semester: {
             id: profile.semesterId,
             isActive: true,
             programmeId: profile.programmeId,
             academicYearId: profile.academicYearId,
-            academicYear: { collegeId, isActive: true },
+            academicYear: {
+              collegeId,
+              isActive: true,
+              archivedAt: null,
+            },
             programme: {
               id: profile.programmeId,
               departmentId: profile.departmentId,
+              degreeTypeId: profile.degreeTypeId,
               collegeId,
               isActive: true,
+              archivedAt: null,
+              degreeTypeMaster: { isActive: true, archivedAt: null },
               department: { isActive: true, archivedAt: null },
             },
           },
         },
-        select: { id: true },
+        select: {
+          id: true,
+          studyYear: true,
+          semester: { select: { number: true } },
+        },
       });
       if (!section)
         throw new BadRequestException(
           "Student department, programme and section do not match.",
         );
+      const expectedStudyYear = Math.ceil(section.semester.number / 2);
+      if (
+        !profile.academicOverride &&
+        (section.semester.number < 1 ||
+          section.semester.number > 8 ||
+          expectedStudyYear !== profile.studyYear ||
+          (section.studyYear != null &&
+            section.studyYear !== profile.studyYear))
+      ) {
+        throw new BadRequestException(
+          `Study Year ${profile.studyYear} permits only Semesters ${profile.studyYear * 2 - 1} and ${profile.studyYear * 2}.`,
+        );
+      }
+      if (
+        profile.admissionYear != null &&
+        profile.expectedGraduationYear != null &&
+        profile.expectedGraduationYear <= profile.admissionYear
+      ) {
+        throw new BadRequestException(
+          "Expected graduation year must be greater than admission year.",
+        );
+      }
       const studentId =
         profile.studentId?.trim() || input.collegeIdentityId.trim();
       const duplicate = await this.prisma.studentProfile.findFirst({
@@ -3453,7 +3618,13 @@ export class UsersService {
         // ── Deactivate section memberships (preserve historical) ──
         const membershipsDeactivated = await tx.sectionMembership.updateMany({
           where: { studentUserId: userId, isActive: true },
-          data: { isActive: false, endsOn: this.dateOnly(new Date()) },
+          data: {
+            isActive: false,
+            endsOn: this.dateOnly(new Date()),
+            status: "ARCHIVED",
+            changedById: admin.id,
+            reason: "User permanently deleted after restore-tested backup",
+          },
         });
 
         // ── Anonymise User record ──

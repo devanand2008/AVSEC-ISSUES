@@ -20,6 +20,31 @@ enum AccountStatus {
   ARCHIVED
 }
 
+enum AdmissionType {
+  REGULAR
+  LATERAL_ENTRY
+  TRANSFER
+  READMISSION
+  OTHER
+}
+
+enum StudentAcademicStatus {
+  ACTIVE
+  COMPLETED
+  GRADUATED
+  ALUMNI
+  DISCONTINUED
+  TRANSFERRED
+}
+
+enum AcademicMembershipStatus {
+  ACTIVE
+  MOVED
+  PROMOTED
+  COMPLETED
+  ARCHIVED
+}
+
 enum ProfileCompletionStatus {
   NOT_STARTED
   IN_PROGRESS
@@ -543,6 +568,7 @@ model College {
   version                 Int                      @default(1)
   campuses                Campus[]
   departments             Department[]
+  degreeTypes             DegreeType[]
   programmes              Programme[]
   academicYears           AcademicYear[]
   users                   User[]
@@ -628,6 +654,7 @@ model Department {
   college              College               @relation(fields: [collegeId], references: [id], onDelete: Restrict)
   campus               Campus?               @relation(fields: [campusId], references: [id], onDelete: Restrict)
   programmes           Programme[]
+  academicMemberships  SectionMembership[]
   rooms                Room[]
   studentProfiles      StudentProfile[]
   staffProfiles        StaffProfile[]
@@ -646,25 +673,53 @@ model Department {
   @@map("departments")
 }
 
+model DegreeType {
+  id          String      @id @default(uuid()) @db.Uuid
+  collegeId   String      @map("college_id") @db.Uuid
+  code        String      @db.VarChar(30)
+  name        String      @db.VarChar(80)
+  description String?
+  isActive    Boolean     @default(true) @map("is_active")
+  archivedAt  DateTime?   @map("archived_at") @db.Timestamptz(3)
+  sortOrder   Int         @default(0) @map("sort_order")
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  college     College     @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  programmes  Programme[]
+
+  @@unique([collegeId, code])
+  @@unique([collegeId, name])
+  @@index([collegeId, isActive, sortOrder])
+  @@index([collegeId, archivedAt])
+  @@map("degree_types")
+}
+
 model Programme {
   id                   String                @id @default(uuid()) @db.Uuid
   collegeId            String                @map("college_id") @db.Uuid
   departmentId         String                @map("department_id") @db.Uuid
+  degreeTypeId         String                @map("degree_type_id") @db.Uuid
   code                 String                @db.VarChar(30)
   name                 String                @db.VarChar(180)
   degreeType           String?               @map("degree_type") @db.VarChar(80)
   durationYears        Int                   @map("duration_years")
+  totalSemesters       Int                   @default(8) @map("total_semesters")
   isActive             Boolean               @default(true) @map("is_active")
+  archivedAt           DateTime?             @map("archived_at") @db.Timestamptz(3)
   createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
   college              College               @relation(fields: [collegeId], references: [id], onDelete: Restrict)
   department           Department            @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  degreeTypeMaster     DegreeType             @relation(fields: [degreeTypeId], references: [id], onDelete: Restrict)
   semesters            Semester[]
   studentProfiles      StudentProfile[]
   courses              Course[]
   aiKnowledgeDocuments AiKnowledgeDocument[]
+  academicMemberships  SectionMembership[]
 
   @@unique([departmentId, code])
+  @@index([collegeId, degreeTypeId, isActive])
+  @@index([collegeId, archivedAt])
   @@map("programmes")
 }
 
@@ -676,6 +731,7 @@ model AcademicYear {
   endsOn              DateTime            @map("ends_on") @db.Date
   isCurrent           Boolean             @default(false) @map("is_current")
   isActive            Boolean             @default(true) @map("is_active")
+  archivedAt          DateTime?           @map("archived_at") @db.Timestamptz(3)
   createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
   college             College             @relation(fields: [collegeId], references: [id], onDelete: Restrict)
@@ -683,8 +739,10 @@ model AcademicYear {
   attendanceSessions  AttendanceSession[]
   attendanceSummaries AttendanceSummary[]
   feedbackCycles      FeedbackCycle[]
+  sectionMemberships  SectionMembership[]
 
   @@unique([collegeId, name])
+  @@index([collegeId, archivedAt])
   @@map("academic_years")
 }
 
@@ -703,6 +761,7 @@ model Semester {
   subjects             Subject[]
   feedbackCycles       FeedbackCycle[]
   aiKnowledgeDocuments AiKnowledgeDocument[]
+  academicMemberships  SectionMembership[]
 
   @@unique([programmeId, academicYearId, number])
   @@map("semesters")
@@ -801,6 +860,7 @@ model User {
   coordinatorAssignments         ClassCoordinatorAssignment[]
   representativeAssignments      ClassRepresentativeAssignment[]
   sectionMemberships             SectionMembership[]
+  academicMembershipChanges      SectionMembership[]             @relation("SectionMembershipChangedBy")
   classStaffAssignments          ClassStaffAssignment[]
   attendanceSessions             AttendanceSession[]             @relation("AttendanceFaculty")
   attendanceRecords              AttendanceRecord[]              @relation("AttendanceStudent")
@@ -1061,6 +1121,9 @@ model StudentProfile {
   registerNumber     String?    @map("register_number") @db.VarChar(60)
   legacyId           String?    @map("legacy_id") @db.VarChar(80)
   admissionYear      Int        @map("admission_year")
+  admissionType      AdmissionType @default(REGULAR) @map("admission_type")
+  expectedGraduationYear Int?    @map("expected_graduation_year")
+  academicStatus     StudentAcademicStatus @default(ACTIVE) @map("academic_status")
   rollNumber         String?    @map("roll_number") @db.VarChar(60)
   admissionNumber    String?    @map("admission_number") @db.VarChar(60)
   studyYear          Int?       @map("study_year")
@@ -1091,20 +1154,34 @@ model StudentProfile {
 }
 
 model SectionMembership {
-  id             String    @id @default(uuid()) @db.Uuid
-  sectionId      String    @map("section_id") @db.Uuid
-  studentUserId  String    @map("student_user_id") @db.Uuid
-  academicYearId String?   @map("academic_year_id") @db.Uuid
-  startsOn       DateTime  @map("starts_on") @db.Date
-  endsOn         DateTime? @map("ends_on") @db.Date
-  isActive       Boolean   @default(true) @map("is_active")
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
-  section        Section   @relation(fields: [sectionId], references: [id], onDelete: Restrict)
-  student        User      @relation(fields: [studentUserId], references: [id], onDelete: Restrict)
+  id             String                     @id @default(uuid()) @db.Uuid
+  sectionId      String                     @map("section_id") @db.Uuid
+  studentUserId  String                     @map("student_user_id") @db.Uuid
+  academicYearId String                     @map("academic_year_id") @db.Uuid
+  departmentId   String                     @map("department_id") @db.Uuid
+  programmeId    String                     @map("programme_id") @db.Uuid
+  semesterId     String                     @map("semester_id") @db.Uuid
+  studyYear      Int                        @map("study_year")
+  status         AcademicMembershipStatus   @default(ACTIVE)
+  changedById    String?                    @map("changed_by_id") @db.Uuid
+  reason         String?                    @db.VarChar(500)
+  startsOn       DateTime                   @map("starts_on") @db.Date
+  endsOn         DateTime?                  @map("ends_on") @db.Date
+  isActive       Boolean                    @default(true) @map("is_active")
+  createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  section        Section                    @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+  student        User                       @relation(fields: [studentUserId], references: [id], onDelete: Restrict)
+  academicYear   AcademicYear               @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  department     Department                 @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  programme      Programme                  @relation(fields: [programmeId], references: [id], onDelete: Restrict)
+  semester       Semester                   @relation(fields: [semesterId], references: [id], onDelete: Restrict)
+  changedBy      User?                      @relation("SectionMembershipChangedBy", fields: [changedById], references: [id], onDelete: Restrict)
 
   @@index([sectionId, isActive])
   @@index([studentUserId, isActive])
+  @@index([studentUserId, academicYearId, startsOn])
+  @@index([programmeId, academicYearId, studyYear, semesterId])
   @@map("section_memberships")
 }
 

@@ -620,7 +620,13 @@ describe("UsersService — Permanent Deletion", () => {
     });
     expect(prisma.sectionMembership.updateMany).toHaveBeenCalledWith({
       where: { studentUserId: mockStudent.id, isActive: true },
-      data: { isActive: false, endsOn: expect.any(Date) },
+      data: {
+        isActive: false,
+        endsOn: expect.any(Date),
+        status: "ARCHIVED",
+        changedById: mockAdmin.id,
+        reason: "User permanently deleted after restore-tested backup",
+      },
     });
 
     const studentUpdate = prisma.studentProfile.update.mock.calls[0]?.[0];

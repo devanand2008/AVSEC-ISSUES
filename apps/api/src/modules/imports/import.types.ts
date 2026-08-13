@@ -24,7 +24,7 @@ export const IMPORT_MODES = [
 ] as const;
 
 export type ImportMode = (typeof IMPORT_MODES)[number];
-export type ImportStudyYear = "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8";
+export type ImportStudyYear = "1" | "2" | "3" | "4";
 
 export interface ImportRow {
   [key: string]: string;
@@ -39,7 +39,7 @@ export interface ImportRow {
   academic_year: string; year: string; semester: string; admission_number: string;
   employee_id: string; designation: string; joined_on: string; campus_scope: string; assigned_year: string; assigned_semester: string;
   assigned_section: string; assigned_block: string; assigned_floor: string; assigned_room: string; specialization: string; assigned_issue_category: string; shift: string;
-  code: string; name: string; campus_code: string; sort_order: string; duration_years: string;
+  code: string; name: string; campus_code: string; sort_order: string; degree_type_code: string; duration_years: string; total_semesters: string;
   semester_number: string; capacity: string; block_code: string; floor_code: string; level: string;
   room_number: string; room_type: string; room_code: string; category_name: string; serial_number: string; installed_on: string;
   team_code: string; is_primary: string; max_open_issues: string; category_code: string; issue_type_code: string;
@@ -106,7 +106,7 @@ export const IMPORT_TEMPLATES: Record<ImportEntityType, ImportTemplate> = {
     required: ["full_name", "email", "college_identity_id", "register_number", "department_code", "academic_year", "year", "semester_number", "section_code", "temporary_password"],
     optional: ["first_name", "last_name", "role_codes", "student_id", "mobile", "whatsapp_number", "roll_number", "legacy_id", "legacy_path", "programme_code", "admission_year", "account_status", "admission_number", "gender", "date_of_birth", "parent_name", "parent_mobile_number", "blood_group", "address", "profile_photo_url", "batch", "source_sheet", "source_row_number", "source_department_code", "password_status"],
     downloadHeaders: ["full_name", "official_email", "college_id", "register_number", "department_code", "programme_code", "academic_year", "study_year", "semester", "section", "temporary_password", "mobile"],
-    example: { full_name: "Sample Student One", official_email: "sample1@example.edu", college_id: "AVS26CSE001", register_number: "620124104001", department_code: "CSE", programme_code: "BTECH-CSE", academic_year: "2026-27", study_year: "3", semester: "5", section: "A", temporary_password: "AvsTemp@2026!", mobile: "9876543210" },
+    example: { full_name: "Sample Student One", official_email: "sample1@example.edu", college_id: "AVS26CSE001", register_number: "620124104001", department_code: "CSE", programme_code: "CSE", academic_year: "2026-2027", study_year: "3", semester: "5", section: "A", temporary_password: "AvsTemp@2026!", mobile: "9876543210" },
   },
   STAFF: {
     entityType: "STAFF",
@@ -124,21 +124,21 @@ export const IMPORT_TEMPLATES: Record<ImportEntityType, ImportTemplate> = {
   PROGRAMMES: {
     entityType: "PROGRAMMES",
     permission: "academic.manage",
-    required: ["department_code", "code", "name", "duration_years"], optional: [],
-    example: { department_code: "CSE", code: "BTECH-CSE", name: "B.Tech Computer Science", duration_years: "4" },
+    required: ["department_code", "degree_type_code", "code", "name", "duration_years"], optional: ["total_semesters"],
+    example: { department_code: "CSE", degree_type_code: "BE", code: "CSE", name: "Computer Science and Engineering", duration_years: "4", total_semesters: "8" },
   },
   CLASSES: {
     entityType: "CLASSES",
     permission: "academic.manage",
     required: ["programme_code", "academic_year", "semester_number", "code", "name"], optional: ["capacity"],
-    example: { programme_code: "BTECH-CSE", academic_year: "2026-27", semester_number: "1", code: "A", name: "Section A", capacity: "70" },
+    example: { programme_code: "CSE", academic_year: "2026-2027", semester_number: "1", code: "A", name: "Section A", capacity: "70" },
   },
   ATTENDANCE: {
     entityType: "ATTENDANCE",
     permission: "attendance.import",
     required: ["academic_year", "programme_code", "semester_number", "section_code", "subject_code", "session_date", "period_number", "faculty_identity", "student_id", "status"],
     optional: ["legacy_id", "note", "marked_by"],
-    example: { academic_year: "2025-26", programme_code: "BTECH-CSE", semester_number: "2", section_code: "A", subject_code: "CS201", session_date: "2026-01-15", period_number: "3", faculty_identity: "FAC101", student_id: "2025CSE001", legacy_id: "LEGACY-0001", status: "P", note: "Migrated from legacy register", marked_by: "Legacy Clerk" },
+    example: { academic_year: "2025-2026", programme_code: "CSE", semester_number: "2", section_code: "A", subject_code: "CS201", session_date: "2026-01-15", period_number: "3", faculty_identity: "FAC101", student_id: "2025CSE001", legacy_id: "LEGACY-0001", status: "P", note: "Migrated from legacy register", marked_by: "Legacy Clerk" },
   },
   BLOCKS: {
     entityType: "BLOCKS",

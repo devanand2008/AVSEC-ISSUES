@@ -78,6 +78,7 @@ export const permissions = [
   "data.maintenance",
   "academic.read",
   "academic.manage",
+  "academic.override_placement",
   "locations.read",
   "locations.manage",
   "locations.import",
@@ -659,23 +660,71 @@ async function main() {
         });
     departments.set(input.code, row.id);
   }
-  const year = await prisma.academicYear.upsert({
-    where: { collegeId_name: { collegeId: college.id, name: "2026-27" } },
-    create: {
+  const currentYearMatches = await prisma.academicYear.findMany({
+    where: {
       collegeId: college.id,
-      name: "2026-27",
-      startsOn: new Date("2026-06-01"),
-      endsOn: new Date("2027-05-31"),
-      isCurrent: true,
+      name: { in: ["2026-2027", "2026-27"] },
     },
-    update: { isCurrent: true },
+    take: 2,
   });
+  if (currentYearMatches.length > 1) {
+    throw new Error(
+      "Both 2026-2027 and its legacy 2026-27 academic year exist; resolve the duplicate before seeding.",
+    );
+  }
+  await prisma.academicYear.updateMany({
+    where: { collegeId: college.id, isCurrent: true },
+    data: { isCurrent: false },
+  });
+  const year = currentYearMatches[0]
+    ? await prisma.academicYear.update({
+        where: { id: currentYearMatches[0].id },
+        data: {
+          name: "2026-2027",
+          startsOn: new Date("2026-06-01"),
+          endsOn: new Date("2027-05-31"),
+          isCurrent: true,
+          isActive: true,
+          archivedAt: null,
+        },
+      })
+    : await prisma.academicYear.create({
+        data: {
+          collegeId: college.id,
+          name: "2026-2027",
+          startsOn: new Date("2026-06-01"),
+          endsOn: new Date("2027-05-31"),
+          isCurrent: true,
+        },
+      });
   const programmeRows = new Map<string, { id: string }>();
   const semesterRows = new Map<string, { id: string }>();
   const sectionRows = new Map<string, { id: string; name: string }>();
+  const degreeTypes = new Map<string, { id: string; name: string }>();
+  for (const degreeType of [
+    { code: "BE", name: "B.E.", sortOrder: 10 },
+    { code: "BTECH", name: "B.Tech.", sortOrder: 20 },
+  ]) {
+    const row = await prisma.degreeType.upsert({
+      where: {
+        collegeId_code: { collegeId: college.id, code: degreeType.code },
+      },
+      create: { collegeId: college.id, ...degreeType },
+      update: {
+        name: degreeType.name,
+        sortOrder: degreeType.sortOrder,
+        isActive: true,
+        archivedAt: null,
+      },
+    });
+    degreeTypes.set(degreeType.code, { id: row.id, name: row.name });
+  }
   for (const structure of AVS_ENGINEERING_ACADEMIC_STRUCTURE) {
     const departmentId = departments.get(structure.code);
     if (!departmentId) throw new Error(`Department ${structure.code} was not seeded.`);
+    const degreeType = degreeTypes.get(structure.degreeTypeCode);
+    if (!degreeType)
+      throw new Error(`Degree Type ${structure.degreeTypeCode} was not seeded.`);
     const programmeMatches = await prisma.programme.findMany({
       where: {
         departmentId,
@@ -693,9 +742,12 @@ async function main() {
           data: {
             code: structure.programmeCode,
             name: structure.programmeName,
-            degreeType: "B.Tech",
+            degreeTypeId: degreeType.id,
+            degreeType: degreeType.name,
             durationYears: 4,
+            totalSemesters: 8,
             isActive: true,
+            archivedAt: null,
           },
         })
       : await prisma.programme.create({
@@ -704,49 +756,64 @@ async function main() {
             departmentId,
             code: structure.programmeCode,
             name: structure.programmeName,
-            degreeType: "B.Tech",
+            degreeTypeId: degreeType.id,
+            degreeType: degreeType.name,
             durationYears: 4,
+            totalSemesters: 8,
           },
         });
     programmeRows.set(structure.code, { id: programmeRow.id });
-    const semesterRow = await prisma.semester.upsert({
-      where: {
-        programmeId_academicYearId_number: {
+    for (let semesterNumber = 1; semesterNumber <= 8; semesterNumber += 1) {
+      const semesterRow = await prisma.semester.upsert({
+        where: {
+          programmeId_academicYearId_number: {
+            programmeId: programmeRow.id,
+            academicYearId: year.id,
+            number: semesterNumber,
+          },
+        },
+        create: {
           programmeId: programmeRow.id,
           academicYearId: year.id,
-          number: 5,
+          number: semesterNumber,
+          name: `Semester ${semesterNumber}`,
         },
-      },
-      create: {
-        programmeId: programmeRow.id,
-        academicYearId: year.id,
-        number: 5,
-        name: "Semester 5",
-      },
-      update: { name: "Semester 5", isActive: true },
-    });
-    semesterRows.set(structure.code, { id: semesterRow.id });
-    for (const sectionCode of structure.sections) {
-      const sectionRow = await prisma.section.upsert({
-        where: { semesterId_code: { semesterId: semesterRow.id, code: sectionCode } },
-        create: {
-          semesterId: semesterRow.id,
-          code: sectionCode,
-          name: `Section ${sectionCode}`,
-          studyYear: 3,
-          displayName: `${structure.code} - Section ${sectionCode}`,
-          capacity: 70,
-        },
-        update: {
-          name: `Section ${sectionCode}`,
-          studyYear: 3,
-          displayName: `${structure.code} - Section ${sectionCode}`,
-          capacity: 70,
-          isActive: true,
-          archivedAt: null,
-        },
+        update: { name: `Semester ${semesterNumber}`, isActive: true },
       });
-      sectionRows.set(`${structure.code}:${sectionCode}`, { id: sectionRow.id, name: sectionRow.name });
+      if (semesterNumber === 5)
+        semesterRows.set(structure.code, { id: semesterRow.id });
+      for (const sectionCode of structure.sections) {
+        const sectionRow = await prisma.section.upsert({
+          where: {
+            semesterId_code: {
+              semesterId: semesterRow.id,
+              code: sectionCode,
+            },
+          },
+          create: {
+            semesterId: semesterRow.id,
+            code: sectionCode,
+            name: `Section ${sectionCode}`,
+            studyYear: Math.ceil(semesterNumber / 2),
+            displayName: `${structure.code} - Semester ${semesterNumber} - Section ${sectionCode}`,
+            capacity: 70,
+          },
+          update: {
+            name: `Section ${sectionCode}`,
+            studyYear: Math.ceil(semesterNumber / 2),
+            displayName: `${structure.code} - Semester ${semesterNumber} - Section ${sectionCode}`,
+            capacity: 70,
+            isActive: true,
+            archivedAt: null,
+          },
+        });
+        if (semesterNumber === 5) {
+          sectionRows.set(`${structure.code}:${sectionCode}`, {
+            id: sectionRow.id,
+            name: sectionRow.name,
+          });
+        }
+      }
     }
   }
   const programme = programmeRows.get("CSE")!;

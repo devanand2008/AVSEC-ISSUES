@@ -47,7 +47,7 @@ export class UsersController {
     });
   }
   @Permissions("users.create") @Post("users") create(@CurrentUser() user: AuthPrincipal, @Body() input: CreateUserDto, @Req() request: RequestWithId) { return this.users.create(user, input, request.id); }
-  @Permissions("users.create") @Post("admin/users") adminCreate(@CurrentUser() user: AuthPrincipal, @Body() input: CreateUserDto, @Req() request: RequestWithId) { return this.users.create(user, input, request.id); }
+  @Permissions("users.create") @Post(["admin/users", "admin/people"]) adminCreate(@CurrentUser() user: AuthPrincipal, @Body() input: CreateUserDto, @Req() request: RequestWithId) { return this.users.create(user, input, request.id); }
   @Permissions("users.read") @Get(["admin/users/:publicId", "admin/students/:publicId", "admin/profiles/:publicId", "admin/people/:publicId"]) adminDetail(@CurrentUser() user: AuthPrincipal, @Param("publicId", ParseUUIDPipe) publicId: string) { return this.users.detail(user, publicId); }
   @Permissions("users.create") @Patch(["admin/users/:publicId", "admin/students/:publicId", "admin/profiles/:publicId", "admin/people/:publicId"]) adminUpdate(@CurrentUser() user: AuthPrincipal, @Param("publicId", ParseUUIDPipe) publicId: string, @Body() input: Record<string, unknown>, @Req() request: RequestWithId) { return this.users.updateBasic(user, publicId, input, request.id); }
   @Permissions("users.suspend") @Patch("users/:publicId/status") status(@CurrentUser() user: AuthPrincipal, @Param("publicId", ParseUUIDPipe) publicId: string, @Body() input: UpdateUserStatusDto, @Req() request: RequestWithId) { return this.users.status(user, publicId, input, request.id); }

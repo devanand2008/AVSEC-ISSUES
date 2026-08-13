@@ -4,7 +4,7 @@ import * as argon2 from "argon2";
 import { randomInt } from "node:crypto";
 import { PrismaService } from "../../database/prisma.service";
 import type { Prisma } from "../../generated/prisma/client";
-import { AccountStatus, AttendanceCode, IssuePriority, RoomType, ScopeType } from "../../generated/prisma/enums";
+import { AcademicMembershipStatus, AccountStatus, AttendanceCode, IssuePriority, RoomType, ScopeType, StudentAcademicStatus } from "../../generated/prisma/enums";
 import { SectionPlacementService } from "../academic/section-placement.service";
 import { attendanceParts } from "../attendance/attendance-value";
 import type { CredentialExportRow, ImportEntityType, ImportMode, ImportedRecord, ImportRow, ImportRowError } from "./import.types";
@@ -61,14 +61,18 @@ export class ImportsHandlerService {
     importMode: ImportMode,
     preInvalidRows: ReadonlySet<number> = new Set<number>(),
   ): Promise<ImportRowError[]> {
-    if (!["USERS", "STUDENTS", "STAFF"].includes(entityType)) return [];
+    if (!["USERS", "STUDENTS", "STAFF", "PROGRAMMES"].includes(entityType)) return [];
     const errors: ImportRowError[] = [];
     const invalidRows = new Set(preInvalidRows);
     for (const [index, row] of rows.entries()) {
       const rowNumber = index + 2;
       if (invalidRows.has(rowNumber)) continue;
       try {
-        await this.validateUserRow(entityType, collegeId, row, importMode);
+        if (entityType === "PROGRAMMES") {
+          await this.validateProgrammeRow(collegeId, row);
+        } else {
+          await this.validateUserRow(entityType, collegeId, row, importMode);
+        }
       } catch (error) {
         errors.push({ rowNumber, message: this.errorMessage(error) });
         invalidRows.add(rowNumber);
@@ -78,6 +82,41 @@ export class ImportsHandlerService {
       errors.push(...await this.validateStudentBatchCapacity(collegeId, rows, importMode, invalidRows));
     }
     return errors;
+  }
+
+  private async validateProgrammeRow(
+    collegeId: string,
+    row: ImportRow,
+  ): Promise<void> {
+    const department = await this.resolveDepartmentByCodeOrName(
+      this.prisma,
+      collegeId,
+      row.department_code,
+    );
+    if (!department)
+      throw new BadRequestException("department_code was not found.");
+    await this.resolveDegreeTypeByCode(
+      this.prisma,
+      collegeId,
+      row.degree_type_code,
+    );
+    const durationYears = this.integer(
+      row.duration_years,
+      "duration_years",
+      1,
+      4,
+    );
+    const totalSemesters = this.optionalInteger(
+      row.total_semesters,
+      "total_semesters",
+      1,
+      8,
+    ) ?? durationYears * 2;
+    if (totalSemesters < durationYears) {
+      throw new BadRequestException(
+        "total_semesters cannot be lower than duration_years.",
+      );
+    }
   }
 
   private async validateStudentBatchCapacity(
@@ -101,7 +140,18 @@ export class ImportsHandlerService {
               select: {
                 status: true,
                 archivedAt: true,
-                studentProfile: { select: { sectionId: true } },
+                studentProfile: {
+                  select: { sectionId: true, academicStatus: true },
+                },
+                sectionMemberships: {
+                  where: {
+                    isActive: true,
+                    endsOn: null,
+                    status: AcademicMembershipStatus.ACTIVE,
+                  },
+                  select: { sectionId: true },
+                  take: 2,
+                },
               },
             })
           : null;
@@ -112,16 +162,19 @@ export class ImportsHandlerService {
         const alreadyOccupiesTarget =
           existingUser?.status === AccountStatus.ACTIVE &&
           !existingUser.archivedAt &&
-          existingUser.studentProfile?.sectionId === selection.sectionId;
+          existingUser.studentProfile?.academicStatus === StudentAcademicStatus.ACTIVE &&
+          existingUser.sectionMemberships.length === 1 &&
+          existingUser.sectionMemberships[0]?.sectionId === selection.sectionId;
         if (alreadyOccupiesTarget) continue;
         if (importMode === "UPDATE_ONLY" && !existing) continue;
 
         let current = currentBySection.get(selection.sectionId);
         if (current === undefined) {
-          current = await this.prisma.studentProfile.count({
+          current = await this.prisma.sectionMembership.count({
             where: {
               sectionId: selection.sectionId,
-              user: { status: "ACTIVE", archivedAt: null },
+              isActive: true,
+              status: "ACTIVE",
             },
           });
           currentBySection.set(selection.sectionId, current);
@@ -553,7 +606,22 @@ export class ImportsHandlerService {
 
   private async assignExistingClassRepresentative(tx: Prisma.TransactionClient, collegeId: string, row: ImportRow, rowNumber: number): Promise<ImportedRecord> {
     const student = await tx.studentProfile.findFirst({
-      where: { collegeId, studentId: row.student_id, user: { status: AccountStatus.ACTIVE } },
+      where: {
+        collegeId,
+        studentId: row.student_id,
+        academicStatus: StudentAcademicStatus.ACTIVE,
+        user: {
+          status: AccountStatus.ACTIVE,
+          archivedAt: null,
+          sectionMemberships: {
+            some: {
+              isActive: true,
+              endsOn: null,
+              status: AcademicMembershipStatus.ACTIVE,
+            },
+          },
+        },
+      },
       include: { user: { select: { id: true, collegeIdentityId: true, fullName: true } } },
     });
     if (!student) throw new BadRequestException("student_id did not identify an active existing student.");
@@ -590,18 +658,63 @@ export class ImportsHandlerService {
   private async createProgramme(tx: Prisma.TransactionClient, collegeId: string, row: ImportRow, rowNumber: number): Promise<ImportedRecord> {
     const department = await this.resolveDepartmentByCodeOrName(tx, collegeId, row.department_code);
     if (!department) throw new BadRequestException("department_code was not found.");
-    const item = await tx.programme.create({ data: { collegeId, departmentId: department.id, code: this.code(row.code), name: row.name, durationYears: this.integer(row.duration_years, "duration_years", 1, 12) } });
+    const degreeType = await this.resolveDegreeTypeByCode(tx, collegeId, row.degree_type_code);
+    const durationYears = this.integer(row.duration_years, "duration_years", 1, 4);
+    const item = await tx.programme.create({
+      data: {
+        collegeId,
+        departmentId: department.id,
+        degreeTypeId: degreeType.id,
+        degreeType: degreeType.name,
+        code: this.code(row.code),
+        name: row.name.trim(),
+        durationYears,
+        totalSemesters:
+          this.optionalInteger(
+            row.total_semesters,
+            "total_semesters",
+            1,
+            8,
+          ) ?? durationYears * 2,
+      },
+    });
     return this.record(rowNumber, "Programme", item.id, `${item.code} - ${item.name}`);
   }
 
+  private async resolveDegreeTypeByCode(
+    tx: Prisma.TransactionClient | PrismaService,
+    collegeId: string,
+    rawCode: string,
+  ): Promise<{ id: string; name: string }> {
+    const code = this.code(rawCode);
+    const matches = await tx.degreeType.findMany({
+      where: {
+        collegeId,
+        code: { equals: code, mode: "insensitive" },
+        isActive: true,
+        archivedAt: null,
+      },
+      take: 2,
+      select: { id: true, name: true },
+    });
+    if (matches.length !== 1) {
+      throw new BadRequestException(
+        matches.length
+          ? "degree_type_code is ambiguous in this college."
+          : "degree_type_code was not found or is inactive in this college.",
+      );
+    }
+    return matches[0]!;
+  }
+
   private async createClass(tx: Prisma.TransactionClient, collegeId: string, row: ImportRow, rowNumber: number): Promise<ImportedRecord> {
-    const programmes = await tx.programme.findMany({ where: { collegeId, code: this.code(row.programme_code), isActive: true }, take: 2 });
+    const programmes = await tx.programme.findMany({ where: { collegeId, code: this.code(row.programme_code), isActive: true, archivedAt: null, department: { isActive: true, archivedAt: null }, degreeTypeMaster: { isActive: true, archivedAt: null } }, take: 2 });
     if (programmes.length !== 1) throw new BadRequestException(programmes.length ? "programme_code is ambiguous. Use a unique programme code." : "programme_code was not found.");
-    const academicYear = await tx.academicYear.findFirst({ where: { collegeId, name: row.academic_year, isActive: true } });
+    const academicYear = await tx.academicYear.findFirst({ where: { collegeId, name: row.academic_year, isActive: true, archivedAt: null } });
     if (!academicYear) throw new BadRequestException("academic_year was not found.");
     const programme = programmes[0];
     if (!programme) throw new BadRequestException("programme_code was not found.");
-    const semester = await tx.semester.findUnique({ where: { programmeId_academicYearId_number: { programmeId: programme.id, academicYearId: academicYear.id, number: this.integer(row.semester_number, "semester_number", 1, 30) } } });
+    const semester = await tx.semester.findUnique({ where: { programmeId_academicYearId_number: { programmeId: programme.id, academicYearId: academicYear.id, number: this.integer(row.semester_number, "semester_number", 1, 8) } } });
     if (!semester?.isActive) throw new BadRequestException("The requested semester was not found or is inactive.");
     const item = await tx.section.create({ data: { semesterId: semester.id, code: this.code(row.code), name: row.name, capacity: this.optionalInteger(row.capacity, "capacity", 1, 70) ?? 70 } });
     return this.record(rowNumber, "Section", item.id, `${item.code} - ${item.name}`);
@@ -609,12 +722,12 @@ export class ImportsHandlerService {
 
   private async createAttendance(tx: Prisma.TransactionClient, collegeId: string, row: ImportRow, rowNumber: number, importJobId: string, requestedById: string): Promise<ImportedRecord> {
     const sessionDate = this.requiredDate(row.session_date, "session_date");
-    const programmes = await tx.programme.findMany({ where: { collegeId, code: this.code(row.programme_code), isActive: true }, take: 2 });
+    const programmes = await tx.programme.findMany({ where: { collegeId, code: this.code(row.programme_code), isActive: true, archivedAt: null, department: { isActive: true, archivedAt: null }, degreeTypeMaster: { isActive: true, archivedAt: null } }, take: 2 });
     if (programmes.length !== 1) throw new BadRequestException(programmes.length ? "programme_code is ambiguous." : "programme_code was not found.");
     const programme = programmes[0]!;
-    const academicYear = await tx.academicYear.findFirst({ where: { collegeId, name: row.academic_year, isActive: true } });
+    const academicYear = await tx.academicYear.findFirst({ where: { collegeId, name: row.academic_year, isActive: true, archivedAt: null } });
     if (!academicYear) throw new BadRequestException("academic_year was not found.");
-    const semester = await tx.semester.findUnique({ where: { programmeId_academicYearId_number: { programmeId: programme.id, academicYearId: academicYear.id, number: this.integer(row.semester_number, "semester_number", 1, 30) } } });
+    const semester = await tx.semester.findUnique({ where: { programmeId_academicYearId_number: { programmeId: programme.id, academicYearId: academicYear.id, number: this.integer(row.semester_number, "semester_number", 1, 8) } } });
     if (!semester?.isActive) throw new BadRequestException("semester_number was not found for the programme and academic year.");
     const section = await tx.section.findUnique({ where: { semesterId_code: { semesterId: semester.id, code: this.code(row.section_code) } } });
     if (!section?.isActive) throw new BadRequestException("section_code was not found for the selected semester.");
@@ -630,7 +743,28 @@ export class ImportsHandlerService {
 
     const studentIdentifiers: Prisma.StudentProfileWhereInput[] = [{ studentId: row.student_id }];
     if (row.legacy_id) studentIdentifiers.push({ legacyId: row.legacy_id });
-    const students = await tx.studentProfile.findMany({ where: { collegeId, sectionId: section.id, OR: studentIdentifiers, user: { status: "ACTIVE" } }, take: 2, include: { user: { select: { id: true, fullName: true } } } });
+    const students = await tx.studentProfile.findMany({
+      where: {
+        collegeId,
+        sectionId: section.id,
+        academicStatus: StudentAcademicStatus.ACTIVE,
+        OR: studentIdentifiers,
+        user: {
+          status: AccountStatus.ACTIVE,
+          archivedAt: null,
+          sectionMemberships: {
+            some: {
+              sectionId: section.id,
+              isActive: true,
+              endsOn: null,
+              status: AcademicMembershipStatus.ACTIVE,
+            },
+          },
+        },
+      },
+      take: 2,
+      include: { user: { select: { id: true, fullName: true } } },
+    });
     if (students.length !== 1) throw new BadRequestException(students.length ? "student_id and legacy_id identify different students." : "The student was not found in the selected section.");
     const student = students[0]!;
     const periodNumber = this.integer(row.period_number, "period_number", 1, 20);
@@ -789,6 +923,9 @@ export class ImportsHandlerService {
         collegeId,
         departmentId: department.id,
         isActive: true,
+        archivedAt: null,
+        department: { isActive: true, archivedAt: null },
+        degreeTypeMaster: { isActive: true, archivedAt: null },
         ...(row.programme_code ? { code: this.code(row.programme_code) } : {}),
       },
       take: 2,
@@ -810,11 +947,11 @@ export class ImportsHandlerService {
 
     const academicYears = row.academic_year
       ? await tx.academicYear.findMany({
-          where: { collegeId, isActive: true },
+          where: { collegeId, isActive: true, archivedAt: null },
           select: { id: true, name: true },
         })
       : await tx.academicYear.findMany({
-          where: { collegeId, isCurrent: true, isActive: true },
+          where: { collegeId, isCurrent: true, isActive: true, archivedAt: null },
           take: 2,
           select: { id: true, name: true },
         });
@@ -836,7 +973,7 @@ export class ImportsHandlerService {
     if (!row.section_code?.trim()) throw new BadRequestException("section is required for an academic student profile.");
 
     if (row.semester_number?.trim()) {
-      const semesterNumber = this.integer(row.semester_number, "semester_number", 1, 30);
+      const semesterNumber = this.integer(row.semester_number, "semester_number", 1, 8);
       const semester = await tx.semester.findUnique({
         where: {
           programmeId_academicYearId_number: {
@@ -916,12 +1053,12 @@ export class ImportsHandlerService {
   }
 
   private async resolveAcademicSection(tx: Prisma.TransactionClient, collegeId: string, row: ImportRow): Promise<{ id: string; semesterId: string }> {
-    const programmes = await tx.programme.findMany({ where: { collegeId, code: this.code(row.programme_code), isActive: true }, take: 2 });
+    const programmes = await tx.programme.findMany({ where: { collegeId, code: this.code(row.programme_code), isActive: true, archivedAt: null, department: { isActive: true, archivedAt: null }, degreeTypeMaster: { isActive: true, archivedAt: null } }, take: 2 });
     if (programmes.length !== 1) throw new BadRequestException(programmes.length ? "programme_code is ambiguous." : "programme_code was not found.");
     const programme = programmes[0]!;
-    const academicYear = row.academic_year ? await tx.academicYear.findFirst({ where: { collegeId, name: row.academic_year, isActive: true } }) : await tx.academicYear.findFirst({ where: { collegeId, isCurrent: true, isActive: true } });
+    const academicYear = row.academic_year ? await tx.academicYear.findFirst({ where: { collegeId, name: row.academic_year, isActive: true, archivedAt: null } }) : await tx.academicYear.findFirst({ where: { collegeId, isCurrent: true, isActive: true, archivedAt: null } });
     if (!academicYear) throw new BadRequestException("academic_year was not found.");
-    const semesterNumber = this.integer(row.semester_number || row.assigned_semester, "semester_number", 1, 30);
+    const semesterNumber = this.integer(row.semester_number || row.assigned_semester, "semester_number", 1, 8);
     const sectionCode = row.section_code || row.assigned_section;
     const semester = await tx.semester.findUnique({ where: { programmeId_academicYearId_number: { programmeId: programme.id, academicYearId: academicYear.id, number: semesterNumber } } });
     if (!semester?.isActive) throw new BadRequestException("semester_number was not found for the programme and academic year.");
@@ -1052,21 +1189,17 @@ export class ImportsHandlerService {
   private importStudyYear(value?: string): number | undefined {
     if (!value?.trim()) return undefined;
     const normalized = value.trim().toUpperCase().replace(/[\s-]+/g, "_");
-    if (/^[1-8]$/.test(normalized)) return Number(normalized);
+    if (/^[1-4]$/.test(normalized)) return Number(normalized);
     const aliases: Record<string, number> = {
       "1ST": 1, "1ST_YEAR": 1, FIRST: 1, FIRST_YEAR: 1,
       "2ND": 2, "2RD": 2, "2ND_YEAR": 2, "2RD_YEAR": 2, SECOND: 2, SECOND_YEAR: 2,
       "3RD": 3, "3RD_YEAR": 3, THIRD: 3, THIRD_YEAR: 3,
       "4TH": 4, "4TH_YEAR": 4, FOURTH: 4, FOURTH_YEAR: 4,
-      "5TH": 5, "5TH_YEAR": 5, FIFTH: 5, FIFTH_YEAR: 5,
-      "6TH": 6, "6TH_YEAR": 6, SIXTH: 6, SIXTH_YEAR: 6,
-      "7TH": 7, "7TH_YEAR": 7, SEVENTH: 7, SEVENTH_YEAR: 7,
-      "8TH": 8, "8TH_YEAR": 8, EIGHTH: 8, EIGHTH_YEAR: 8,
     };
     const year = aliases[normalized];
     if (year === undefined)
       throw new BadRequestException(
-        "study_year must be an integer from 1 to 8.",
+        "study_year must be an integer from 1 to 4.",
       );
     return year;
   }

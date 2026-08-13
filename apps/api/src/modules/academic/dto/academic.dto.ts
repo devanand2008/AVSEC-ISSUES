@@ -31,31 +31,58 @@ export class UpdateDepartmentDto {
 
 export class CreateProgrammeDto {
   @ApiProperty() @IsUUID() departmentId!: string;
+  @ApiProperty() @IsUUID() degreeTypeId!: string;
   @ApiProperty() @IsString() @Length(1, 30) code!: string;
   @ApiProperty() @IsString() @Length(2, 180) name!: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(80) degreeType?: string;
-  @ApiProperty() @IsInt() @Min(1) @Max(10) durationYears!: number;
+  @ApiProperty() @IsInt() @Min(1) @Max(4) durationYears!: number;
+  @ApiPropertyOptional({ default: 8 }) @IsOptional() @IsInt() @Min(1) @Max(8) totalSemesters?: number;
+  @ApiPropertyOptional({ default: true }) @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
 export class UpdateProgrammeDto {
+  @ApiPropertyOptional() @IsOptional() @IsUUID() degreeTypeId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 30) code?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(2, 180) name?: string;
-  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(10) durationYears?: number;
-  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(80) degreeType?: string | null;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(4) durationYears?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(8) totalSemesters?: number;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
+}
+
+export class CreateDegreeTypeDto {
+  @ApiProperty() @IsString() @Length(1, 30) code!: string;
+  @ApiProperty() @IsString() @Length(2, 80) name!: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) description?: string;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(10_000) sortOrder?: number;
+  @ApiPropertyOptional({ default: true }) @IsOptional() @IsBoolean() isActive?: boolean;
+}
+
+export class UpdateDegreeTypeDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 30) code?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(2, 80) name?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) description?: string | null;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) @Max(10_000) sortOrder?: number;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
 export class CreateAcademicYearDto {
   @ApiProperty() @IsString() @Length(2, 30) name!: string;
-  @ApiProperty() @IsString() startsOn!: string;
-  @ApiProperty() @IsString() endsOn!: string;
+  @ApiProperty() @IsDateString() startsOn!: string;
+  @ApiProperty() @IsDateString() endsOn!: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isCurrent?: boolean;
+  @ApiPropertyOptional({ default: true }) @IsOptional() @IsBoolean() isActive?: boolean;
+}
+
+export class UpdateAcademicYearDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(2, 30) name?: string;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() startsOn?: string;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() endsOn?: string;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
 export class CreateSemesterDto {
   @ApiProperty() @IsUUID() programmeId!: string;
   @ApiProperty() @IsUUID() academicYearId!: string;
-  @ApiProperty() @IsInt() @Min(1) @Max(20) number!: number;
+  @ApiProperty() @IsInt() @Min(1) @Max(8) number!: number;
   @ApiProperty() @IsString() @Length(2, 80) name!: string;
 }
 
@@ -63,7 +90,7 @@ export class CreateSectionDto {
   @ApiProperty() @IsUUID() semesterId!: string;
   @ApiProperty() @IsString() @Length(1, 30) code!: string;
   @ApiProperty() @IsString() @Length(1, 80) name!: string;
-  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(10) studyYear?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(4) studyYear?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(180) displayName?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() assignedRoomId?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() officialGroupEnabled?: boolean;
@@ -77,7 +104,7 @@ export class CreateSectionDto {
 export class UpdateSectionDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 30) code?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 80) name?: string;
-  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(10) studyYear?: number | null;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(4) studyYear?: number | null;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(180) displayName?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsUUID() assignedRoomId?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() officialGroupEnabled?: boolean;

@@ -143,10 +143,12 @@ describe("Academic lifecycle and normalized duplicates", () => {
           .fn()
           .mockResolvedValue({
             id: "semester-id",
+            number: 3,
             academicYear: {
               startsOn: new Date("2026-06-01"),
               endsOn: new Date("2027-05-31"),
             },
+            programme: { departmentId: "department-id", totalSemesters: 8 },
           }),
       },
       section: {
@@ -173,11 +175,12 @@ describe("Academic lifecycle and normalized duplicates", () => {
   it("allows the same section name in a different department by scoping uniqueness to its semester", async () => {
     const semester = {
       id: "semester-cse",
+      number: 3,
       academicYear: {
         startsOn: new Date("2026-06-01"),
         endsOn: new Date("2027-05-31"),
       },
-      programme: { departmentId: "department-cse" },
+      programme: { departmentId: "department-cse", totalSemesters: 8 },
     };
     const created = {
       id: "section-cse-a",
@@ -188,7 +191,13 @@ describe("Academic lifecycle and normalized duplicates", () => {
       officialGroupEnabled: false,
     };
     const tx = {
-      semester: { findFirst: jest.fn().mockResolvedValue({ id: semester.id }) },
+      semester: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: semester.id,
+          number: 3,
+          programme: { totalSemesters: 8 },
+        }),
+      },
       section: { create: jest.fn().mockResolvedValue(created) },
     };
     const prisma = {
@@ -221,6 +230,36 @@ describe("Academic lifecycle and normalized duplicates", () => {
       select: { code: true, name: true },
     });
     expect(tx.section.create).toHaveBeenCalled();
+  });
+
+  it("rejects a Section study year that conflicts with its semester", async () => {
+    const semester = {
+      id: "semester-id",
+      number: 5,
+      academicYear: {
+        startsOn: new Date("2026-06-01"),
+        endsOn: new Date("2027-05-31"),
+      },
+      programme: { departmentId: "department-id", totalSemesters: 8 },
+    };
+    const prisma = {
+      semester: { findFirst: jest.fn().mockResolvedValue(semester) },
+      section: { findFirst: jest.fn().mockResolvedValue(null) },
+    };
+    const { service } = serviceWith(prisma);
+
+    await expect(
+      service.createSection(
+        actor,
+        {
+          semesterId: semester.id,
+          code: "A",
+          name: "Section A",
+          studyYear: 2,
+        },
+        "request-id",
+      ),
+    ).rejects.toThrow("Semester 5 belongs to Study Year 3");
   });
 
   it("archives a department and closes active section assignments under the hierarchy lock", async () => {
@@ -256,6 +295,11 @@ describe("Academic lifecycle and normalized duplicates", () => {
       classRepresentativeAssignment: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      sectionMembership: {
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      userScope: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
     };
     const prisma = {
       department: { findFirst: jest.fn().mockResolvedValue(existing) },
@@ -413,6 +457,11 @@ describe("Academic lifecycle and normalized duplicates", () => {
       classRepresentativeAssignment: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      sectionMembership: {
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      userScope: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
     };
     const prisma = {
       section: { findFirst: jest.fn().mockResolvedValue(existing) },
@@ -457,11 +506,12 @@ describe("Academic lifecycle and normalized duplicates", () => {
       isActive: true,
       archivedAt: null,
       semester: {
+        number: 3,
         academicYear: {
           startsOn: new Date("2026-06-01"),
           endsOn: new Date("2027-05-31"),
         },
-        programme: { departmentId: "department-id" },
+        programme: { departmentId: "department-id", totalSemesters: 8 },
       },
     };
     const tx = {
@@ -502,7 +552,7 @@ describe("Academic lifecycle and normalized duplicates", () => {
         create: jest.fn().mockResolvedValue({ id: "new-staff-assignment" }),
       },
       facultySubjectAssignment: { updateMany: jest.fn() },
-      studentProfile: { count: jest.fn() },
+      sectionMembership: { count: jest.fn() },
     };
     const prisma = {
       section: { findFirst: jest.fn().mockResolvedValue(existing) },

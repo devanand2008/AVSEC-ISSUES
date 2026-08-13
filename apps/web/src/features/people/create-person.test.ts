@@ -35,6 +35,7 @@ function validStudentForm() {
     roleCodes: ["STUDENT"],
     scopes: [{ type: "SECTION" as const, targetId: "section-cse-a" }],
     profileType: "student" as const,
+    degreeTypeId: "degree-be",
     departmentId: "department-cse",
     programmeId: "programme-cse",
     academicYearId: "academic-year-2026",
@@ -46,6 +47,9 @@ function validStudentForm() {
     dateOfBirth: "2007-05-17",
     gender: "FEMALE",
     admissionYear: "2026",
+    admissionType: "REGULAR" as const,
+    expectedGraduationYear: "2030",
+    personalEmail: "student.personal@example.com",
   };
 }
 
@@ -102,6 +106,7 @@ describe("person creation helpers", () => {
       email: "student1@college.edu",
       mustChangePassword: true,
       studentProfile: {
+        degreeTypeId: "degree-be",
         departmentId: "department-cse",
         programmeId: "programme-cse",
         academicYearId: "academic-year-2026",
@@ -113,6 +118,9 @@ describe("person creation helpers", () => {
         dateOfBirth: "2007-05-17",
         gender: "FEMALE",
         admissionYear: 2026,
+        admissionType: "REGULAR",
+        expectedGraduationYear: 2030,
+        personalEmail: "student.personal@example.com",
       },
     });
   });
@@ -156,6 +164,19 @@ describe("person creation helpers", () => {
         mustChangePassword: false,
       }).mustChangePassword,
     ).toBe(false);
+  });
+
+  it("validates the four-year Engineering boundary and academic override", () => {
+    expect(
+      validateCreatePersonForm({ ...validStudentForm(), studyYear: "5" }),
+    ).toMatch(/four Engineering study years/i);
+    expect(
+      validateCreatePersonForm({
+        ...validStudentForm(),
+        academicOverride: true,
+        academicOverrideReason: "",
+      }),
+    ).toMatch(/override reason/i);
   });
 
   it("requires a college scope for college administrators", () => {

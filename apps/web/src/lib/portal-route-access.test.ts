@@ -140,6 +140,15 @@ describe("canAccessPortalPath", () => {
     ).toBe(true);
   });
 
+  it("allows account creators to open Add Person without broad People read access", () => {
+    expect(
+      canAccessPortalPath("/admin/people/new", ["users.create"], []),
+    ).toBe(true);
+    expect(
+      canAccessPortalPath("/admin/people/new", ["users.read"], []),
+    ).toBe(false);
+  });
+
   it("gates both academic setup routes by academic management permission", () => {
     expect(
       canAccessPortalPath(
@@ -151,5 +160,14 @@ describe("canAccessPortalPath", () => {
     expect(canAccessPortalPath("/admin/academic", [], ["MAIN_ADMIN"])).toBe(
       false,
     );
+    for (const path of [
+      "/admin/academic/degree-types",
+      "/admin/academic/academic-years",
+      "/admin/academic/programmes",
+      "/admin/academic/student-promotion",
+    ]) {
+      expect(canAccessPortalPath(path, ["academic.manage"], [])).toBe(true);
+      expect(canAccessPortalPath(path, ["academic.read"], [])).toBe(false);
+    }
   });
 });

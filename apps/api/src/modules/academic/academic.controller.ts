@@ -7,10 +7,13 @@ import type { AuthPrincipal } from "../../common/http/request-context";
 import { AcademicService } from "./academic.service";
 import {
   CreateDepartmentDto,
+  CreateDegreeTypeDto,
+  UpdateDegreeTypeDto,
   UpdateDepartmentDto,
   CreateProgrammeDto,
   UpdateProgrammeDto,
   CreateAcademicYearDto,
+  UpdateAcademicYearDto,
   CreateSemesterDto,
   CreateSectionDto,
   CreateSubjectDto,
@@ -32,14 +35,19 @@ export class AcademicController {
 
   /* ─── Active-only reads (existing behavior, all authenticated users) ─── */
 
+  @Get("degree-types")
+  degreeTypes(@CurrentUser() user: AuthPrincipal) {
+    return this.academic.degreeTypes(user);
+  }
+
   @Get("departments")
-  departments(@CurrentUser() user: AuthPrincipal) {
-    return this.academic.departments(user);
+  departments(@CurrentUser() user: AuthPrincipal, @Query("degreeTypeId") degreeTypeId?: string) {
+    return this.academic.departments(user, degreeTypeId);
   }
 
   @Get("programmes")
-  programmes(@CurrentUser() user: AuthPrincipal, @Query("departmentId") departmentId?: string) {
-    return this.academic.programmes(user, departmentId);
+  programmes(@CurrentUser() user: AuthPrincipal, @Query("departmentId") departmentId?: string, @Query("degreeTypeId") degreeTypeId?: string) {
+    return this.academic.programmes(user, departmentId, degreeTypeId);
   }
 
   @Get("years")
@@ -48,13 +56,13 @@ export class AcademicController {
   }
 
   @Get("semesters")
-  semesters(@CurrentUser() user: AuthPrincipal, @Query("programmeId") programmeId?: string, @Query("academicYearId") academicYearId?: string) {
-    return this.academic.semesters(user, programmeId, academicYearId);
+  semesters(@CurrentUser() user: AuthPrincipal, @Query("programmeId") programmeId?: string, @Query("academicYearId") academicYearId?: string, @Query("studyYear") studyYearInput?: string) {
+    return this.academic.semesters(user, programmeId, academicYearId, this.studyYear(studyYearInput));
   }
 
   @Get("sections")
-  sections(@CurrentUser() user: AuthPrincipal, @Query("semesterId") semesterId?: string) {
-    return this.academic.sections(user, semesterId);
+  sections(@CurrentUser() user: AuthPrincipal, @Query("semesterId") semesterId?: string, @Query("programmeId") programmeId?: string, @Query("academicYearId") academicYearId?: string, @Query("studyYear") studyYearInput?: string) {
+    return this.academic.sections(user, { semesterId, programmeId, academicYearId, studyYear: this.studyYear(studyYearInput) });
   }
 
   @Get("subjects")
@@ -63,6 +71,12 @@ export class AcademicController {
   }
 
   /* ─── Admin reads (includes inactive, with counts) ─── */
+
+  @Permissions("academic.manage")
+  @Get("admin/degree-types")
+  adminDegreeTypes(@CurrentUser() user: AuthPrincipal) {
+    return this.academic.allDegreeTypes(user);
+  }
 
   @Permissions("academic.manage")
   @Get("admin/departments")
@@ -125,6 +139,12 @@ export class AcademicController {
   }
 
   /* ─── Create ─── */
+
+  @Permissions("academic.manage")
+  @Post("degree-types")
+  createDegreeType(@CurrentUser() user: AuthPrincipal, @Body() input: CreateDegreeTypeDto, @CurrentRequestId() requestId: string) {
+    return this.academic.createDegreeType(user, input, requestId);
+  }
 
   @Permissions("academic.manage")
   @Post("departments")
@@ -195,6 +215,24 @@ export class AcademicController {
   /* ─── Update ─── */
 
   @Permissions("academic.manage")
+  @Patch("degree-types/:id")
+  updateDegreeType(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: UpdateDegreeTypeDto, @CurrentRequestId() requestId: string) {
+    return this.academic.updateDegreeType(user, id, input, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Post("degree-types/:id/archive")
+  archiveDegreeType(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: ArchiveDepartmentDto, @CurrentRequestId() requestId: string) {
+    return this.academic.archiveDegreeType(user, id, input?.reason, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Post("degree-types/:id/restore")
+  restoreDegreeType(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
+    return this.academic.restoreDegreeType(user, id, requestId);
+  }
+
+  @Permissions("academic.manage")
   @Patch("departments/:id")
   updateDepartment(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: UpdateDepartmentDto, @CurrentRequestId() requestId: string) {
     return this.academic.updateDepartment(user, id, input, requestId);
@@ -204,6 +242,42 @@ export class AcademicController {
   @Patch("programmes/:id")
   updateProgramme(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: UpdateProgrammeDto, @CurrentRequestId() requestId: string) {
     return this.academic.updateProgramme(user, id, input, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Post("programmes/:id/archive")
+  archiveProgramme(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: ArchiveDepartmentDto, @CurrentRequestId() requestId: string) {
+    return this.academic.archiveProgramme(user, id, input?.reason, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Post("programmes/:id/restore")
+  restoreProgramme(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
+    return this.academic.restoreProgramme(user, id, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Patch("years/:id")
+  updateAcademicYear(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: UpdateAcademicYearDto, @CurrentRequestId() requestId: string) {
+    return this.academic.updateAcademicYear(user, id, input, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Post("years/:id/set-current")
+  setCurrentAcademicYear(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
+    return this.academic.setCurrentAcademicYear(user, id, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Post("years/:id/archive")
+  archiveAcademicYear(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @Body() input: ArchiveDepartmentDto, @CurrentRequestId() requestId: string) {
+    return this.academic.archiveAcademicYear(user, id, input?.reason, requestId);
+  }
+
+  @Permissions("academic.manage")
+  @Post("years/:id/restore")
+  restoreAcademicYear(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
+    return this.academic.restoreAcademicYear(user, id, requestId);
   }
 
   @Permissions("academic.manage")
@@ -298,5 +372,14 @@ export class AcademicController {
       throw new BadRequestException(`Entity type must be one of: ${allowed.join(", ")}`);
     }
     return this.academic.updateEntityStatus(user, entityType, id, input, requestId);
+  }
+
+  private studyYear(value?: string): number | undefined {
+    if (value === undefined || value.trim() === "") return undefined;
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 4) {
+      throw new BadRequestException("Study year must be a whole number from 1 to 4.");
+    }
+    return parsed;
   }
 }

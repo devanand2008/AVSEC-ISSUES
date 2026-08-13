@@ -320,7 +320,11 @@ export class DataMaintenanceService {
             where: { semester: semesterWhere, archivedAt: null },
           }),
           activeMemberships: await this.prisma.sectionMembership.count({
-            where: { section: { semester: semesterWhere }, isActive: true },
+            where: {
+              academicYearId: year.id,
+              isActive: true,
+              status: "ACTIVE",
+            },
           }),
           attendanceSessions: await this.prisma.attendanceSession.count({
             where: { academicYearId: year.id, archivedAt: null },
@@ -506,15 +510,73 @@ export class DataMaintenanceService {
         const now = new Date();
         return this.prisma.$transaction(
           async (tx) => {
+            await this.placements.lockDepartment(
+              tx,
+              `academic-year:${year.id}`,
+            );
+            const departments = await tx.department.findMany({
+              where: {
+                collegeId: user.collegeId,
+                programmes: {
+                  some: { semesters: { some: { academicYearId: year.id } } },
+                },
+              },
+              select: { id: true },
+              orderBy: { id: "asc" },
+            });
+            for (const department of departments) {
+              await this.placements.lockDepartment(tx, department.id);
+            }
+            const lockedSections = await tx.section.findMany({
+              where: { semester: { academicYearId: year.id } },
+              select: { id: true },
+              orderBy: { id: "asc" },
+            });
+            for (const section of lockedSections) {
+              await this.placements.lockSection(tx, section.id);
+            }
             const semesterWhere = { academicYearId: year.id };
             const attendance = await tx.attendanceSession.updateMany({
               where: { academicYearId: year.id, archivedAt: null },
               data: { archivedAt: now, status: "LOCKED", lockedAt: now },
             });
-            const memberships = await tx.sectionMembership.updateMany({
-              where: { section: { semester: semesterWhere }, isActive: true },
-              data: { isActive: false, endsOn: now },
+            const activeMemberships = await tx.sectionMembership.findMany({
+              where: {
+                academicYearId: year.id,
+                isActive: true,
+                status: "ACTIVE",
+              },
+              select: { studentUserId: true, sectionId: true },
             });
+            const memberships = await tx.sectionMembership.updateMany({
+              where: {
+                academicYearId: year.id,
+                isActive: true,
+                status: "ACTIVE",
+              },
+              data: {
+                isActive: false,
+                endsOn: now,
+                status: "ARCHIVED",
+                changedById: user.id,
+                reason: "Archived by academic-year maintenance workflow",
+              },
+            });
+            if (activeMemberships.length) {
+              await tx.userScope.deleteMany({
+                where: {
+                  userId: {
+                    in: activeMemberships.map(
+                      ({ studentUserId }) => studentUserId,
+                    ),
+                  },
+                  scopeType: "SECTION",
+                  scopeId: {
+                    in: activeMemberships.map(({ sectionId }) => sectionId),
+                  },
+                },
+              });
+            }
             await tx.facultySubjectAssignment.updateMany({
               where: { section: { semester: semesterWhere }, isActive: true },
               data: { isActive: false, validUntil: now },
@@ -545,7 +607,7 @@ export class DataMaintenanceService {
             });
             await tx.academicYear.update({
               where: { id: year.id },
-              data: { isActive: false, isCurrent: false },
+              data: { isActive: false, isCurrent: false, archivedAt: now },
             });
             await tx.archivedRecord.create({
               data: {
@@ -791,17 +853,11 @@ export class DataMaintenanceService {
     parameters: MaintenanceParameters,
   ): Promise<CountReport> {
     const { source, target } = await this.transferSections(user, parameters);
-    const students = await this.prisma.studentProfile.count({
-      where: {
-        sectionId: source.id,
-        user: { status: "ACTIVE", archivedAt: null },
-      },
+    const students = await this.prisma.sectionMembership.count({
+      where: { sectionId: source.id, isActive: true, status: "ACTIVE" },
     });
-    const targetStudents = await this.prisma.studentProfile.count({
-      where: {
-        sectionId: target.id,
-        user: { status: "ACTIVE", archivedAt: null },
-      },
+    const targetStudents = await this.prisma.sectionMembership.count({
+      where: { sectionId: target.id, isActive: true, status: "ACTIVE" },
     });
     this.placements.assertCapacity(target, targetStudents, students);
     return {
@@ -828,7 +884,20 @@ export class DataMaintenanceService {
         const profiles = await tx.studentProfile.findMany({
           where: {
             sectionId: source.id,
+            academicStatus: "ACTIVE",
             user: { status: "ACTIVE", archivedAt: null },
+            userId: {
+              in: (
+                await tx.sectionMembership.findMany({
+                  where: {
+                    sectionId: source.id,
+                    isActive: true,
+                    status: "ACTIVE",
+                  },
+                  select: { studentUserId: true },
+                })
+              ).map((membership) => membership.studentUserId),
+            },
           },
           select: { userId: true },
         });
@@ -842,13 +911,28 @@ export class DataMaintenanceService {
           return { studentsMoved: 0, historicalAttendancePreserved: true };
         await tx.sectionMembership.updateMany({
           where: { studentUserId: { in: userIds }, isActive: true },
-          data: { isActive: false, endsOn: today },
+          data: {
+            isActive: false,
+            endsOn: today,
+            status: "MOVED",
+            changedById: user.id,
+            reason: "Academic maintenance section transfer",
+          },
         });
         await tx.sectionMembership.createMany({
           data: userIds.map((studentUserId) => ({
             studentUserId,
             sectionId: lockedTarget.id,
             academicYearId: lockedTarget.semester.academicYearId,
+            departmentId: lockedTarget.semester.programme.departmentId,
+            programmeId: lockedTarget.semester.programme.id,
+            semesterId: lockedTarget.semesterId,
+            studyYear:
+              lockedTarget.studyYear ??
+              Math.ceil(lockedTarget.semester.number / 2),
+            status: "ACTIVE" as const,
+            changedById: user.id,
+            reason: "Academic maintenance section transfer",
             startsOn: today,
             isActive: true,
           })),
@@ -859,7 +943,9 @@ export class DataMaintenanceService {
             sectionId: lockedTarget.id,
             programmeId: lockedTarget.semester.programmeId,
             departmentId: lockedTarget.semester.programme.departmentId,
-            studyYear: lockedTarget.studyYear,
+            studyYear:
+              lockedTarget.studyYear ??
+              Math.ceil(lockedTarget.semester.number / 2),
           },
         });
         await tx.userScope.deleteMany({

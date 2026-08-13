@@ -18,7 +18,7 @@ export class OfficialGroupsService {
     }
 
     const sections = await this.prisma.section.findMany({
-      where: { isActive: true, officialGroupEnabled: true, semester: { programme: { collegeId } } },
+      where: { isActive: true, archivedAt: null, officialGroupEnabled: true, semester: { isActive: true, academicYear: { collegeId, isActive: true, archivedAt: null }, programme: { collegeId, isActive: true, archivedAt: null, department: { isActive: true, archivedAt: null }, degreeTypeMaster: { isActive: true, archivedAt: null } } } },
       select: { id: true },
     });
     for (const section of sections) {
@@ -77,7 +77,7 @@ export class OfficialGroupsService {
 
   async synchronizeSection(collegeId: string, sectionId: string): Promise<void> {
     const section = await this.prisma.section.findFirst({
-      where: { id: sectionId, isActive: true, officialGroupEnabled: true, semester: { programme: { collegeId } } },
+      where: { id: sectionId, isActive: true, archivedAt: null, officialGroupEnabled: true, semester: { isActive: true, academicYear: { collegeId, isActive: true, archivedAt: null }, programme: { collegeId, isActive: true, archivedAt: null, department: { isActive: true, archivedAt: null }, degreeTypeMaster: { isActive: true, archivedAt: null } } } },
       select: {
         id: true,
         code: true,
@@ -93,7 +93,17 @@ export class OfficialGroupsService {
         status: "ACTIVE",
         archivedAt: null,
         OR: [
-          { studentProfile: { sectionId } },
+          {
+            studentProfile: { sectionId, academicStatus: "ACTIVE" },
+            sectionMemberships: {
+              some: {
+                sectionId,
+                isActive: true,
+                endsOn: null,
+                status: "ACTIVE",
+              },
+            },
+          },
           { coordinatorAssignments: { some: { sectionId, isActive: true } } },
           { representativeAssignments: { some: { sectionId, isActive: true } } },
           { facultyAssignments: { some: { sectionId, isActive: true } } },

@@ -41,10 +41,15 @@ function harness() {
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     userRole: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    sectionMembership: {
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    userScope: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
     $executeRawUnsafe: jest.fn().mockResolvedValue(undefined),
   };
   const prisma = {
     user: { findFirst: jest.fn() },
+    studentProfile: { findUnique: jest.fn().mockResolvedValue(null) },
     userScope: { findFirst: jest.fn().mockResolvedValue(null) },
     department: { findFirst: jest.fn() },
     $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
@@ -53,7 +58,10 @@ function harness() {
   const officialGroups = {
     synchronizeCollege: jest.fn().mockResolvedValue(undefined),
   };
-  const placements = { placeStudent: jest.fn().mockResolvedValue({}) };
+  const placements = {
+    placeStudent: jest.fn().mockResolvedValue({}),
+    lockSection: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new UsersService(
     prisma as unknown as PrismaService,
     { get: jest.fn() } as unknown as ConfigService,
@@ -139,7 +147,7 @@ describe("UsersService student placement integration", () => {
   });
 
   it("deactivates class-representative authority and revokes sessions when archiving", async () => {
-    const { service, prisma, tx } = harness();
+    const { service, prisma, tx, placements } = harness();
     prisma.user.findFirst.mockResolvedValue({
       id: "student-id",
       publicId: "student-public-id",
@@ -153,6 +161,7 @@ describe("UsersService student placement integration", () => {
       status: AccountStatus.ACTIVE,
       collegeIdentityId: "AVS001",
       studentProfile: { sectionId: "section-id" },
+      sectionMemberships: [],
     });
 
     await service.status(
@@ -183,6 +192,101 @@ describe("UsersService student placement integration", () => {
         where: { userId: "student-id", revokedAt: null },
       }),
     );
+    expect(placements.lockSection).toHaveBeenCalledWith(tx, "section-id");
+    expect(tx.sectionMembership.updateMany).toHaveBeenCalledWith({
+      where: {
+        studentUserId: "student-id",
+        isActive: true,
+        status: "ACTIVE",
+      },
+      data: expect.objectContaining({
+        isActive: false,
+        status: "ARCHIVED",
+        changedById: actor.id,
+        reason: "Student left college",
+      }),
+    });
+    expect(tx.userScope.deleteMany).toHaveBeenCalledWith({
+      where: { userId: "student-id", scopeType: "SECTION" },
+    });
+  });
+
+  it("does not close a future-dated active membership before it starts", async () => {
+    const { service, prisma, tx } = harness();
+    const futureStartsOn = new Date("2027-06-01T00:00:00.000Z");
+    prisma.user.findFirst.mockResolvedValue({
+      id: "student-id",
+      publicId: "student-public-id",
+      collegeId: actor.collegeId,
+      collegeIdentityId: "AVS001",
+      status: AccountStatus.ACTIVE,
+      studentProfile: { sectionId: "section-id" },
+      roles: [{ role: { code: "STUDENT" } }],
+    });
+    tx.user.findFirst.mockResolvedValue({
+      status: AccountStatus.ACTIVE,
+      collegeIdentityId: "AVS001",
+      studentProfile: { sectionId: "section-id" },
+      sectionMemberships: [{ startsOn: futureStartsOn }],
+    });
+
+    await service.status(
+      actor,
+      "student-public-id",
+      {
+        status: AccountStatus.ARCHIVED,
+        reason: "Student left college",
+      },
+      "request-id",
+    );
+
+    expect(tx.sectionMembership.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ endsOn: futureStartsOn }),
+      }),
+    );
+  });
+
+  it("prevents a student from changing an existing academic placement", async () => {
+    const { service, prisma, placements } = harness();
+    prisma.studentProfile.findUnique.mockResolvedValue({
+      departmentId: "department-id",
+      programmeId: "programme-id",
+      sectionId: "section-id",
+      studyYear: 2,
+      section: {
+        semesterId: "semester-id",
+        semester: { academicYearId: "academic-year-id" },
+      },
+    });
+    const student = {
+      ...actor,
+      id: "student-id",
+      roles: ["STUDENT"],
+      fullName: "Student One",
+    };
+
+    await expect(
+      service.submitMyProfile(
+        student,
+        {
+          fullName: "Student One",
+          mobileNumber: "9876543210",
+          collegeId: "AVS001",
+          registerNumber: "620124104001",
+          departmentId: "department-id",
+          programmeId: "programme-id",
+          academicYearId: "academic-year-id",
+          semesterId: "new-semester-id",
+          sectionId: "new-section-id",
+          studyYear: 3,
+        },
+        "request-id",
+      ),
+    ).rejects.toThrow(
+      "Students cannot change their academic placement",
+    );
+    expect(placements.placeStudent).not.toHaveBeenCalled();
   });
 
   it("routes student profile submission through the canonical placement transaction", async () => {
@@ -283,7 +387,13 @@ describe("UsersService student placement integration", () => {
             { id: "student-role", code: "STUDENT", permissions: [] },
           ]),
       },
-      section: { findFirst: jest.fn().mockResolvedValue({ id: "section-id" }) },
+      section: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "section-id",
+          studyYear: 2,
+          semester: { number: 3 },
+        }),
+      },
       studentProfile: { findFirst: jest.fn().mockResolvedValue(null) },
       user: { findFirst: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
@@ -316,6 +426,7 @@ describe("UsersService student placement integration", () => {
           roleCodes: ["STUDENT"],
           scopes: [{ type: "SECTION", id: "section-id" }],
           studentProfile: {
+            degreeTypeId: "degree-type-id",
             departmentId: "department-id",
             programmeId: "programme-id",
             academicYearId: "academic-year-id",

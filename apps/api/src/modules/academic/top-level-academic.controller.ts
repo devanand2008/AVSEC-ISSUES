@@ -26,11 +26,11 @@ export class DepartmentsController {
   }
 
   @Get()
-  list(@CurrentUser() user: AuthPrincipal, @Query("search") search?: string, @Query("status") status?: string, @Query("hod") hod?: string) {
+  list(@CurrentUser() user: AuthPrincipal, @Query("search") search?: string, @Query("status") status?: string, @Query("hod") hod?: string, @Query("degreeTypeId") degreeTypeId?: string) {
     if (user.permissions.includes("academic.manage") && (search || status || hod)) {
       return this.academic.allDepartments(user, { search: search?.trim(), status, hod });
     }
-    return this.academic.departments(user);
+    return this.academic.departments(user, degreeTypeId);
   }
 
   @Permissions("academic.manage")
@@ -82,8 +82,8 @@ export class ProgrammesController {
   }
 
   @Get()
-  list(@CurrentUser() user: AuthPrincipal, @Query("departmentId") departmentId?: string) {
-    return this.academic.programmes(user, departmentId);
+  list(@CurrentUser() user: AuthPrincipal, @Query("departmentId") departmentId?: string, @Query("degreeTypeId") degreeTypeId?: string) {
+    return this.academic.programmes(user, departmentId, degreeTypeId);
   }
 }
 
@@ -100,7 +100,7 @@ export class SectionsController {
 
   @Get()
   list(@CurrentUser() user: AuthPrincipal, @Query("semesterId") semesterId?: string) {
-    return this.academic.sections(user, semesterId);
+    return this.academic.sections(user, { semesterId });
   }
 
   @Permissions("academic.manage")

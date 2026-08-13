@@ -517,7 +517,7 @@ describe("ImportsFileService", () => {
     expect(parsed.errors).toEqual([]);
   });
 
-  it.each(["1", "8"])(
+  it.each(["1", "4"])(
     "accepts study year %s at the supported boundary",
     async (studyYear) => {
       const parsed = await service.parse(
@@ -532,10 +532,10 @@ describe("ImportsFileService", () => {
     },
   );
 
-  it("rejects study years outside 1 through 8", async () => {
+  it.each(["5", "8", "9"])("rejects study year %s outside 1 through 4", async (studyYear) => {
     const parsed = await service.parse(
       csvFile(
-        "full_name,official_email,college_id,register_number,department_code,academic_year,study_year,semester,section,temporary_password\nInvalid Year,invalid.year@college.edu,AVS9,REG9,CSE,2026-27,9,1,A,AvsTemp@2026!\n",
+        `full_name,official_email,college_id,register_number,department_code,academic_year,study_year,semester,section,temporary_password\nInvalid Year,invalid.year${studyYear}@college.edu,AVS${studyYear},REG${studyYear},CSE,2026-27,${studyYear},1,A,AvsTemp@2026!\n`,
       ),
       "STUDENTS",
     );
@@ -544,7 +544,7 @@ describe("ImportsFileService", () => {
       expect.arrayContaining([
         expect.objectContaining({
           field: "year",
-          message: "study_year must be an integer from 1 to 8.",
+          message: "study_year must be an integer from 1 to 4.",
         }),
       ]),
     );

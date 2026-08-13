@@ -291,6 +291,30 @@ export const navigation: NavigationItem[] = [
     any: ["academic.manage"],
   },
   {
+    href: "/admin/academic/degree-types",
+    label: "Degree types",
+    icon: GraduationCap,
+    any: ["academic.manage"],
+  },
+  {
+    href: "/admin/academic/academic-years",
+    label: "Academic years",
+    icon: History,
+    any: ["academic.manage"],
+  },
+  {
+    href: "/admin/academic/programmes",
+    label: "Programmes",
+    icon: BookOpen,
+    any: ["academic.manage"],
+  },
+  {
+    href: "/admin/academic/student-promotion",
+    label: "Student promotion",
+    icon: GraduationCap,
+    any: ["academic.manage"],
+  },
+  {
     href: "/admin/categories",
     label: "Issue categories",
     icon: Tags,

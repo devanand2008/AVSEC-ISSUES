@@ -27,6 +27,66 @@ describe("AVS Engineering College canonical academic structure", () => {
     });
   });
 
+  it("keeps degree type separate from a degree-neutral programme name", () => {
+    expect(
+      Object.fromEntries(
+        AVS_ENGINEERING_ACADEMIC_STRUCTURE.map((entry) => [
+          entry.code,
+          entry.degreeTypeCode,
+        ]),
+      ),
+    ).toEqual({
+      "AI & ML": "BE",
+      "AI & DS": "BTECH",
+      CSE: "BE",
+      IT: "BTECH",
+      ECE: "BE",
+      EEE: "BE",
+      MECH: "BE",
+      BME: "BE",
+    });
+    expect(
+      AVS_ENGINEERING_ACADEMIC_STRUCTURE.every(
+        (entry) => !/^B\.(?:E|Tech)\.?\s/i.test(entry.programmeName),
+      ),
+    ).toBe(true);
+    expect(
+      AVS_ENGINEERING_ACADEMIC_STRUCTURE.map((entry) => entry.programmeCode),
+    ).toEqual(["AIML", "AIDS", "CSE", "IT", "ECE", "EEE", "MECH", "BME"]);
+    expect(
+      AVS_ENGINEERING_ACADEMIC_STRUCTURE.every(
+        (entry) =>
+          (entry.legacyProgrammeCodes as readonly string[]).includes(
+            `BTECH-${entry.programmeCode}`,
+          ) ||
+          entry.code === "AI & ML",
+      ),
+    ).toBe(true);
+  });
+
+  it("uses canonical programme codes while preserving explicit legacy imports", () => {
+    expect(
+      Object.fromEntries(
+        AVS_ENGINEERING_ACADEMIC_STRUCTURE.map((entry) => [
+          entry.code,
+          {
+            programmeCode: entry.programmeCode,
+            legacyProgrammeCodes: [...entry.legacyProgrammeCodes],
+          },
+        ]),
+      ),
+    ).toEqual({
+      "AI & ML": { programmeCode: "AIML", legacyProgrammeCodes: ["BTECH-AIML", "CSE(AI&ML)"] },
+      "AI & DS": { programmeCode: "AIDS", legacyProgrammeCodes: ["BTECH-AIDS"] },
+      CSE: { programmeCode: "CSE", legacyProgrammeCodes: ["BTECH-CSE"] },
+      IT: { programmeCode: "IT", legacyProgrammeCodes: ["BTECH-IT"] },
+      ECE: { programmeCode: "ECE", legacyProgrammeCodes: ["BTECH-ECE"] },
+      EEE: { programmeCode: "EEE", legacyProgrammeCodes: ["BTECH-EEE"] },
+      MECH: { programmeCode: "MECH", legacyProgrammeCodes: ["BTECH-MECH"] },
+      BME: { programmeCode: "BME", legacyProgrammeCodes: ["BTECH-BME"] },
+    });
+  });
+
   it("never encodes a section as a department", () => {
     expect(AVS_ENGINEERING_ACADEMIC_STRUCTURE.every((entry) => !(/\([A-Z]\)$|\[[A-Z]\]$/).test(entry.code))).toBe(true);
     expect(new Set(AVS_ENGINEERING_ACADEMIC_STRUCTURE.map((entry) => entry.code)).size).toBe(8);

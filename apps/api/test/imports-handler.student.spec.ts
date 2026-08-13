@@ -78,6 +78,7 @@ describe("ImportsHandlerService student academic import", () => {
         findFirst: jest.fn().mockResolvedValue(null),
         count: jest.fn().mockResolvedValue(0),
       },
+      sectionMembership: { count: jest.fn().mockResolvedValue(0) },
       user: {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: "user-1", publicId: "public-user-1", collegeIdentityId: "AVS001", fullName: "Test Student" }),
@@ -120,7 +121,7 @@ describe("ImportsHandlerService student academic import", () => {
     expect(academic.programme.findMany.mock.calls[0]?.[0]?.where.code).toBeUndefined();
   });
 
-  it("accepts every integer study year from 1 through 8", () => {
+  it("accepts every Engineering study year from 1 through 4", () => {
     const service = new ImportsHandlerService(
       {} as PrismaService,
       new ConfigService({ PASSWORD_PEPPER: "test-pepper" }),
@@ -130,8 +131,10 @@ describe("ImportsHandlerService student academic import", () => {
       importStudyYear(value: string): number;
     }).importStudyYear.bind(service);
 
-    expect(Array.from({ length: 8 }, (_, index) => importStudyYear(String(index + 1)))).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-    expect(() => importStudyYear("9")).toThrow("study_year must be an integer from 1 to 8.");
+    expect(Array.from({ length: 4 }, (_, index) => importStudyYear(String(index + 1)))).toEqual([1, 2, 3, 4]);
+    for (const invalid of ["5", "8", "9"]) {
+      expect(() => importStudyYear(invalid)).toThrow("study_year must be an integer from 1 to 4.");
+    }
   });
 
   it("marks rows beyond the remaining seats invalid during preview", async () => {
@@ -142,6 +145,7 @@ describe("ImportsHandlerService student academic import", () => {
         findFirst: jest.fn().mockResolvedValue(null),
         count: jest.fn().mockResolvedValue(0),
       },
+      sectionMembership: { count: jest.fn().mockResolvedValue(0) },
       user: {
         findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn(),
@@ -185,6 +189,7 @@ describe("ImportsHandlerService student academic import", () => {
         findFirst: jest.fn().mockResolvedValue(null),
         count: jest.fn().mockResolvedValue(0),
       },
+      sectionMembership: { count: jest.fn().mockResolvedValue(0) },
       user: {
         findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn(),
@@ -212,7 +217,7 @@ describe("ImportsHandlerService student academic import", () => {
     );
 
     expect(errors).toEqual([]);
-    expect(prisma.studentProfile.count).toHaveBeenCalledTimes(1);
+    expect(prisma.sectionMembership.count).toHaveBeenCalledTimes(1);
   });
 
   it("removes placement membership and scope before rolling back an imported student", async () => {

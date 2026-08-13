@@ -44,6 +44,7 @@ import {
 } from "@/features/people/student-academic-options";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
+import { StudentRegistrationWizard } from "@/features/people/student-registration-wizard";
 
 interface Role {
   code: string;
@@ -132,12 +133,12 @@ export default function CreatePersonPage() {
   const roles = useQuery({
     queryKey: ["roles", "person-creation"],
     queryFn: () => api.get<Role[]>("/roles"),
-    enabled: canCreate,
+    enabled: canCreate && form.profileType !== "student",
   });
   const options = useQuery({
     queryKey: ["scope-options", "person-creation"],
     queryFn: () => api.get<ScopeOptions>("/users/scope-options"),
-    enabled: canCreate,
+    enabled: canCreate && form.profileType !== "student",
   });
 
   const programmes = useMemo(
@@ -198,7 +199,7 @@ export default function CreatePersonPage() {
 
   const create = useMutation({
     mutationFn: () =>
-      api.post<CreatedPerson>("/users", buildCreatePersonPayload(form)),
+      api.post<CreatedPerson>("/admin/people", buildCreatePersonPayload(form)),
     onSuccess: (person) => {
       setCreated({ ...person, temporaryPassword: form.temporaryPassword });
       setError("");
@@ -303,10 +304,10 @@ export default function CreatePersonPage() {
       {!authLoading && !canCreate && (
         <ErrorState message="You do not have permission to create user accounts." />
       )}
-      {canCreate && (roles.isLoading || options.isLoading) && (
+      {canCreate && form.profileType !== "student" && (roles.isLoading || options.isLoading) && (
         <LoadingState rows={6} />
       )}
-      {canCreate && (roles.isError || options.isError) && (
+      {canCreate && form.profileType !== "student" && (roles.isError || options.isError) && (
         <ErrorState message="Roles or college scope options could not be loaded. Refresh the page and try again." />
       )}
 
@@ -366,7 +367,37 @@ export default function CreatePersonPage() {
         </section>
       )}
 
-      {canCreate && roles.isSuccess && options.isSuccess && !created && (
+      {canCreate && form.profileType === "student" && !created && (
+        <StudentRegistrationWizard
+          form={form}
+          setForm={setForm}
+          error={error}
+          fieldError={fieldError}
+          isPending={create.isPending}
+          onCreate={() => {
+            setError("");
+            setFieldError(null);
+            create.mutate();
+          }}
+          onSwitchToOther={() =>
+            setForm({
+              ...form,
+              profileType: "none",
+              roleCodes: [],
+              scopes: [{ type: "DEPARTMENT", targetId: "" }],
+              degreeTypeId: "",
+              departmentId: "",
+              programmeId: "",
+              academicYearId: "",
+              studyYear: "1",
+              semesterId: "",
+              sectionId: "",
+            })
+          }
+        />
+      )}
+
+      {canCreate && form.profileType !== "student" && roles.isSuccess && options.isSuccess && !created && (
         <form
           className="card"
           onSubmit={submit}
@@ -416,14 +447,10 @@ export default function CreatePersonPage() {
                 onChange={(fullName) => setForm({ ...form, fullName })}
               />
               <TextField
-                label={
-                  form.profileType === "student"
-                    ? "Official college email"
-                    : "Email"
-                }
+                label="Email"
                 value={form.email}
                 type="email"
-                optional={form.profileType !== "student"}
+                optional
                 maxLength={254}
                 autoComplete="email"
                 error={
@@ -736,13 +763,21 @@ export default function CreatePersonPage() {
                   setForm({
                     ...form,
                     profileType: event.target.value as ProfileType,
+                    roleCodes:
+                      event.target.value === "student"
+                        ? ["STUDENT"]
+                        : form.roleCodes.filter((code) => code !== "STUDENT"),
                     departmentId: "",
+                    degreeTypeId: "",
                     programmeId: "",
                     academicYearId: "",
-                    studyYear: "",
+                    studyYear: event.target.value === "student" ? "1" : "",
                     semesterId: "",
                     sectionId: "",
-                    scopes: clearSectionScopeTargets(form.scopes),
+                    scopes:
+                      event.target.value === "student"
+                        ? [{ type: "SECTION", targetId: "" }]
+                        : clearSectionScopeTargets(form.scopes),
                   })
                 }
               >
@@ -752,7 +787,7 @@ export default function CreatePersonPage() {
               </select>
             </label>
 
-            {form.profileType === "student" && (
+            {(form.profileType as ProfileType) === "student" && (
               <div className="person-entry-student-fields">
                 <label className="field">
                   <span>Gender (optional)</span>

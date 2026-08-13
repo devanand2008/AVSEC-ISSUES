@@ -526,20 +526,16 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
   private studyYearOption(value?: string): ImportStudyYear | undefined {
     const normalized = (value || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
     if (!normalized) return undefined;
-    if (/^[1-8]$/.test(normalized)) return normalized as ImportStudyYear;
+    if (/^[1-4]$/.test(normalized)) return normalized as ImportStudyYear;
     const aliases: Record<string, ImportStudyYear> = {
       "1ST": "1", "1ST_YEAR": "1", FIRST: "1", FIRST_YEAR: "1",
       "2ND": "2", "2RD": "2", "2ND_YEAR": "2", "2RD_YEAR": "2", SECOND: "2", SECOND_YEAR: "2",
       "3RD": "3", "3RD_YEAR": "3", THIRD: "3", THIRD_YEAR: "3",
       "4TH": "4", "4TH_YEAR": "4", FOURTH: "4", FOURTH_YEAR: "4",
-      "5TH": "5", "5TH_YEAR": "5", FIFTH: "5", FIFTH_YEAR: "5",
-      "6TH": "6", "6TH_YEAR": "6", SIXTH: "6", SIXTH_YEAR: "6",
-      "7TH": "7", "7TH_YEAR": "7", SEVENTH: "7", SEVENTH_YEAR: "7",
-      "8TH": "8", "8TH_YEAR": "8", EIGHTH: "8", EIGHTH_YEAR: "8",
     };
     if (aliases[normalized]) return aliases[normalized];
     throw new BadRequestException(
-      "detectedStudyYear must be an integer from 1 to 8.",
+      "detectedStudyYear must be an integer from 1 to 4.",
     );
   }
 
@@ -610,7 +606,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     if (!value || typeof value !== "object" || Array.isArray(value))
       return undefined;
     const year = (value as Record<string, unknown>)[DETECTED_STUDY_YEAR_KEY];
-    return typeof year === "string" && /^[1-8]$/.test(year)
+    return typeof year === "string" && /^[1-4]$/.test(year)
       ? year as ImportStudyYear
       : undefined;
   }

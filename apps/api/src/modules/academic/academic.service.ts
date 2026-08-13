@@ -14,11 +14,14 @@ import type {
   CreateClassStaffAssignmentDto,
   AssignSectionStudentDto,
   CreateDepartmentDto,
+  CreateDegreeTypeDto,
+  UpdateDegreeTypeDto,
   CreateFacultySubjectAssignmentDto,
   UpdateDepartmentDto,
   CreateProgrammeDto,
   UpdateProgrammeDto,
   CreateAcademicYearDto,
+  UpdateAcademicYearDto,
   CreateSemesterDto,
   CreateSectionDto,
   CreateSubjectDto,
@@ -40,32 +43,60 @@ export class AcademicService {
 
   /* ─── READ (existing, preserved) ─── */
 
-  departments(user: AuthPrincipal) {
-    return this.prisma.department.findMany({
+  degreeTypes(user: AuthPrincipal) {
+    return this.prisma.degreeType.findMany({
       where: { collegeId: user.collegeId, isActive: true, archivedAt: null },
+      select: { id: true, code: true, name: true, description: true, isActive: true, sortOrder: true },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    });
+  }
+
+  allDegreeTypes(user: AuthPrincipal) {
+    return this.prisma.degreeType.findMany({
+      where: { collegeId: user.collegeId },
+      include: { _count: { select: { programmes: true } } },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    });
+  }
+
+  departments(user: AuthPrincipal, degreeTypeId?: string) {
+    return this.prisma.department.findMany({
+      where: {
+        collegeId: user.collegeId,
+        isActive: true,
+        archivedAt: null,
+        ...(degreeTypeId
+          ? { programmes: { some: { degreeTypeId, isActive: true, archivedAt: null } } }
+          : {}),
+      },
       select: { id: true, code: true, name: true, campusId: true },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     });
   }
 
-  programmes(user: AuthPrincipal, departmentId?: string) {
+  programmes(user: AuthPrincipal, departmentId?: string, degreeTypeId?: string) {
     return this.prisma.programme.findMany({
       where: {
         collegeId: user.collegeId,
         isActive: true,
+        archivedAt: null,
         department: {
           collegeId: user.collegeId,
           isActive: true,
           archivedAt: null,
         },
         ...(departmentId ? { departmentId } : {}),
+        ...(degreeTypeId ? { degreeTypeId } : {}),
       },
       select: {
         id: true,
         code: true,
         name: true,
         departmentId: true,
+        degreeTypeId: true,
+        degreeTypeMaster: { select: { id: true, code: true, name: true } },
         durationYears: true,
+        totalSemesters: true,
       },
       orderBy: { name: "asc" },
     });
@@ -73,13 +104,15 @@ export class AcademicService {
 
   years(user: AuthPrincipal) {
     return this.prisma.academicYear.findMany({
-      where: { collegeId: user.collegeId, isActive: true },
+      where: { collegeId: user.collegeId, isActive: true, archivedAt: null },
       select: {
         id: true,
         name: true,
         startsOn: true,
         endsOn: true,
         isCurrent: true,
+        isActive: true,
+        archivedAt: true,
       },
       orderBy: { startsOn: "desc" },
     });
@@ -89,18 +122,23 @@ export class AcademicService {
     user: AuthPrincipal,
     programmeId?: string,
     academicYearId?: string,
+    studyYear?: number,
   ) {
     return this.prisma.semester.findMany({
       where: {
         programme: {
           collegeId: user.collegeId,
           isActive: true,
+          archivedAt: null,
           department: { isActive: true, archivedAt: null },
         },
-        academicYear: { collegeId: user.collegeId, isActive: true },
+        academicYear: { collegeId: user.collegeId, isActive: true, archivedAt: null },
         isActive: true,
         ...(programmeId ? { programmeId } : {}),
         ...(academicYearId ? { academicYearId } : {}),
+        ...(studyYear
+          ? { number: { in: [studyYear * 2 - 1, studyYear * 2] } }
+          : {}),
       },
       select: {
         id: true,
@@ -108,26 +146,44 @@ export class AcademicService {
         name: true,
         programmeId: true,
         academicYearId: true,
+        programme: { select: { totalSemesters: true } },
       },
       orderBy: { number: "asc" },
     });
   }
 
-  sections(user: AuthPrincipal, semesterId?: string) {
-    return this.prisma.section.findMany({
+  async sections(
+    user: AuthPrincipal,
+    filters: {
+      semesterId?: string;
+      programmeId?: string;
+      academicYearId?: string;
+      studyYear?: number;
+    } = {},
+  ) {
+    const sections = await this.prisma.section.findMany({
       where: {
         archivedAt: null,
+        isActive: true,
+        ...(filters.semesterId ? { semesterId: filters.semesterId } : {}),
+        ...(filters.studyYear ? { OR: [{ studyYear: filters.studyYear }, { studyYear: null }] } : {}),
         semester: {
           isActive: true,
-          academicYear: { collegeId: user.collegeId, isActive: true },
+          ...(filters.studyYear ? { number: { in: [filters.studyYear * 2 - 1, filters.studyYear * 2] } } : {}),
+          academicYear: {
+            collegeId: user.collegeId,
+            isActive: true,
+            archivedAt: null,
+            ...(filters.academicYearId ? { id: filters.academicYearId } : {}),
+          },
           programme: {
             collegeId: user.collegeId,
             isActive: true,
+            archivedAt: null,
+            ...(filters.programmeId ? { id: filters.programmeId } : {}),
             department: { isActive: true, archivedAt: null },
           },
         },
-        isActive: true,
-        ...(semesterId ? { semesterId } : {}),
       },
       select: {
         id: true,
@@ -135,8 +191,31 @@ export class AcademicService {
         name: true,
         semesterId: true,
         capacity: true,
+        studyYear: true,
+        semester: { select: { number: true, programmeId: true, academicYearId: true } },
+        _count: {
+          select: {
+            memberships: { where: { isActive: true, status: "ACTIVE" } },
+          },
+        },
       },
       orderBy: { code: "asc" },
+    });
+    return sections.map((section) => {
+      const currentStudentCount = section._count.memberships;
+      return {
+        id: section.id,
+        code: section.code,
+        name: section.name,
+        semesterId: section.semesterId,
+        programmeId: section.semester.programmeId,
+        academicYearId: section.semester.academicYearId,
+        studyYear: section.studyYear ?? Math.ceil(section.semester.number / 2),
+        capacity: section.capacity,
+        currentStudentCount,
+        availableSeats: Math.max(0, section.capacity - currentStudentCount),
+        isFull: currentStudentCount >= section.capacity,
+      };
     });
   }
 
@@ -324,6 +403,7 @@ export class AcademicService {
       },
       include: {
         department: { select: { id: true, name: true } },
+        degreeTypeMaster: { select: { id: true, code: true, name: true } },
         _count: { select: { semesters: true, studentProfiles: true } },
       },
       orderBy: { name: "asc" },
@@ -397,9 +477,7 @@ export class AcademicService {
         },
         _count: {
           select: {
-            studentProfiles: {
-              where: { user: { status: "ACTIVE", archivedAt: null } },
-            },
+            memberships: { where: { isActive: true, status: "ACTIVE" } },
             attendanceSessions: true,
           },
         },
@@ -432,11 +510,11 @@ export class AcademicService {
       assignedRoom: section.assignedRoomId
         ? (byId.get(section.assignedRoomId) ?? null)
         : null,
-      currentStudentCount: section._count.studentProfiles,
+      currentStudentCount: section._count.memberships,
       maximumCapacity: section.capacity,
       availableSeats: Math.max(
         0,
-        section.capacity - section._count.studentProfiles,
+        section.capacity - section._count.memberships,
       ),
     }));
   }
@@ -482,7 +560,7 @@ export class AcademicService {
           },
         },
         memberships: {
-          where: { isActive: true },
+          where: { isActive: true, status: "ACTIVE" },
           include: {
             student: {
               select: {
@@ -496,9 +574,7 @@ export class AcademicService {
         },
         _count: {
           select: {
-            studentProfiles: {
-              where: { user: { status: "ACTIVE", archivedAt: null } },
-            },
+            memberships: { where: { isActive: true, status: "ACTIVE" } },
             attendanceSessions: true,
           },
         },
@@ -507,11 +583,11 @@ export class AcademicService {
     if (!section) throw new NotFoundException("Section not found.");
     return {
       ...section,
-      currentStudentCount: section._count.studentProfiles,
+      currentStudentCount: section._count.memberships,
       maximumCapacity: section.capacity,
       availableSeats: Math.max(
         0,
-        section.capacity - section._count.studentProfiles,
+        section.capacity - section._count.memberships,
       ),
     };
   }
@@ -690,9 +766,11 @@ export class AcademicService {
       programme: {
         collegeId: user.collegeId,
         isActive: true,
+        archivedAt: null,
+        degreeTypeMaster: { isActive: true, archivedAt: null },
         department: { isActive: true, archivedAt: null },
       },
-      academicYear: { collegeId: user.collegeId, isActive: true },
+      academicYear: { collegeId: user.collegeId, isActive: true, archivedAt: null },
     };
     const [users, sections, subjects] = await Promise.all([
       this.prisma.user.findMany({
@@ -759,6 +837,41 @@ export class AcademicService {
   }
 
   /* ─── CREATE ─── */
+
+  async createDegreeType(
+    user: AuthPrincipal,
+    input: CreateDegreeTypeDto,
+    requestId: string,
+  ) {
+    await this.assertDegreeTypeUnique(user.collegeId, input.code, input.name);
+    try {
+      const degreeType = await this.prisma.degreeType.create({
+        data: {
+          collegeId: user.collegeId,
+          code: input.code.trim().toUpperCase(),
+          name: input.name.trim(),
+          description: input.description?.trim() || null,
+          sortOrder: input.sortOrder ?? 0,
+          isActive: input.isActive ?? true,
+        },
+      });
+      await this.audit.record({
+        actorId: user.id,
+        action: "degree_type.created",
+        entityType: "DegreeType",
+        entityId: degreeType.id,
+        afterValue: degreeType,
+        requestId,
+      });
+      return degreeType;
+    } catch (error) {
+      this.rethrowAcademicDuplicate(
+        error,
+        "A Degree Type with this code or name already exists.",
+      );
+      throw error;
+    }
+  }
 
   async createDepartment(
     user: AuthPrincipal,
@@ -852,6 +965,10 @@ export class AcademicService {
     });
     if (!department)
       throw new BadRequestException("The selected department is not active.");
+    const degreeType = await this.requireActiveDegreeType(
+      user.collegeId,
+      input.degreeTypeId,
+    );
     await this.assertProgrammeUnique(
       input.departmentId,
       input.code,
@@ -875,14 +992,24 @@ export class AcademicService {
             throw new BadRequestException(
               "The selected department must remain active.",
             );
+          const totalSemesters =
+            input.totalSemesters ?? input.durationYears * 2;
+          if (totalSemesters < input.durationYears) {
+            throw new BadRequestException(
+              "Total semesters cannot be lower than duration years.",
+            );
+          }
           const created = await tx.programme.create({
             data: {
               collegeId: user.collegeId,
               departmentId: input.departmentId,
               code: input.code.trim().toUpperCase(),
               name: input.name.trim(),
-              degreeType: input.degreeType?.trim(),
+              degreeTypeId: degreeType.id,
+              degreeType: degreeType.name,
               durationYears: input.durationYears,
+              totalSemesters,
+              isActive: input.isActive ?? true,
             },
           });
           await this.audit.record(
@@ -921,11 +1048,10 @@ export class AcademicService {
   ) {
     const startsOn = new Date(input.startsOn);
     const endsOn = new Date(input.endsOn);
-    if (isNaN(startsOn.getTime()) || isNaN(endsOn.getTime()))
-      throw new BadRequestException("Invalid date format.");
-    if (endsOn <= startsOn)
-      throw new BadRequestException("End date must be after start date.");
+    this.assertAcademicYearInput(input.name, startsOn, endsOn);
+    await this.assertAcademicYearUnique(user.collegeId, input.name);
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`academic-year-current:${user.collegeId}`}))`;
       if (input.isCurrent) {
         await tx.academicYear.updateMany({
           where: { collegeId: user.collegeId, isCurrent: true },
@@ -939,6 +1065,7 @@ export class AcademicService {
           startsOn,
           endsOn,
           isCurrent: input.isCurrent ?? false,
+          isActive: input.isActive ?? true,
         },
       });
       await this.audit.record(
@@ -958,7 +1085,7 @@ export class AcademicService {
         tx,
       );
       return year;
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async createSemester(
@@ -971,16 +1098,23 @@ export class AcademicService {
         id: input.programmeId,
         collegeId: user.collegeId,
         isActive: true,
+        archivedAt: null,
+        degreeTypeMaster: { isActive: true, archivedAt: null },
         department: { isActive: true, archivedAt: null },
       },
     });
     if (!programme)
       throw new BadRequestException("The selected programme is not active.");
+    if (input.number > Math.min(programme.totalSemesters, 8))
+      throw new BadRequestException(
+        `Semester number cannot exceed this programme's ${programme.totalSemesters} configured semesters.`,
+      );
     const academicYear = await this.prisma.academicYear.findFirst({
       where: {
         id: input.academicYearId,
         collegeId: user.collegeId,
         isActive: true,
+        archivedAt: null,
       },
     });
     if (!academicYear)
@@ -1000,6 +1134,8 @@ export class AcademicService {
               id: input.programmeId,
               collegeId: user.collegeId,
               isActive: true,
+              archivedAt: null,
+              degreeTypeMaster: { isActive: true, archivedAt: null },
               department: { isActive: true, archivedAt: null },
             },
             select: { id: true },
@@ -1009,6 +1145,7 @@ export class AcademicService {
               id: input.academicYearId,
               collegeId: user.collegeId,
               isActive: true,
+              archivedAt: null,
             },
             select: { id: true },
           }),
@@ -1059,21 +1196,32 @@ export class AcademicService {
       where: {
         id: input.semesterId,
         isActive: true,
-        academicYear: { collegeId: user.collegeId, isActive: true },
+        academicYear: { collegeId: user.collegeId, isActive: true, archivedAt: null },
         programme: {
           collegeId: user.collegeId,
           isActive: true,
+          archivedAt: null,
+          degreeTypeMaster: { isActive: true, archivedAt: null },
           department: { isActive: true, archivedAt: null },
         },
       },
       select: {
         id: true,
+        number: true,
         academicYear: { select: { startsOn: true, endsOn: true } },
-        programme: { select: { departmentId: true } },
+        programme: { select: { departmentId: true, totalSemesters: true } },
       },
     });
     if (!semester)
       throw new BadRequestException("The selected semester is not active.");
+    const derivedStudyYear = this.engineeringStudyYear(
+      semester.number,
+      semester.programme.totalSemesters,
+    );
+    if (input.studyYear !== undefined && input.studyYear !== derivedStudyYear)
+      throw new BadRequestException(
+        `Semester ${semester.number} belongs to Study Year ${derivedStudyYear}.`,
+      );
     if (input.assignedRoomId)
       await this.requireRoom(user.collegeId, input.assignedRoomId);
     await this.assertSectionUnique(input.semesterId, input.code, input.name);
@@ -1117,25 +1265,39 @@ export class AcademicService {
             where: {
               id: input.semesterId,
               isActive: true,
-              academicYear: { collegeId: user.collegeId, isActive: true },
+              academicYear: { collegeId: user.collegeId, isActive: true, archivedAt: null },
               programme: {
                 collegeId: user.collegeId,
                 isActive: true,
+                archivedAt: null,
+                degreeTypeMaster: { isActive: true, archivedAt: null },
                 department: { isActive: true, archivedAt: null },
               },
             },
-            select: { id: true },
+            select: {
+              id: true,
+              number: true,
+              programme: { select: { totalSemesters: true } },
+            },
           });
           if (!activeSemester)
             throw new BadRequestException(
               "The selected semester and its academic parents must remain active.",
+            );
+          const lockedStudyYear = this.engineeringStudyYear(
+            activeSemester.number,
+            activeSemester.programme.totalSemesters,
+          );
+          if (input.studyYear !== undefined && input.studyYear !== lockedStudyYear)
+            throw new BadRequestException(
+              `Semester ${activeSemester.number} belongs to Study Year ${lockedStudyYear}.`,
             );
           const created = await tx.section.create({
             data: {
               semesterId: input.semesterId,
               code: input.code.trim().toUpperCase(),
               name: input.name.trim(),
-              studyYear: input.studyYear,
+              studyYear: lockedStudyYear,
               displayName: input.displayName?.trim(),
               assignedRoomId: input.assignedRoomId,
               officialGroupEnabled: input.officialGroupEnabled ?? true,
@@ -1431,7 +1593,18 @@ export class AcademicService {
           where: {
             userId: representative.id,
             sectionId: section.id,
+            academicStatus: "ACTIVE",
             user: { status: "ACTIVE", archivedAt: null },
+            section: {
+              memberships: {
+                some: {
+                  studentUserId: representative.id,
+                  isActive: true,
+                  endsOn: null,
+                  status: "ACTIVE",
+                },
+              },
+            },
           },
           select: { id: true },
         });
@@ -1638,6 +1811,89 @@ export class AcademicService {
     return result;
   }
 
+  async updateDegreeType(
+    user: AuthPrincipal,
+    id: string,
+    input: UpdateDegreeTypeDto,
+    requestId: string,
+  ) {
+    const existing = await this.prisma.degreeType.findFirst({
+      where: { id, collegeId: user.collegeId },
+    });
+    if (!existing) throw new NotFoundException("Degree Type not found.");
+    if (existing.archivedAt && input.isActive)
+      throw new ConflictException("Restore the archived Degree Type instead.");
+    if (input.code !== undefined || input.name !== undefined) {
+      await this.assertDegreeTypeUnique(
+        user.collegeId,
+        input.code ?? existing.code,
+        input.name ?? existing.name,
+        id,
+      );
+    }
+    if (input.isActive === false) {
+      const activeProgrammes = await this.prisma.programme.count({
+        where: { collegeId: user.collegeId, degreeTypeId: id, isActive: true, archivedAt: null },
+      });
+      if (activeProgrammes)
+        throw new ConflictException("Deactivate or archive this Degree Type's active programmes first.");
+    }
+    const updated = await this.prisma.degreeType.update({
+      where: { id },
+      data: {
+        ...(input.code !== undefined ? { code: input.code.trim().toUpperCase() } : {}),
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
+        ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      },
+    });
+    await this.audit.record({
+      actorId: user.id,
+      action: "degree_type.updated",
+      entityType: "DegreeType",
+      entityId: id,
+      beforeValue: existing,
+      afterValue: updated,
+      requestId,
+    });
+    return updated;
+  }
+
+  async archiveDegreeType(
+    user: AuthPrincipal,
+    id: string,
+    reason: string | undefined,
+    requestId: string,
+  ) {
+    const existing = await this.prisma.degreeType.findFirst({
+      where: { id, collegeId: user.collegeId },
+    });
+    if (!existing) throw new NotFoundException("Degree Type not found.");
+    if (existing.archivedAt) throw new ConflictException("Degree Type is already archived.");
+    const activeProgrammes = await this.prisma.programme.count({
+      where: { collegeId: user.collegeId, degreeTypeId: id, isActive: true, archivedAt: null },
+    });
+    if (activeProgrammes)
+      throw new ConflictException("Archive or deactivate active programmes before archiving this Degree Type.");
+    const updated = await this.prisma.degreeType.update({
+      where: { id },
+      data: { isActive: false, archivedAt: new Date() },
+    });
+    await this.audit.record({ actorId: user.id, action: "degree_type.archived", entityType: "DegreeType", entityId: id, beforeValue: existing, afterValue: updated, reason, requestId });
+    return updated;
+  }
+
+  async restoreDegreeType(user: AuthPrincipal, id: string, requestId: string) {
+    const existing = await this.prisma.degreeType.findFirst({ where: { id, collegeId: user.collegeId } });
+    if (!existing) throw new NotFoundException("Degree Type not found.");
+    if (!existing.archivedAt) throw new ConflictException("Degree Type is not archived.");
+    await this.assertDegreeTypeUnique(user.collegeId, existing.code, existing.name, id);
+    const updated = await this.prisma.degreeType.update({ where: { id }, data: { archivedAt: null, isActive: true } });
+    await this.audit.record({ actorId: user.id, action: "degree_type.restored", entityType: "DegreeType", entityId: id, beforeValue: existing, afterValue: updated, requestId });
+    return updated;
+  }
+
   async updateDepartment(
     user: AuthPrincipal,
     id: string,
@@ -1794,6 +2050,9 @@ export class AcademicService {
       include: { department: true },
     });
     if (!existing) throw new NotFoundException("Programme not found.");
+    const degreeType = input.degreeTypeId
+      ? await this.requireActiveDegreeType(user.collegeId, input.degreeTypeId)
+      : null;
     if (
       input.isActive &&
       (!existing.department.isActive || existing.department.archivedAt)
@@ -1826,6 +2085,14 @@ export class AcademicService {
               user.collegeId,
               current.departmentId,
             );
+          const nextDurationYears = input.durationYears ?? current.durationYears;
+          const nextTotalSemesters =
+            input.totalSemesters ?? current.totalSemesters;
+          if (nextTotalSemesters < nextDurationYears) {
+            throw new BadRequestException(
+              "Total semesters cannot be lower than duration years.",
+            );
+          }
           const updated = await tx.programme.update({
             where: { id },
             data: {
@@ -1833,11 +2100,14 @@ export class AcademicService {
                 ? { code: input.code.trim().toUpperCase() }
                 : {}),
               ...(input.name !== undefined ? { name: input.name.trim() } : {}),
-              ...(input.degreeType !== undefined
-                ? { degreeType: input.degreeType?.trim() || null }
+              ...(degreeType
+                ? { degreeTypeId: degreeType.id, degreeType: degreeType.name }
                 : {}),
               ...(input.durationYears !== undefined
                 ? { durationYears: input.durationYears }
+                : {}),
+              ...(input.totalSemesters !== undefined
+                ? { totalSemesters: input.totalSemesters }
                 : {}),
               ...(input.isActive !== undefined
                 ? { isActive: input.isActive }
@@ -1887,13 +2157,28 @@ export class AcademicService {
       include: {
         semester: {
           select: {
+            number: true,
             academicYear: { select: { startsOn: true, endsOn: true } },
-            programme: { select: { departmentId: true } },
+            programme: {
+              select: { departmentId: true, totalSemesters: true },
+            },
           },
         },
       },
     });
     if (!existing) throw new NotFoundException("Section not found.");
+    const expectedStudyYear = this.engineeringStudyYear(
+      existing.semester.number,
+      existing.semester.programme.totalSemesters,
+    );
+    if (
+      input.studyYear !== undefined &&
+      input.studyYear !== null &&
+      input.studyYear !== expectedStudyYear
+    )
+      throw new BadRequestException(
+        `Semester ${existing.semester.number} belongs to Study Year ${expectedStudyYear}.`,
+      );
     if (input.assignedRoomId)
       await this.requireRoom(user.collegeId, input.assignedRoomId);
     if (input.code !== undefined || input.name !== undefined) {
@@ -1960,8 +2245,28 @@ export class AcademicService {
               id,
               semester: { programme: { collegeId: user.collegeId } },
             },
+            include: {
+              semester: {
+                select: {
+                  number: true,
+                  programme: { select: { totalSemesters: true } },
+                },
+              },
+            },
           });
           if (!current) throw new NotFoundException("Section not found.");
+          const lockedStudyYear = this.engineeringStudyYear(
+            current.semester.number,
+            current.semester.programme.totalSemesters,
+          );
+          if (
+            input.studyYear !== undefined &&
+            input.studyYear !== null &&
+            input.studyYear !== lockedStudyYear
+          )
+            throw new BadRequestException(
+              `Semester ${current.semester.number} belongs to Study Year ${lockedStudyYear}.`,
+            );
           const lockedResultingActive = input.isActive ?? current.isActive;
           if (input.isActive && current.archivedAt)
             throw new ConflictException(
@@ -1976,10 +2281,12 @@ export class AcademicService {
               where: {
                 id: current.semesterId,
                 isActive: true,
-                academicYear: { collegeId: user.collegeId, isActive: true },
+                academicYear: { collegeId: user.collegeId, isActive: true, archivedAt: null },
                 programme: {
                   collegeId: user.collegeId,
                   isActive: true,
+                  archivedAt: null,
+                  degreeTypeMaster: { isActive: true, archivedAt: null },
                   department: { isActive: true, archivedAt: null },
                 },
               },
@@ -1991,11 +2298,8 @@ export class AcademicService {
               );
           }
           if (input.capacity !== undefined) {
-            const currentStudentCount = await tx.studentProfile.count({
-              where: {
-                sectionId: id,
-                user: { status: "ACTIVE", archivedAt: null },
-              },
+            const currentStudentCount = await tx.sectionMembership.count({
+              where: { sectionId: id, isActive: true, status: "ACTIVE" },
             });
             if (input.capacity < currentStudentCount)
               throw new BadRequestException(
@@ -2010,7 +2314,7 @@ export class AcademicService {
                 : {}),
               ...(input.name !== undefined ? { name: input.name.trim() } : {}),
               ...(input.studyYear !== undefined
-                ? { studyYear: input.studyYear }
+                ? { studyYear: lockedStudyYear }
                 : {}),
               ...(input.displayName !== undefined
                 ? { displayName: input.displayName?.trim() || null }
@@ -2160,6 +2464,145 @@ export class AcademicService {
     return section;
   }
 
+  async archiveProgramme(
+    user: AuthPrincipal,
+    id: string,
+    reason: string | undefined,
+    requestId: string,
+  ) {
+    const existing = await this.prisma.programme.findFirst({
+      where: { id, collegeId: user.collegeId },
+    });
+    if (!existing) throw new NotFoundException("Programme not found.");
+    if (existing.archivedAt) throw new ConflictException("Programme is already archived.");
+    const now = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this.lockProgrammeSections(tx, existing.departmentId, id);
+      const archived = await tx.programme.update({ where: { id }, data: { isActive: false, archivedAt: now } });
+      await tx.semester.updateMany({ where: { programmeId: id }, data: { isActive: false } });
+      await tx.section.updateMany({ where: { semester: { programmeId: id } }, data: { isActive: false } });
+      const activeMemberships = await tx.sectionMembership.findMany({
+        where: { programmeId: id, isActive: true, status: "ACTIVE" },
+        select: { studentUserId: true, sectionId: true },
+      });
+      await tx.sectionMembership.updateMany({
+        where: { programmeId: id, isActive: true, status: "ACTIVE" },
+        data: { isActive: false, endsOn: this.dateOnly(now), status: "ARCHIVED", changedById: user.id, reason: reason?.trim() || "Programme archived" },
+      });
+      if (activeMemberships.length) {
+        await tx.userScope.deleteMany({
+          where: {
+            userId: {
+              in: activeMemberships.map(({ studentUserId }) => studentUserId),
+            },
+            scopeType: "SECTION",
+            scopeId: {
+              in: activeMemberships.map(({ sectionId }) => sectionId),
+            },
+          },
+        });
+      }
+      await this.closeProgrammeAssignments(tx, id, this.dateOnly(now));
+      await this.audit.record({ actorId: user.id, action: "programme.archived", entityType: "Programme", entityId: id, beforeValue: existing, afterValue: archived, reason, requestId }, tx);
+      return archived;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return updated;
+  }
+
+  async restoreProgramme(user: AuthPrincipal, id: string, requestId: string) {
+    const existing = await this.prisma.programme.findFirst({
+      where: { id, collegeId: user.collegeId },
+      include: { department: true, degreeTypeMaster: true },
+    });
+    if (!existing) throw new NotFoundException("Programme not found.");
+    if (!existing.archivedAt) throw new ConflictException("Programme is not archived.");
+    if (!existing.department.isActive || existing.department.archivedAt || !existing.degreeTypeMaster.isActive || existing.degreeTypeMaster.archivedAt)
+      throw new ConflictException("Restore the Programme's Department and Degree Type first.");
+    const updated = await this.prisma.programme.update({ where: { id }, data: { archivedAt: null, isActive: true } });
+    await this.audit.record({ actorId: user.id, action: "programme.restored", entityType: "Programme", entityId: id, beforeValue: existing, afterValue: updated, requestId });
+    return updated;
+  }
+
+  async updateAcademicYear(
+    user: AuthPrincipal,
+    id: string,
+    input: UpdateAcademicYearDto,
+    requestId: string,
+  ) {
+    const existing = await this.prisma.academicYear.findFirst({ where: { id, collegeId: user.collegeId } });
+    if (!existing) throw new NotFoundException("Academic year not found.");
+    if (existing.archivedAt) throw new ConflictException("Restore the archived Academic Year before editing it.");
+    if (input.isActive === false && existing.isCurrent)
+      throw new ConflictException("Set another Academic Year as current before deactivating this one.");
+    const startsOn = input.startsOn ? new Date(input.startsOn) : existing.startsOn;
+    const endsOn = input.endsOn ? new Date(input.endsOn) : existing.endsOn;
+    const name = input.name?.trim() ?? existing.name;
+    this.assertAcademicYearInput(name, startsOn, endsOn);
+    await this.assertAcademicYearUnique(user.collegeId, name, id);
+    const updated = await this.prisma.academicYear.update({
+      where: { id },
+      data: { name, startsOn, endsOn, ...(input.isActive !== undefined ? { isActive: input.isActive } : {}) },
+    });
+    await this.audit.record({ actorId: user.id, action: "academic_year.updated", entityType: "AcademicYear", entityId: id, beforeValue: existing, afterValue: updated, requestId });
+    return updated;
+  }
+
+  async setCurrentAcademicYear(user: AuthPrincipal, id: string, requestId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`academic-year-current:${user.collegeId}`}))`;
+      const year = await tx.academicYear.findFirst({ where: { id, collegeId: user.collegeId, isActive: true, archivedAt: null } });
+      if (!year) throw new BadRequestException("Only an active, unarchived Academic Year can be current.");
+      await tx.academicYear.updateMany({ where: { collegeId: user.collegeId, isCurrent: true, id: { not: id } }, data: { isCurrent: false } });
+      const updated = await tx.academicYear.update({ where: { id }, data: { isCurrent: true } });
+      await this.audit.record({ actorId: user.id, action: "academic_year.set_current", entityType: "AcademicYear", entityId: id, beforeValue: year, afterValue: updated, requestId }, tx);
+      return updated;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async archiveAcademicYear(user: AuthPrincipal, id: string, reason: string | undefined, requestId: string) {
+    const existing = await this.prisma.academicYear.findFirst({ where: { id, collegeId: user.collegeId } });
+    if (!existing) throw new NotFoundException("Academic year not found.");
+    if (existing.isCurrent) throw new ConflictException("Set another Academic Year as current before archiving this one.");
+    if (existing.archivedAt) throw new ConflictException("Academic year is already archived.");
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockAcademicYearSections(tx, user.collegeId, id);
+      const updated = await tx.academicYear.update({ where: { id }, data: { isActive: false, isCurrent: false, archivedAt: now } });
+      await tx.semester.updateMany({ where: { academicYearId: id }, data: { isActive: false } });
+      await tx.section.updateMany({ where: { semester: { academicYearId: id } }, data: { isActive: false } });
+      const activeMemberships = await tx.sectionMembership.findMany({
+        where: { academicYearId: id, isActive: true, status: "ACTIVE" },
+        select: { studentUserId: true, sectionId: true },
+      });
+      await tx.sectionMembership.updateMany({ where: { academicYearId: id, isActive: true, status: "ACTIVE" }, data: { isActive: false, endsOn: this.dateOnly(now), status: "ARCHIVED", changedById: user.id, reason: reason?.trim() || "Academic Year archived" } });
+      if (activeMemberships.length) {
+        await tx.userScope.deleteMany({
+          where: {
+            userId: {
+              in: activeMemberships.map(({ studentUserId }) => studentUserId),
+            },
+            scopeType: "SECTION",
+            scopeId: {
+              in: activeMemberships.map(({ sectionId }) => sectionId),
+            },
+          },
+        });
+      }
+      await this.closeAcademicYearAssignments(tx, id, this.dateOnly(now));
+      await this.audit.record({ actorId: user.id, action: "academic_year.archived", entityType: "AcademicYear", entityId: id, beforeValue: existing, afterValue: updated, reason, requestId }, tx);
+      return updated;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async restoreAcademicYear(user: AuthPrincipal, id: string, requestId: string) {
+    const existing = await this.prisma.academicYear.findFirst({ where: { id, collegeId: user.collegeId } });
+    if (!existing) throw new NotFoundException("Academic year not found.");
+    if (!existing.archivedAt) throw new ConflictException("Academic year is not archived.");
+    const updated = await this.prisma.academicYear.update({ where: { id }, data: { archivedAt: null, isActive: true, isCurrent: false } });
+    await this.audit.record({ actorId: user.id, action: "academic_year.restored", entityType: "AcademicYear", entityId: id, beforeValue: existing, afterValue: updated, requestId });
+    return updated;
+  }
+
   async archiveDepartment(
     user: AuthPrincipal,
     id: string,
@@ -2183,6 +2626,41 @@ export class AcademicService {
           where: { id },
           data: { isActive: false, archivedAt: now, updatedById: user.id },
         });
+        const activeMemberships = await tx.sectionMembership.findMany({
+          where: { departmentId: id, isActive: true, status: "ACTIVE" },
+          select: { studentUserId: true },
+        });
+        if (activeMemberships.length) {
+          const userIds = activeMemberships.map(
+            (membership) => membership.studentUserId,
+          );
+          await tx.sectionMembership.updateMany({
+            where: { departmentId: id, isActive: true, status: "ACTIVE" },
+            data: {
+              isActive: false,
+              endsOn: this.dateOnly(now),
+              status: "ARCHIVED",
+              changedById: user.id,
+              reason: reason?.trim() || "Department archived",
+            },
+          });
+          await tx.userScope.deleteMany({
+            where: {
+              userId: { in: userIds },
+              scopeType: "SECTION",
+              scopeId: {
+                in: (
+                  await tx.section.findMany({
+                    where: {
+                      semester: { programme: { departmentId: id } },
+                    },
+                    select: { id: true },
+                  })
+                ).map((section) => section.id),
+              },
+            },
+          });
+        }
         await this.closeDepartmentAssignments(tx, id, this.dateOnly(now));
         await this.audit.record(
           {
@@ -2545,6 +3023,32 @@ export class AcademicService {
           where: { id },
           data: { isActive: false, archivedAt: now },
         });
+        const activeMemberships = await tx.sectionMembership.findMany({
+          where: { sectionId: id, isActive: true, status: "ACTIVE" },
+          select: { studentUserId: true },
+        });
+        if (activeMemberships.length) {
+          const userIds = activeMemberships.map(
+            (membership) => membership.studentUserId,
+          );
+          await tx.sectionMembership.updateMany({
+            where: { sectionId: id, isActive: true, status: "ACTIVE" },
+            data: {
+              isActive: false,
+              endsOn: this.dateOnly(now),
+              status: "ARCHIVED",
+              changedById: user.id,
+              reason: reason?.trim() || "Section archived",
+            },
+          });
+          await tx.userScope.deleteMany({
+            where: {
+              userId: { in: userIds },
+              scopeType: "SECTION",
+              scopeId: id,
+            },
+          });
+        }
         await this.closeSectionAssignments(tx, id, this.dateOnly(now));
         await this.audit.record(
           {
@@ -2591,10 +3095,12 @@ export class AcademicService {
           where: {
             id: current.semesterId,
             isActive: true,
-            academicYear: { collegeId: user.collegeId, isActive: true },
+            academicYear: { collegeId: user.collegeId, isActive: true, archivedAt: null },
             programme: {
               collegeId: user.collegeId,
               isActive: true,
+              archivedAt: null,
+              degreeTypeMaster: { isActive: true, archivedAt: null },
               department: { isActive: true, archivedAt: null },
             },
           },
@@ -3123,10 +3629,12 @@ export class AcademicService {
                   archivedAt: null,
                   semester: {
                     isActive: true,
-                    academicYear: { collegeId: user.collegeId, isActive: true },
+                    academicYear: { collegeId: user.collegeId, isActive: true, archivedAt: null },
                     programme: {
                       collegeId: user.collegeId,
                       isActive: true,
+                      archivedAt: null,
+                      degreeTypeMaster: { isActive: true, archivedAt: null },
                       department: {
                         collegeId: user.collegeId,
                         isActive: true,
@@ -3287,6 +3795,92 @@ export class AcademicService {
     }
   }
 
+  private async assertDegreeTypeUnique(
+    collegeId: string,
+    rawCode: string,
+    rawName: string,
+    exceptId?: string,
+  ) {
+    const code = rawCode.trim().toUpperCase();
+    const name = rawName.trim();
+    if (!code) throw new BadRequestException("Degree Type code is required.");
+    if (!name) throw new BadRequestException("Degree Type name is required.");
+    const duplicate = await this.prisma.degreeType.findFirst({
+      where: {
+        collegeId,
+        ...(exceptId ? { id: { not: exceptId } } : {}),
+        OR: [
+          { code: { equals: code, mode: "insensitive" } },
+          { name: { equals: name, mode: "insensitive" } },
+        ],
+      },
+      select: { code: true, name: true },
+    });
+    if (duplicate)
+      throw new ConflictException(
+        duplicate.code.toUpperCase() === code
+          ? "Degree Type code already exists."
+          : "Degree Type name already exists in this college.",
+      );
+  }
+
+  private async requireActiveDegreeType(collegeId: string, id: string) {
+    const degreeType = await this.prisma.degreeType.findFirst({
+      where: { id, collegeId, isActive: true, archivedAt: null },
+      select: { id: true, code: true, name: true },
+    });
+    if (!degreeType)
+      throw new BadRequestException("The selected Degree Type is not active.");
+    return degreeType;
+  }
+
+  private assertAcademicYearInput(name: string, startsOn: Date, endsOn: Date) {
+    const normalizedName = name.trim();
+    if (!normalizedName) throw new BadRequestException("Academic Year name is required.");
+    if (Number.isNaN(startsOn.getTime()) || Number.isNaN(endsOn.getTime()))
+      throw new BadRequestException("Invalid Academic Year date format.");
+    if (endsOn <= startsOn)
+      throw new BadRequestException("Academic Year end date must be after its start date.");
+    const match = normalizedName.match(/^(\d{4})-(\d{4})$/u);
+    if (!match) {
+      throw new BadRequestException(
+        "Academic Year name must use YYYY-YYYY, for example 2026-2027.",
+      );
+    }
+    const nameStartYear = Number(match[1]);
+    const nameEndYear = Number(match[2]);
+    if (nameEndYear !== nameStartYear + 1) {
+      throw new BadRequestException(
+        "Academic Year end year must be exactly one year after its start year.",
+      );
+    }
+    if (
+      startsOn.getUTCFullYear() !== nameStartYear ||
+      endsOn.getUTCFullYear() !== nameEndYear
+    ) {
+      throw new BadRequestException(
+        "Academic Year name must match the configured start and end dates.",
+      );
+    }
+  }
+
+  private async assertAcademicYearUnique(
+    collegeId: string,
+    rawName: string,
+    exceptId?: string,
+  ) {
+    const duplicate = await this.prisma.academicYear.findFirst({
+      where: {
+        collegeId,
+        ...(exceptId ? { id: { not: exceptId } } : {}),
+        name: { equals: rawName.trim(), mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+    if (duplicate)
+      throw new ConflictException("This Academic Year already exists in the college.");
+  }
+
   private async assertProgrammeUnique(
     departmentId: string,
     rawCode: string,
@@ -3353,10 +3947,12 @@ export class AcademicService {
       where: {
         id: semesterId,
         isActive: true,
-        academicYear: { collegeId, isActive: true },
+        academicYear: { collegeId, isActive: true, archivedAt: null },
         programme: {
           collegeId,
           isActive: true,
+          archivedAt: null,
+          degreeTypeMaster: { isActive: true, archivedAt: null },
           department: { collegeId, isActive: true, archivedAt: null },
         },
       },
@@ -3458,7 +4054,15 @@ export class AcademicService {
         collegeId: user.collegeId,
         status: "ACTIVE",
         archivedAt: null,
-        studentProfile: { sectionId },
+        studentProfile: { sectionId, academicStatus: "ACTIVE" },
+        sectionMemberships: {
+          some: {
+            sectionId,
+            isActive: true,
+            endsOn: null,
+            status: "ACTIVE",
+          },
+        },
         roles: {
           some: {
             role: {
@@ -3504,6 +4108,22 @@ export class AcademicService {
     return new Date(
       Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()),
     );
+  }
+
+  private engineeringStudyYear(
+    semesterNumber: number,
+    totalSemesters: number,
+  ): number {
+    if (
+      !Number.isInteger(semesterNumber) ||
+      semesterNumber < 1 ||
+      semesterNumber > Math.min(totalSemesters, 8)
+    ) {
+      throw new BadRequestException(
+        "Semester must be within the configured four-year Engineering programme.",
+      );
+    }
+    return Math.ceil(semesterNumber / 2);
   }
 
   private async closeSectionAssignments(
@@ -3745,10 +4365,12 @@ export class AcademicService {
     const semester = await tx.semester.findFirst({
       where: {
         id: semesterId,
-        academicYear: { collegeId, isActive: true },
+        academicYear: { collegeId, isActive: true, archivedAt: null },
         programme: {
           collegeId,
           isActive: true,
+          archivedAt: null,
+          degreeTypeMaster: { isActive: true, archivedAt: null },
           department: { collegeId, isActive: true, archivedAt: null },
         },
       },
@@ -3923,9 +4545,11 @@ export class AcademicService {
           programme: {
             collegeId: actor.collegeId,
             isActive: true,
+            archivedAt: null,
+            degreeTypeMaster: { isActive: true, archivedAt: null },
             department: { isActive: true, archivedAt: null },
           },
-          academicYear: { collegeId: actor.collegeId, isActive: true },
+          academicYear: { collegeId: actor.collegeId, isActive: true, archivedAt: null },
         },
       },
       select: {
@@ -3959,9 +4583,11 @@ export class AcademicService {
           programme: {
             collegeId: actor.collegeId,
             isActive: true,
+            archivedAt: null,
+            degreeTypeMaster: { isActive: true, archivedAt: null },
             department: { isActive: true, archivedAt: null },
           },
-          academicYear: { collegeId: actor.collegeId, isActive: true },
+          academicYear: { collegeId: actor.collegeId, isActive: true, archivedAt: null },
         },
       },
       select: { id: true, semesterId: true },

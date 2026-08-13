@@ -3,6 +3,7 @@ export interface AvsEngineeringAcademicStructureEntry {
   name: string;
   aliases: readonly string[];
   sortOrder: number;
+  degreeTypeCode: "BE" | "BTECH";
   programmeCode: string;
   programmeName: string;
   legacyProgrammeCodes: readonly string[];
@@ -20,9 +21,10 @@ export const AVS_ENGINEERING_ACADEMIC_STRUCTURE = [
     name: "Artificial Intelligence and Machine Learning",
     aliases: ["CSE(AI&ML)", "AI&ML", "AIML", "AI-ML"],
     sortOrder: 10,
-    programmeCode: "BTECH-AIML",
-    programmeName: "B.Tech Artificial Intelligence and Machine Learning",
-    legacyProgrammeCodes: ["CSE(AI&ML)"],
+    degreeTypeCode: "BE",
+    programmeCode: "AIML",
+    programmeName: "Artificial Intelligence and Machine Learning",
+    legacyProgrammeCodes: ["BTECH-AIML", "CSE(AI&ML)"],
     sections: ["A"],
   },
   {
@@ -30,9 +32,10 @@ export const AVS_ENGINEERING_ACADEMIC_STRUCTURE = [
     name: "Artificial Intelligence and Data Science",
     aliases: ["AI&DS", "AIDS", "AI-DS"],
     sortOrder: 20,
-    programmeCode: "BTECH-AIDS",
-    programmeName: "B.Tech Artificial Intelligence and Data Science",
-    legacyProgrammeCodes: [],
+    degreeTypeCode: "BTECH",
+    programmeCode: "AIDS",
+    programmeName: "Artificial Intelligence and Data Science",
+    legacyProgrammeCodes: ["BTECH-AIDS"],
     sections: ["A", "B", "C"],
   },
   {
@@ -40,9 +43,10 @@ export const AVS_ENGINEERING_ACADEMIC_STRUCTURE = [
     name: "Computer Science and Engineering",
     aliases: [],
     sortOrder: 30,
-    programmeCode: "BTECH-CSE",
-    programmeName: "B.Tech Computer Science and Engineering",
-    legacyProgrammeCodes: [],
+    degreeTypeCode: "BE",
+    programmeCode: "CSE",
+    programmeName: "Computer Science and Engineering",
+    legacyProgrammeCodes: ["BTECH-CSE"],
     sections: ["A", "B", "C"],
   },
   {
@@ -50,9 +54,10 @@ export const AVS_ENGINEERING_ACADEMIC_STRUCTURE = [
     name: "Information Technology",
     aliases: [],
     sortOrder: 40,
-    programmeCode: "BTECH-IT",
-    programmeName: "B.Tech Information Technology",
-    legacyProgrammeCodes: [],
+    degreeTypeCode: "BTECH",
+    programmeCode: "IT",
+    programmeName: "Information Technology",
+    legacyProgrammeCodes: ["BTECH-IT"],
     sections: ["A", "B"],
   },
   {
@@ -60,9 +65,10 @@ export const AVS_ENGINEERING_ACADEMIC_STRUCTURE = [
     name: "Electronics and Communication Engineering",
     aliases: [],
     sortOrder: 50,
-    programmeCode: "BTECH-ECE",
-    programmeName: "B.Tech Electronics and Communication Engineering",
-    legacyProgrammeCodes: [],
+    degreeTypeCode: "BE",
+    programmeCode: "ECE",
+    programmeName: "Electronics and Communication Engineering",
+    legacyProgrammeCodes: ["BTECH-ECE"],
     sections: ["A", "B"],
   },
   {
@@ -70,9 +76,10 @@ export const AVS_ENGINEERING_ACADEMIC_STRUCTURE = [
     name: "Electrical and Electronics Engineering",
     aliases: [],
     sortOrder: 60,
-    programmeCode: "BTECH-EEE",
-    programmeName: "B.Tech Electrical and Electronics Engineering",
-    legacyProgrammeCodes: [],
+    degreeTypeCode: "BE",
+    programmeCode: "EEE",
+    programmeName: "Electrical and Electronics Engineering",
+    legacyProgrammeCodes: ["BTECH-EEE"],
     sections: ["A"],
   },
   {
@@ -80,9 +87,10 @@ export const AVS_ENGINEERING_ACADEMIC_STRUCTURE = [
     name: "Mechanical Engineering",
     aliases: ["ME"],
     sortOrder: 70,
-    programmeCode: "BTECH-MECH",
-    programmeName: "B.Tech Mechanical Engineering",
-    legacyProgrammeCodes: [],
+    degreeTypeCode: "BE",
+    programmeCode: "MECH",
+    programmeName: "Mechanical Engineering",
+    legacyProgrammeCodes: ["BTECH-MECH"],
     sections: ["A"],
   },
   {
@@ -90,9 +98,10 @@ export const AVS_ENGINEERING_ACADEMIC_STRUCTURE = [
     name: "Biomedical Engineering",
     aliases: [],
     sortOrder: 80,
-    programmeCode: "BTECH-BME",
-    programmeName: "B.Tech Biomedical Engineering",
-    legacyProgrammeCodes: [],
+    degreeTypeCode: "BE",
+    programmeCode: "BME",
+    programmeName: "Biomedical Engineering",
+    legacyProgrammeCodes: ["BTECH-BME"],
     sections: ["A"],
   },
 ] as const satisfies readonly AvsEngineeringAcademicStructureEntry[];

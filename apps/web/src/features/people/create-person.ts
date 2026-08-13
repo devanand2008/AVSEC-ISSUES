@@ -15,6 +15,12 @@ export const SCOPE_TYPES = [
 
 export type ScopeType = (typeof SCOPE_TYPES)[number];
 export type ProfileType = "student" | "staff" | "none";
+export type AdmissionType =
+  | "REGULAR"
+  | "LATERAL_ENTRY"
+  | "TRANSFER"
+  | "READMISSION"
+  | "OTHER";
 export type CreatePersonField =
   | "collegeIdentityId"
   | "fullName"
@@ -23,6 +29,7 @@ export type CreatePersonField =
   | "roleCodes"
   | "scopes"
   | "departmentId"
+  | "degreeTypeId"
   | "programmeId"
   | "academicYearId"
   | "studyYear"
@@ -33,6 +40,10 @@ export type CreatePersonField =
   | "dateOfBirth"
   | "gender"
   | "admissionYear"
+  | "admissionType"
+  | "expectedGraduationYear"
+  | "personalEmail"
+  | "academicOverrideReason"
   | "employeeId";
 
 export interface ScopeRow {
@@ -52,6 +63,7 @@ export interface CreatePersonFormState {
   roleCodes: string[];
   scopes: ScopeRow[];
   profileType: ProfileType;
+  degreeTypeId: string;
   departmentId: string;
   programmeId: string;
   academicYearId: string;
@@ -63,6 +75,11 @@ export interface CreatePersonFormState {
   dateOfBirth: string;
   gender: string;
   admissionYear: string;
+  admissionType: AdmissionType;
+  expectedGraduationYear: string;
+  personalEmail: string;
+  academicOverride: boolean;
+  academicOverrideReason: string;
   rollNumber: string;
   employeeId: string;
   designation: string;
@@ -84,6 +101,7 @@ export interface CreatePersonPayload {
     issueCategoryId?: string;
   }>;
   studentProfile?: {
+    degreeTypeId: string;
     departmentId: string;
     programmeId: string;
     academicYearId: string;
@@ -95,6 +113,11 @@ export interface CreatePersonPayload {
     dateOfBirth?: string;
     gender?: string;
     admissionYear: number;
+    admissionType: AdmissionType;
+    expectedGraduationYear: number;
+    personalEmail?: string;
+    academicOverride?: boolean;
+    academicOverrideReason?: string;
     rollNumber?: string;
   };
   staffProfile?: {
@@ -129,10 +152,11 @@ export function createBlankPersonForm(): CreatePersonFormState {
     roleCodes: ["STUDENT"],
     scopes: [{ type: "SECTION", targetId: "" }],
     profileType: "student",
+    degreeTypeId: "",
     departmentId: "",
     programmeId: "",
     academicYearId: "",
-    studyYear: "",
+    studyYear: "1",
     semesterId: "",
     sectionId: "",
     studentId: "",
@@ -140,6 +164,11 @@ export function createBlankPersonForm(): CreatePersonFormState {
     dateOfBirth: "",
     gender: "",
     admissionYear: String(new Date().getFullYear()),
+    admissionType: "REGULAR",
+    expectedGraduationYear: String(new Date().getFullYear() + 4),
+    personalEmail: "",
+    academicOverride: false,
+    academicOverrideReason: "",
     rollNumber: "",
     employeeId: "",
     designation: "",
@@ -239,6 +268,7 @@ export function validateCreatePersonForm(
       return "Official college email must be a valid email address.";
     }
     if (
+      !form.degreeTypeId ||
       !form.departmentId ||
       !form.programmeId ||
       !form.academicYearId ||
@@ -246,7 +276,7 @@ export function validateCreatePersonForm(
       !form.semesterId ||
       !form.sectionId
     ) {
-      return "Select the student's department, programme, academic year, study year, semester, and section.";
+      return "Select the student's degree type, department, programme, academic year, study year, semester, and section.";
     }
     if ((form.studentId || form.collegeIdentityId).trim().length < 2) {
       return "Student ID must contain at least 2 characters.";
@@ -255,8 +285,8 @@ export function validateCreatePersonForm(
       return "Register number must contain at least 2 characters.";
     }
     const studyYear = Number(form.studyYear);
-    if (!Number.isInteger(studyYear) || studyYear < 1 || studyYear > 8) {
-      return "Study year must be a whole number from 1 to 8.";
+    if (!Number.isInteger(studyYear) || studyYear < 1 || studyYear > 4) {
+      return "Study year must be one of the four Engineering study years.";
     }
     if (form.dateOfBirth) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(form.dateOfBirth)) {
@@ -274,6 +304,26 @@ export function validateCreatePersonForm(
       admissionYear > 2200
     ) {
       return "Admission year must be a whole year from 1990 to 2200.";
+    }
+    const expectedGraduationYear = Number(form.expectedGraduationYear);
+    if (
+      !Number.isInteger(expectedGraduationYear) ||
+      expectedGraduationYear <= admissionYear ||
+      expectedGraduationYear > 2210
+    ) {
+      return "Expected graduation year must be later than the admission year.";
+    }
+    if (
+      form.personalEmail.trim() &&
+      !/^\S+@\S+\.\S+$/.test(form.personalEmail.trim())
+    ) {
+      return "Personal email must be a valid email address.";
+    }
+    if (
+      form.academicOverride &&
+      form.academicOverrideReason.trim().length < 10
+    ) {
+      return "Enter an academic override reason with at least 10 characters.";
     }
   }
   if (
@@ -305,6 +355,7 @@ export function createPersonErrorField(
   if (value.includes("role")) return "roleCodes";
   if (value.includes("scope")) return "scopes";
   if (value.includes("department")) return "departmentId";
+  if (value.includes("degree type")) return "degreeTypeId";
   if (value.includes("programme")) return "programmeId";
   if (value.includes("academic year")) return "academicYearId";
   if (value.includes("study year")) return "studyYear";
@@ -316,6 +367,19 @@ export function createPersonErrorField(
   if (value.includes("admission year") || value.includes("admissionyear")) {
     return "admissionYear";
   }
+  if (value.includes("admission type") || value.includes("admissiontype")) {
+    return "admissionType";
+  }
+  if (
+    value.includes("expected graduation") ||
+    value.includes("expectedgraduationyear")
+  ) {
+    return "expectedGraduationYear";
+  }
+  if (value.includes("personal email") || value.includes("personalemail")) {
+    return "personalEmail";
+  }
+  if (value.includes("override")) return "academicOverrideReason";
   if (value.includes("register number") || value.includes("registernumber")) {
     return "registerNumber";
   }
@@ -356,6 +420,7 @@ export function buildCreatePersonPayload(
     ...(form.profileType === "student"
       ? {
           studentProfile: {
+            degreeTypeId: form.degreeTypeId,
             departmentId: form.departmentId,
             programmeId: form.programmeId,
             academicYearId: form.academicYearId,
@@ -371,6 +436,18 @@ export function buildCreatePersonPayload(
               ? { gender: optional(form.gender) }
               : {}),
             admissionYear: Number(form.admissionYear),
+            admissionType: form.admissionType,
+            expectedGraduationYear: Number(form.expectedGraduationYear),
+            ...(optional(form.personalEmail)
+              ? { personalEmail: optional(form.personalEmail) }
+              : {}),
+            ...(form.academicOverride
+              ? {
+                  academicOverride: true,
+                  academicOverrideReason:
+                    optional(form.academicOverrideReason) ?? "",
+                }
+              : {}),
             ...(optional(form.rollNumber)
               ? { rollNumber: optional(form.rollNumber) }
               : {}),

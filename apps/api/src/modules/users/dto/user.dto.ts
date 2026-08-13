@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from "class-validator";
-import { AccountStatus, ScopeType } from "../../../generated/prisma/enums";
+import { AccountStatus, AdmissionType, ScopeType, StudentAcademicStatus } from "../../../generated/prisma/enums";
 
 export class UserScopeDto {
   @ApiProperty({ enum: ScopeType }) @IsEnum(ScopeType) type!: ScopeType;
@@ -10,6 +10,7 @@ export class UserScopeDto {
 }
 
 export class StudentProfileDto {
+  @ApiProperty() @IsUUID() degreeTypeId!: string;
   @ApiProperty() @IsUUID() departmentId!: string;
   @ApiProperty() @IsUUID() programmeId!: string;
   @ApiProperty() @IsUUID() sectionId!: string;
@@ -18,10 +19,16 @@ export class StudentProfileDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(60) rollNumber?: string;
   @ApiProperty() @IsString() @Length(2, 60) registerNumber!: string;
   @ApiProperty() @IsUUID() academicYearId!: string;
-  @ApiProperty() @IsInt() @Min(1) @Max(10) studyYear!: number;
+  @ApiProperty() @IsInt() @Min(1) @Max(4) studyYear!: number;
   @ApiProperty() @IsUUID() semesterId!: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateOfBirth?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(30) gender?: string;
+  @ApiPropertyOptional() @IsOptional() @IsEmail() @MaxLength(254) personalEmail?: string;
+  @ApiPropertyOptional({ enum: AdmissionType, default: AdmissionType.REGULAR }) @IsOptional() @IsEnum(AdmissionType) admissionType?: AdmissionType;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1990) @Max(2200) expectedGraduationYear?: number;
+  @ApiPropertyOptional({ enum: StudentAcademicStatus, default: StudentAcademicStatus.ACTIVE }) @IsOptional() @IsEnum(StudentAcademicStatus) academicStatus?: StudentAcademicStatus;
+  @ApiPropertyOptional({ default: false }) @IsOptional() @IsBoolean() academicOverride?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(10, 500) academicOverrideReason?: string;
 }
 
 export class StaffProfileDto {

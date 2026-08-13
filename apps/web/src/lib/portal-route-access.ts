@@ -22,6 +22,10 @@ const portalRouteRules: readonly PortalRouteRule[] = [
     any: ["academic.manage"],
   },
   {
+    prefix: "/admin/people/new",
+    any: ["users.create"],
+  },
+  {
     prefix: "/admin/people",
     any: ["users.read"],
   },

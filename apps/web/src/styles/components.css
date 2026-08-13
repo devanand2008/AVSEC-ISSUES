@@ -569,6 +569,442 @@
 }
 
 /* Person entry and academic assignment */
+.student-registration {
+  width: min(100%, 1040px);
+  min-width: 0;
+}
+
+.student-registration-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.student-registration-heading h2 {
+  margin: var(--space-1) 0;
+  font-size: var(--text-2xl);
+}
+
+.student-registration-heading p,
+.student-registration-panel > header p {
+  margin: 0;
+  color: var(--avs-text-muted);
+}
+
+.student-registration-progress {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.student-registration-progress button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--avs-border);
+  border-radius: var(--radius-md);
+  background: var(--avs-card);
+  color: var(--avs-text-muted);
+  text-align: left;
+}
+
+.student-registration-progress button > span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: var(--radius-full);
+  background: var(--avs-page-alt);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+}
+
+.student-registration-progress strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-xs);
+}
+
+.student-registration-progress .current button {
+  border-color: var(--avs-primary);
+  background: var(--avs-primary-surface);
+  color: var(--avs-primary);
+}
+
+.student-registration-progress .current button > span {
+  background: var(--avs-primary);
+  color: white;
+}
+
+.student-registration-progress .complete button {
+  color: var(--avs-success-dark);
+}
+
+.student-registration-progress .complete button > span {
+  background: var(--avs-success-surface);
+}
+
+.student-registration-card {
+  min-width: 0;
+  overflow: clip;
+}
+
+.student-registration-step-caption {
+  display: none;
+  padding: var(--space-3) var(--space-5) 0;
+  color: var(--avs-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.student-registration-card > .error-box {
+  margin: var(--space-5) var(--space-5) 0;
+}
+
+.student-registration-panel {
+  min-height: 410px;
+  padding: var(--space-6);
+}
+
+.student-registration-panel > header {
+  margin-bottom: var(--space-5);
+}
+
+.student-registration-panel > header h3 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-xl);
+}
+
+.student-registration-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.student-registration-searchable {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.student-registration-override {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--avs-warning-light);
+  border-radius: var(--radius-md);
+  background: var(--avs-warning-surface);
+}
+
+.student-registration-override > small {
+  color: var(--avs-text-muted);
+}
+
+.student-registration-password {
+  grid-column: 1 / -1;
+}
+
+.student-registration-password > div {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.student-registration-password .input {
+  flex: 1 1 260px;
+}
+
+.student-registration-password small.valid {
+  color: var(--avs-success-dark);
+}
+
+.student-registration-first-login {
+  margin-top: var(--space-4);
+}
+
+.student-registration-review {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.student-registration-review > div {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--avs-border-light);
+  border-radius: var(--radius-md);
+  background: var(--avs-page-alt);
+}
+
+.student-registration-review dt {
+  color: var(--avs-text-muted);
+  font-size: var(--text-xs);
+}
+
+.student-registration-review dd {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+  font-weight: var(--weight-semibold);
+}
+
+.student-registration-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--avs-border);
+  background: color-mix(in srgb, var(--avs-card) 96%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.field-error {
+  color: var(--avs-error-dark);
+  font-size: var(--text-xs);
+}
+
+/* Configurable academic masters */
+.academic-master-page,
+.student-promotion-page {
+  min-width: 0;
+}
+
+.academic-master-heading-actions,
+.academic-master-card > header,
+.academic-master-card > footer,
+.academic-master-form > footer,
+.student-promotion-section > header,
+.student-promotion-preview > header,
+.student-promotion-confirm,
+.student-promotion-actions,
+.promotion-student-picker-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.academic-master-heading-actions,
+.academic-master-card > footer,
+.academic-master-form > footer,
+.student-promotion-confirm,
+.student-promotion-actions {
+  flex-wrap: wrap;
+}
+
+.academic-master-success {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--avs-success-surface);
+  color: var(--avs-success-dark);
+}
+
+.academic-master-form {
+  max-width: 820px;
+  margin-bottom: var(--space-5);
+  padding: var(--space-5);
+}
+
+.academic-master-form h2,
+.academic-master-card h2,
+.student-promotion-section h2,
+.student-promotion-preview h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.academic-master-form-grid,
+.student-promotion-grid,
+.student-promotion-preview dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.academic-master-form > footer {
+  justify-content: flex-end;
+  margin-top: var(--space-5);
+}
+
+.academic-master-active {
+  align-self: end;
+  min-height: var(--touch-target);
+}
+
+.academic-master-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr));
+  gap: var(--space-4);
+}
+
+.academic-master-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--space-5);
+}
+
+.academic-master-card > header {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.academic-master-card > header > div:last-child {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.academic-master-card ul {
+  flex: 1;
+  margin: var(--space-4) 0;
+  padding-left: var(--space-5);
+  color: var(--avs-text-muted);
+}
+
+.student-promotion-workspace {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 1080px;
+}
+
+.student-promotion-section,
+.student-promotion-preview {
+  min-width: 0;
+  padding: var(--space-5);
+}
+
+.student-promotion-section > header,
+.student-promotion-preview > header {
+  align-items: flex-start;
+  margin-bottom: var(--space-4);
+}
+
+.student-promotion-section > header > span {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: var(--radius-full);
+  background: var(--avs-primary);
+  color: white;
+  font-weight: var(--weight-bold);
+}
+
+.student-promotion-section header p,
+.student-promotion-preview header p {
+  margin: var(--space-1) 0 0;
+  color: var(--avs-text-muted);
+}
+
+.promotion-student-picker {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--avs-border);
+  border-radius: var(--radius-md);
+}
+
+.promotion-student-picker-head {
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.promotion-student-picker-head > div {
+  display: grid;
+}
+
+.promotion-student-picker-head small {
+  color: var(--avs-text-muted);
+}
+
+.promotion-student-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: var(--space-2);
+  max-height: 340px;
+  overflow: auto;
+}
+
+.promotion-student-list > label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--avs-border-light);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.promotion-student-list span {
+  display: grid;
+  min-width: 0;
+}
+
+.promotion-student-list strong,
+.promotion-student-list small {
+  overflow-wrap: anywhere;
+}
+
+.promotion-student-list small {
+  color: var(--avs-text-muted);
+}
+
+.student-promotion-preview dl {
+  margin: 0;
+}
+
+.student-promotion-preview dl > div {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--avs-page-alt);
+}
+
+.student-promotion-preview dt {
+  color: var(--avs-text-muted);
+  font-size: var(--text-xs);
+}
+
+.student-promotion-preview dd {
+  margin: var(--space-1) 0 0;
+  font-weight: var(--weight-semibold);
+}
+
+.student-promotion-confirm,
+.student-promotion-actions {
+  justify-content: space-between;
+  margin-top: var(--space-5);
+}
+
+.student-promotion-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--avs-border);
+  border-radius: var(--radius-md);
+  background: var(--avs-card);
+}
+
 .person-entry-account-option {
   margin-top: var(--space-4);
 }
@@ -647,6 +1083,106 @@
 }
 
 @media (max-width: 767px) {
+  .student-registration-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .student-registration-heading .avs-btn {
+    width: 100%;
+  }
+
+  .student-registration-progress {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+  }
+
+  .student-registration-progress button {
+    justify-content: center;
+    padding: 6px 3px;
+  }
+
+  .student-registration-progress strong {
+    display: none;
+  }
+
+  .student-registration-step-caption {
+    display: block;
+  }
+
+  .student-registration-panel {
+    min-height: 0;
+    padding: var(--space-4);
+  }
+
+  .student-registration-card > .error-box {
+    margin: var(--space-4) var(--space-4) 0;
+  }
+
+  .student-registration-grid,
+  .student-registration-review {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .student-registration-password {
+    grid-column: auto;
+  }
+
+  .student-registration-actions {
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .student-registration-actions .avs-btn {
+    flex: 1 1 0;
+  }
+
+  body:has(.student-registration) .pwa-install-button,
+  body:has(.student-registration) .avs-bot-launcher,
+  body:has(.student-promotion-page) .pwa-install-button,
+  body:has(.student-promotion-page) .avs-bot-launcher {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .academic-master-heading-actions,
+  .academic-master-form > footer,
+  .academic-master-card > footer,
+  .promotion-student-picker-head,
+  .student-promotion-confirm {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .academic-master-heading-actions .avs-btn,
+  .academic-master-form > footer .avs-btn,
+  .academic-master-card > footer .avs-btn,
+  .student-promotion-confirm .avs-btn {
+    width: 100%;
+  }
+
+  .academic-master-form-grid,
+  .student-promotion-grid,
+  .student-promotion-preview dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .academic-master-form,
+  .academic-master-card,
+  .student-promotion-section,
+  .student-promotion-preview,
+  .promotion-student-picker {
+    padding: var(--space-4);
+  }
+
+  .student-promotion-actions {
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .student-promotion-actions .avs-btn {
+    width: 100%;
+  }
+
   .person-entry-student-fields,
   .student-section-move-form {
     grid-template-columns: minmax(0, 1fr);
@@ -673,6 +1209,17 @@
   .student-section-move-header .avs-btn,
   .student-section-move-actions .avs-btn {
     width: 100%;
+  }
+}
+
+@media (max-width: 430px) {
+  .student-registration .input,
+  .student-registration button {
+    font-size: 16px;
+  }
+
+  .student-registration-actions .avs-btn {
+    padding-inline: var(--space-2);
   }
 }
 
