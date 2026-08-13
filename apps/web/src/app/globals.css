@@ -292,7 +292,20 @@ textarea.input {
   flex: 0 0 auto;
 }
 .password-checks .ok {
-  color: var(--success);
+  color: #166534;
+}
+.change-pw-server-rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.change-pw-server-rule svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
 }
 /* ── Change-password page ─────────────────────────────────────────────── */
 .change-pw-page {
@@ -771,14 +784,19 @@ tbody tr:hover {
   }
 }
 
-@media (max-width: 420px) {
-  body:has(.auth-page) {
+@media (max-width: 780px) {
+  body:has(.auth-page),
+  body:has(.change-pw-page) {
     position: relative;
   }
   body:has(.auth-page) .auth-form-wrap {
     padding-bottom: calc(84px + env(safe-area-inset-bottom));
   }
-  body:has(.auth-page) .pwa-install-button {
+  body:has(.change-pw-page) .change-pw-page {
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+  body:has(.auth-page) .pwa-install-button,
+  body:has(.change-pw-page) .pwa-install-button {
     position: absolute;
   }
 }

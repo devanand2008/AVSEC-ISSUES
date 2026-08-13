@@ -3,37 +3,21 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Eye, EyeOff, KeyRound, ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
-import {
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { CollegeBranding } from "@/components/college-branding";
-import { api, ApiError } from "@/lib/api";
+import {
+  MAX_PASSWORD_LENGTH,
+  MIN_PASSWORD_LENGTH,
+  passwordChangeErrorMessage,
+  passwordChecks,
+  passwordIdentityCheck,
+  passwordInputError,
+} from "@/features/auth/change-password";
+import { api } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
 
-interface PasswordCheck {
-  label: string;
-  ok: boolean;
-}
-
-function passwordChecks(currentPassword: string, newPassword: string): PasswordCheck[] {
-  return [
-    { label: "At least 10 characters", ok: newPassword.length >= 10 },
-    { label: "Uppercase letter", ok: /[A-Z]/.test(newPassword) },
-    { label: "Lowercase letter", ok: /[a-z]/.test(newPassword) },
-    { label: "Number", ok: /\d/.test(newPassword) },
-    { label: "Special character", ok: /[^A-Za-z0-9]/.test(newPassword) },
-    {
-      label: "Different from temporary password",
-      ok: Boolean(newPassword) && newPassword !== currentPassword,
-    },
-  ];
-}
-
-function strengthLevel(checks: PasswordCheck[]): number {
+function strengthLevel(checks: ReturnType<typeof passwordChecks>): number {
   return checks.filter((c) => c.ok).length; // 0-6
 }
 
@@ -75,7 +59,15 @@ export default function ChangePasswordPage() {
   const [busyDisplay, setBusyDisplay] = useState(false); // for UI only
 
   const checks = passwordChecks(currentPassword, newPassword);
-  const strength = strengthLevel(checks);
+  const identityCheck = passwordIdentityCheck(newPassword, {
+    fullName: user?.fullName ?? "",
+    email: user?.email ?? null,
+  });
+  const structuralStrength = strengthLevel(checks);
+  const strength = identityCheck.ok ? structuralStrength : 0;
+  const displayedStrengthLabel = identityCheck.ok
+    ? strengthLabel(structuralStrength)
+    : "Not allowed";
 
   // We only redirect to "/" if:
   //   1. The user is loaded AND
@@ -101,67 +93,69 @@ export default function ChangePasswordPage() {
   }, [loading, router, saved, user]);
 
   const submit = async (event: FormEvent) => {
-      event.preventDefault();
+    event.preventDefault();
 
-      // Double-tap / double-submit guard (ref-based, not state-based)
-      if (busyRef.current) return;
+    // Double-tap / double-submit guard (ref-based, not state-based)
+    if (busyRef.current) return;
 
-      if (newPassword !== confirm) {
-        setError("The new passwords do not match.");
-        return;
-      }
-      if (checks.some((check) => !check.ok)) {
-        setError("Complete every password requirement before saving.");
-        return;
-      }
+    const inputError = passwordInputError(
+      currentPassword,
+      newPassword,
+      confirm,
+    );
+    if (inputError) {
+      setError(inputError);
+      return;
+    }
+    if (newPassword !== confirm) {
+      setError("The new passwords do not match.");
+      return;
+    }
+    if (checks.some((check) => !check.ok) || !identityCheck.ok) {
+      setError("Complete every password requirement before saving.");
+      return;
+    }
 
-      busyRef.current = true;
-      setBusyDisplay(true);
-      setError("");
+    busyRef.current = true;
+    setBusyDisplay(true);
+    setError("");
 
-      try {
-        // 1. Send the change-password request to the backend.
-        //    The backend atomically hashes the new password, sets
-        //    mustChangePassword=false, sets firstLoginCompletedAt,
-        //    revokes old sessions and returns fresh tokens + updated user.
-        const result = await api.post<{ user: User }>(
-          "/auth/change-password",
-          { currentPassword, newPassword },
-        );
+    try {
+      // 1. Send the change-password request to the backend.
+      //    The backend atomically hashes the new password, sets
+      //    mustChangePassword=false, sets firstLoginCompletedAt,
+      //    revokes old sessions and returns fresh tokens + updated user.
+      const result = await api.post<{ user: User }>("/auth/change-password", {
+        currentPassword,
+        newPassword,
+      });
 
-        // 2. Immediately update the React Query cache with the server response.
-        //    This is the authoritative state; do not construct it locally.
-        await client.cancelQueries({ queryKey: ["me"] });
-        client.setQueryData(["me"], result.user);
+      // 2. Immediately update the React Query cache with the server response.
+      //    This is the authoritative state; do not construct it locally.
+      await client.cancelQueries({ queryKey: ["me"] });
+      client.setQueryData(["me"], result.user);
 
-        // 3. Mark as saved BEFORE the async refetch so the useEffect above
-        //    does not incorrectly trigger a re-redirect if the user has
-        //    mustChangePassword=false in the new response.
-        setSaved(true);
+      // 3. Mark as saved BEFORE the async refetch so the useEffect above
+      //    does not incorrectly trigger a re-redirect if the user has
+      //    mustChangePassword=false in the new response.
+      setSaved(true);
 
-        // 4. Refetch in the background to sync any other query consumers.
-        //    We do not await this because the cache is already correct.
-        void refetch();
+      // 4. Refetch in the background to sync any other query consumers.
+      //    We do not await this because the cache is already correct.
+      void refetch();
 
-        // 5. Navigate away. router.replace is synchronous in Next.js App
-        //    Router and does not cause a page reload, so BFCache is not
-        //    involved here.
-        router.replace(result.user.allowedNextRoute ?? "/");
-      } catch (caught: unknown) {
-        const status = caught instanceof ApiError ? caught.status : undefined;
-        if (status === 400) {
-          setError(caught instanceof ApiError ? caught.message : "Check the password requirements and try again.");
-        } else if (status === 401) {
-          setError("Your session expired or temporary password was incorrect.");
-        } else {
-          setError("Password change failed. Please try again.");
-        }
-        busyRef.current = false;
-        setBusyDisplay(false);
-      }
-      // Note: we do NOT reset busyRef.current = false on success because we
-      // immediately navigate away. Resetting it would allow a second tap to
-      // fire during navigation.
+      // 5. Navigate away. router.replace is synchronous in Next.js App
+      //    Router and does not cause a page reload, so BFCache is not
+      //    involved here.
+      router.replace(result.user.allowedNextRoute ?? "/");
+    } catch (caught: unknown) {
+      setError(passwordChangeErrorMessage(caught));
+      busyRef.current = false;
+      setBusyDisplay(false);
+    }
+    // Note: we do NOT reset busyRef.current = false on success because we
+    // immediately navigate away. Resetting it would allow a second tap to
+    // fire during navigation.
   };
 
   if (loading || !user || (!user.mustChangePassword && !saved)) {
@@ -172,7 +166,10 @@ export default function ChangePasswordPage() {
             <CollegeBranding />
           </div>
           <div className="change-pw-already">
-            <CheckCircle2 size={22} style={{ color: user ? "var(--success)" : "var(--muted)" }} />
+            <CheckCircle2
+              size={22}
+              style={{ color: user ? "var(--success)" : "var(--muted)" }}
+            />
             <strong>
               {user
                 ? "Your password has already been changed."
@@ -195,7 +192,9 @@ export default function ChangePasswordPage() {
           <CollegeBranding />
         </div>
 
-        <span className="eyebrow" style={{ marginTop: 4 }}>First sign-in</span>
+        <span className="eyebrow" style={{ marginTop: 4 }}>
+          First sign-in
+        </span>
         <h1 className="change-pw-title">Create a private password</h1>
         <p className="change-pw-sub">
           Your temporary password must be replaced before you continue.
@@ -227,6 +226,7 @@ export default function ChangePasswordPage() {
               onVisibleChange={() => setShowCurrent((v) => !v)}
               onChange={setCurrent}
               autoComplete="current-password"
+              maxLength={MAX_PASSWORD_LENGTH}
               disabled={busyDisplay || saved}
             />
           </div>
@@ -241,7 +241,8 @@ export default function ChangePasswordPage() {
               onVisibleChange={() => setShowNew((v) => !v)}
               onChange={setNew}
               autoComplete="new-password"
-              minLength={10}
+              minLength={MIN_PASSWORD_LENGTH}
+              maxLength={MAX_PASSWORD_LENGTH}
               disabled={busyDisplay || saved}
             />
 
@@ -266,7 +267,7 @@ export default function ChangePasswordPage() {
                   className="change-pw-strength-label"
                   style={{ color: strengthColor(strength) }}
                 >
-                  {strengthLabel(strength)}
+                  {displayedStrengthLabel}
                 </span>
               </div>
             )}
@@ -274,11 +275,37 @@ export default function ChangePasswordPage() {
             {/* Checklist */}
             <div className="password-checks">
               {checks.map((check) => (
-                <span className={check.ok ? "ok" : ""} key={check.label}>
-                  <CheckCircle2 size={14} />
+                <span
+                  className={check.ok ? "ok" : ""}
+                  key={check.label}
+                  aria-label={`${check.label}: ${check.ok ? "met" : "not met"}`}
+                >
+                  <CheckCircle2 size={14} aria-hidden="true" />
                   {check.label}
+                  <span className="sr-only">
+                    {check.ok ? " requirement met" : " requirement not met"}
+                  </span>
                 </span>
               ))}
+              <span
+                className={identityCheck.ok ? "ok" : ""}
+                aria-label={`${identityCheck.label}: ${identityCheck.ok ? "met" : "not met"}`}
+              >
+                <CheckCircle2 size={14} aria-hidden="true" />
+                {identityCheck.label}
+                <span className="sr-only">
+                  {identityCheck.ok
+                    ? " requirement met"
+                    : " requirement not met"}
+                </span>
+              </span>
+            </div>
+            <div className="change-pw-server-rule" role="note">
+              <ShieldCheck size={14} aria-hidden="true" />
+              <span>
+                Do not include your college ID. This additional identity check
+                is securely verified when you save.
+              </span>
             </div>
           </div>
 
@@ -292,10 +319,13 @@ export default function ChangePasswordPage() {
               onVisibleChange={() => setShowConfirm((v) => !v)}
               onChange={setConfirm}
               autoComplete="new-password"
+              maxLength={MAX_PASSWORD_LENGTH}
               disabled={busyDisplay || saved}
             />
             {confirm.length > 0 && newPassword !== confirm && (
-              <small className="change-pw-mismatch">Passwords do not match.</small>
+              <small className="change-pw-mismatch">
+                Passwords do not match.
+              </small>
             )}
           </div>
 
@@ -312,7 +342,10 @@ export default function ChangePasswordPage() {
 
           {/* Security note */}
           <div className="change-pw-security-note">
-            <ShieldCheck size={16} style={{ color: "var(--success)", flexShrink: 0 }} />
+            <ShieldCheck
+              size={16}
+              style={{ color: "var(--success)", flexShrink: 0 }}
+            />
             <small>
               Your new password is encrypted and never stored in plain text.
               Temporary passwords cannot be reused after this step.
@@ -330,6 +363,7 @@ function PasswordInput({
   visible,
   autoComplete,
   minLength,
+  maxLength,
   disabled,
   onChange,
   onVisibleChange,
@@ -339,6 +373,7 @@ function PasswordInput({
   visible: boolean;
   autoComplete: string;
   minLength?: number;
+  maxLength?: number;
   disabled?: boolean;
   onChange: (value: string) => void;
   onVisibleChange: () => void;
@@ -351,6 +386,7 @@ function PasswordInput({
         type={visible ? "text" : "password"}
         autoComplete={autoComplete}
         minLength={minLength}
+        maxLength={maxLength}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         required
