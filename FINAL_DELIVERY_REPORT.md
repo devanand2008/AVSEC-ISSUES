@@ -1,5 +1,47 @@
 # Final Delivery Report
 
+## 2026-08-14 Staff Feedback QR Fix - Production Accepted
+
+**State:** LIVE AND VERIFIED
+
+**Executable release:** `30b46ba793eed05db1907c101d62908bffc089bc`
+
+**Render deployment:** `dep-d9vk2nbl550s73ankc6g`
+
+The existing AVS application now provides an idempotent Staff Feedback QR panel
+on eligible People profiles. Production created exactly four targets and four
+QR codes: three Staff and one Vice Principal. All four idempotency rechecks
+reused the same records; PNG and poster-PDF downloads passed for every QR; the
+panel and preview passed at 320px and 1366px without horizontal overflow.
+
+The exact deployment reports no pending migrations; `/health`, `/health/live`,
+`/health/ready`, and `/health/ready/dependencies` returned 200. The stabilized
+post-live log interval contained zero errors, warnings, 5xx responses, database,
+Redis, storage, authentication-error, or crash signals. The only 401 was the
+intentional post-logout revocation check.
+
+The backend rejects inactive staff and stale role/type mappings during browse,
+scan, ticket issuance, and submission. Existing legacy QR tokens are preserved,
+while rendered/downloaded URLs are rebuilt on the current production HTTPS
+origin after SHA-256 verification. The protected Main Admin acceptance session
+logged out successfully and returned 401 after logout.
+
+## 2026-08-14 Independent Full Product QA - Release Blocked
+
+**Decision:** PRODUCTION RELEASE BLOCKED against the 35-section full-product
+acceptance specification.
+
+The deployed service remains live and healthy, and the clean build, student
+registration, persistence, responsive geometry, security probes, and fresh
+isolated-restore backup passed. Full-product approval is withheld because phone
+logout, Regulations, Timetable, Preventive Maintenance, complete Area/Asset
+lifecycle, and AVS Learn unpublish are not acceptance-ready. The former
+People-profile QR blocker is resolved by the production release above.
+
+See [the detailed independent QA report](docs/final-independent-qa-report.md)
+for executed evidence, skipped tests, severity, backup details, and the final
+decision.
+
 ## 2026-08-14 Student Registration Academic Fix — Production Accepted
 
 **State:** LIVE, VERIFIED, AND TEST DATA CLEANED
