@@ -52,6 +52,18 @@ export class AdminFeedbackController {
   }
 
   @Permissions("feedback.qr.manage")
+  @Get("staff/:id/qr")
+  staffQr(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string) {
+    return this.feedback.staffQr(user, id);
+  }
+
+  @Permissions("feedback.qr.manage", "feedback.targets.manage")
+  @Post("staff/:id/qr/ensure")
+  ensureStaffQr(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
+    return this.feedback.ensureStaffQr(user, id, requestId);
+  }
+
+  @Permissions("feedback.qr.manage")
   @Get("qr")
   qr(
     @CurrentUser() user: AuthPrincipal,

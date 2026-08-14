@@ -22,6 +22,7 @@ import {
   isRestoreTestedPreDeletionBackup,
 } from "@/features/people/people-api";
 import { StudentSectionMove } from "@/features/people/student-section-move";
+import { StaffFeedbackQrPanel } from "@/features/people/staff-feedback-qr";
 import { api } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -112,6 +113,11 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
     user?.permissions.includes("academic.manage") ?? false;
   const canDeletePermanently = user?.permissions.includes("users.delete_permanent") ?? false;
   const canManageBackups = user?.permissions.includes("backups.manage") ?? false;
+  const canManageFeedbackQr = Boolean(
+    user?.permissions.includes("feedback.qr.manage")
+      && user.permissions.includes("feedback.targets.manage"),
+  );
+  const canDownloadFeedbackQr = user?.permissions.includes("feedback.qr.download") ?? false;
 
   const person = useQuery({
     queryKey: ["person", publicId],
@@ -239,6 +245,17 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
           </div>
         </div>
       </div>
+
+      {p.staffProfile && (
+        <StaffFeedbackQrPanel
+          staffPublicId={p.publicId}
+          staffName={p.fullName}
+          accountStatus={p.status}
+          hasStaffProfile={Boolean(p.staffProfile)}
+          canManage={canManageFeedbackQr}
+          canDownload={canDownloadFeedbackQr}
+        />
+      )}
 
       {/* Tabs */}
       <div className="avs-tabs" style={{ marginBottom: "var(--space-6)" }}>

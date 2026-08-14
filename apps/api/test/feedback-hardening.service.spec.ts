@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import type { AuthPrincipal } from "../src/common/http/request-context";
 import {
   FeedbackService,
@@ -60,7 +60,7 @@ function ticketClaims(overrides: Partial<FeedbackSubmissionTicketClaims> = {}): 
   };
 }
 
-function feedbackTarget() {
+function feedbackTarget(staffStatus = "ACTIVE") {
   return {
     id: ids.target,
     targetUuid: ids.targetUuid,
@@ -71,7 +71,15 @@ function feedbackTarget() {
     serviceCode: null,
     isActive: true,
     departmentId: ids.department,
-    staff: null,
+    staff: {
+      publicId: "00000000-0000-0000-0000-000000000019",
+      collegeIdentityId: "FAC-001",
+      fullName: "Dr. Feedback",
+      profilePhotoKey: null,
+      status: staffStatus,
+      staffProfile: { employeeId: "EMP-001", designation: "Faculty", department: { id: ids.department, code: "CSE", name: "Computer Science" } },
+      roles: [{ role: { code: "FACULTY" } }],
+    },
     department: { id: ids.department, code: "CSE", name: "Computer Science" },
     campus: null,
     block: null,
@@ -193,8 +201,39 @@ describe("feedback submission tickets", () => {
     expect(prisma.feedbackTarget.findFirst).not.toHaveBeenCalled();
   });
 });
-
 describe("FeedbackService submission hardening", () => {
+  it("rejects a valid ticket when the linked staff account became inactive", async () => {
+    const { service, prisma } = setup();
+    prisma.studentProfile.findUnique.mockResolvedValue({
+      id: ids.user,
+      section: {
+        semesterId: ids.semester,
+        semester: { academicYearId: ids.academicYear },
+      },
+    });
+    prisma.feedbackTarget.findFirst.mockResolvedValue(
+      feedbackTarget("ARCHIVED"),
+    );
+    const submissionTicket = signFeedbackSubmissionTicket(
+      ticketClaims(),
+      secret,
+    );
+
+    await expect(
+      service.submit(
+        student,
+        {
+          submissionTicket,
+          targetId: ids.targetUuid,
+          ratings: [{ questionId: ids.questionOne, rating: 5 }],
+        },
+        "request-inactive-staff",
+        {},
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.feedbackQuestion.findMany).not.toHaveBeenCalled();
+  });
+
   it("rechecks QR status on submit so a disabled QR ticket cannot bypass revocation", async () => {
     const { service, prisma } = setup();
     prisma.studentProfile.findUnique.mockResolvedValue({

@@ -51,6 +51,29 @@ const locationTargetTypes = new Set<FeedbackTargetType>([
   "OTHER_SERVICE",
 ]);
 const staffTargetTypes = new Set<FeedbackTargetType>(["STAFF", "HOD", "PRINCIPAL", "VICE_PRINCIPAL"]);
+const staffTargetTypeList: FeedbackTargetType[] = [
+  "STAFF",
+  "HOD",
+  "PRINCIPAL",
+  "VICE_PRINCIPAL",
+];
+const feedbackStaffRoleCodes = [
+  "PRINCIPAL",
+  "VICE_PRINCIPAL",
+  "HOD",
+  "CLASS_COORDINATOR",
+  "FACULTY",
+  "MAINTENANCE_ADMIN",
+  "MAINTENANCE_SUPERVISOR",
+  "MAINTENANCE_STAFF",
+  "ELECTRICIAN",
+  "PLUMBER",
+  "IT_SUPPORT",
+  "LAB_TECHNICIAN",
+  "HOUSEKEEPING",
+  "SECURITY",
+  "OTHER_RESPONSIBLE",
+] as const;
 const studentManualTargetTypes = [...staffTargetTypes];
 const submissionTicketTtlSeconds = 10 * 60;
 const terminalFeedbackStatuses = new Set<FeedbackSubmissionStatus>(["RESOLVED", "REJECTED", "ARCHIVED"]);
@@ -68,7 +91,6 @@ interface RequestFingerprint {
   ip?: string;
   userAgent?: string;
 }
-
 export interface FeedbackSubmissionTicketClaims {
   version: 1;
   purpose: "feedback-submit";
@@ -103,17 +125,85 @@ interface PublicTargetPayload {
     collegeIdentityId: string;
     fullName: string;
     profilePhotoKey: string | null;
+    status: string;
     staffProfile: {
       employeeId: string;
       designation: string | null;
       department: { id: string; code: string; name: string } | null;
     } | null;
+    roles: Array<{ role: { code: string } }>;
   } | null;
   department?: { id: string; code: string; name: string } | null;
   campus?: { id: string; code: string; name: string } | null;
   block?: { id: string; code: string; name: string } | null;
   floor?: { id: string; code: string; name: string; level: number } | null;
   room?: { id: string; code: string; name: string; roomNumber: string | null; roomType: string } | null;
+}
+
+type FeedbackStaffPrismaClient = Pick<
+  Prisma.TransactionClient,
+  "user" | "feedbackTarget" | "feedbackQrCode"
+>;
+
+export interface FeedbackStaffQrContract {
+  staff: {
+    publicId: string;
+    staffId: string;
+    name: string;
+    designation: string | null;
+    department: { id: string; code: string; name: string } | null;
+    targetType: FeedbackTargetType;
+  };
+  target: {
+    id: string;
+    targetType: FeedbackTargetType;
+    targetName: string;
+    description: string | null;
+    isActive: boolean;
+  } | null;
+  qr: {
+    id: string;
+    secureUrl: string;
+    status: FeedbackQrStatus;
+    expiryDate: Date | null;
+    createdAt: Date;
+  } | null;
+  created?: { target: boolean; qr: boolean };
+}
+
+interface EligibleFeedbackStaff {
+  id: string;
+  publicId: string;
+  collegeIdentityId: string;
+  fullName: string;
+  staffProfile: {
+    employeeId: string;
+    designation: string | null;
+    departmentId: string | null;
+    department: { id: string; code: string; name: string } | null;
+  };
+  targetType: FeedbackTargetType;
+}
+
+interface FeedbackStaffTargetRow {
+  id: string;
+  targetUuid: string;
+  targetType: FeedbackTargetType;
+  targetName: string;
+  description: string | null;
+  isActive: boolean;
+  departmentId: string | null;
+  updatedAt: Date;
+}
+
+interface FeedbackStaffQrRow {
+  id: string;
+  qrUuid: string;
+  qrUrl: string;
+  secureTokenHash: string;
+  status: FeedbackQrStatus;
+  expiryDate: Date | null;
+  createdAt: Date;
 }
 
 interface ManagementSubmissionPayload {
@@ -211,7 +301,7 @@ export class FeedbackService {
       orderBy: [{ targetType: "asc" }, { targetName: "asc" }],
       take: 100,
     });
-    return targets.map((target) => this.publicTarget(target));
+    return targets.filter((target) => !this.staffTargetUnavailable(target)).map((target) => this.publicTarget(target));
   }
 
   async target(user: AuthPrincipal, targetUuid: string) {
@@ -221,7 +311,7 @@ export class FeedbackService {
       ? { collegeId: user.collegeId, targetType: { in: studentManualTargetTypes } }
       : await this.targetDiscoveryWhere(user);
     const target = await this.prisma.feedbackTarget.findFirst({ where: { targetUuid, isActive: true, AND: [visibility] }, include: this.targetInclude() });
-    if (!target) throw new NotFoundException("Feedback target not found.");
+    if (!target || this.staffTargetUnavailable(target)) throw new NotFoundException("Feedback target not found.");
     if (student && !staffTargetTypes.has(target.targetType)) {
       throw new ForbiddenException("Scan this target's active QR code before submitting feedback.");
     }
@@ -248,7 +338,7 @@ export class FeedbackService {
       where: { id: ticket.targetId, targetUuid: input.targetId, collegeId: user.collegeId, isActive: true },
       include: this.targetInclude(),
     });
-    if (!target) throw new NotFoundException("Feedback target not found.");
+    if (!target || this.staffTargetUnavailable(target)) throw new NotFoundException("Feedback target not found.");
     let submittedQr: { id: string; status: FeedbackQrStatus; expiryDate: Date | null; target: { isActive: boolean } } | null = null;
     if (ticket.qrCodeId) {
       submittedQr = await this.prisma.feedbackQrCode.findFirst({
@@ -256,7 +346,7 @@ export class FeedbackService {
         select: { id: true, status: true, expiryDate: true, target: { select: { isActive: true } } },
       });
       if (!submittedQr) throw new BadRequestException("The feedback QR submission ticket is no longer valid.");
-      const qrError = this.qrValidationError(submittedQr);
+      const qrError = this.qrValidationError({ ...submittedQr, target });
       if (qrError) throw new BadRequestException(qrError);
     } else if (!staffTargetTypes.has(target.targetType)) {
       throw new ForbiddenException("Scan this target's active QR code before submitting feedback.");
@@ -597,10 +687,71 @@ export class FeedbackService {
         lastScannedAt: qr.lastScannedAt,
         createdAt: qr.createdAt,
         createdBy: qr.createdBy?.fullName ?? null,
-        secureUrl: qr.qrUrl,
+        secureUrl: this.canonicalFeedbackQrUrl(qr),
       })),
       meta: { page: query.page, pageSize: query.pageSize, total, pageCount: Math.ceil(total / query.pageSize) },
     };
+  }
+
+  async staffQr(
+    user: AuthPrincipal,
+    staffPublicId: string,
+  ): Promise<FeedbackStaffQrContract> {
+    this.requireAny(user, ["feedback.qr.manage"]);
+    const now = new Date();
+    const staff = await this.eligibleFeedbackStaff(
+      this.prisma,
+      user.collegeId,
+      staffPublicId,
+      now,
+    );
+    if (!staff)
+      throw new NotFoundException("Eligible active staff account not found.");
+    const target = await this.prisma.feedbackTarget.findFirst({
+      where: {
+        collegeId: user.collegeId,
+        staffUserId: staff.id,
+        targetType: { in: staffTargetTypeList },
+      },
+      orderBy: [{ isActive: "desc" }, { updatedAt: "desc" }],
+      select: this.feedbackStaffTargetSelect(),
+    });
+    const qrRows = target
+      ? await this.prisma.feedbackQrCode.findMany({
+          where: { targetId: target.id },
+          orderBy: { createdAt: "desc" },
+          select: this.feedbackStaffQrSelect(),
+        })
+      : [];
+    return this.feedbackStaffQrContract(
+      staff,
+      target,
+      this.preferredStaffQr(qrRows, now),
+    );
+  }
+
+  async ensureStaffQr(
+    user: AuthPrincipal,
+    staffPublicId: string,
+    requestId: string,
+  ): Promise<FeedbackStaffQrContract> {
+    this.requireAll(user, ["feedback.qr.manage", "feedback.targets.manage"]);
+    const result = await this.ensureStaffQrRecord(user, staffPublicId);
+    await this.audit.record({
+      actorId: user.id,
+      action: "feedback.staff_qr_ensured",
+      entityType: "FeedbackQrCode",
+      entityId: result.qrId,
+      afterValue: {
+        staffPublicId,
+        targetUuid: result.contract.target?.id,
+        qrUuid: result.contract.qr?.id,
+        targetType: result.contract.staff.targetType,
+        created: result.contract.created,
+      },
+      requestId,
+    });
+    return result.contract;
   }
 
   async createTarget(user: AuthPrincipal, input: CreateFeedbackTargetDto, requestId: string) {
@@ -651,12 +802,14 @@ export class FeedbackService {
     if (!target) throw new NotFoundException("Feedback target not found.");
     const qr = await this.createQrForTarget(target.id, user.id, input.expiryDate ? new Date(input.expiryDate) : undefined);
     await this.audit.record({ actorId: user.id, action: "feedback.qr_created", entityType: "FeedbackQrCode", entityId: qr.id, afterValue: { qrUuid: qr.qrUuid, targetUuid: target.targetUuid }, requestId });
-    return { id: qr.qrUuid, qrId: qr.qrUuid, secureUrl: qr.qrUrl, targetName: target.targetName, status: qr.status, expiryDate: qr.expiryDate };
+    return { id: qr.qrUuid, qrId: qr.qrUuid, secureUrl: this.canonicalFeedbackQrUrl(qr), targetName: target.targetName, status: qr.status, expiryDate: qr.expiryDate };
   }
 
   async bulkGenerate(user: AuthPrincipal, input: BulkGenerateQrDto, requestId: string) {
     this.requireAny(user, ["feedback.qr.manage", "feedback.targets.manage"]);
     const allowed = new Set(input.targetTypes ?? Object.values(FeedbackTargetType));
+    const now = new Date();
+    const activeStaffRoleWhere = this.activeFeedbackStaffRoleWhere(now);
     let targetsCreated = 0;
     let qrCreated = 0;
     const ensureTarget = async (data: Omit<Prisma.FeedbackTargetUncheckedCreateInput, "id" | "targetUuid" | "createdAt" | "updatedAt" | "collegeId" | "createdById">) => {
@@ -683,16 +836,27 @@ export class FeedbackService {
       }
     };
     const [staff, departments, blocks, floors, rooms] = await Promise.all([
-      this.prisma.staffProfile.findMany({ where: { collegeId: user.collegeId, user: { status: "ACTIVE" } }, include: { user: { include: { roles: { include: { role: true } } } }, department: true } }),
+      this.prisma.user.findMany({
+        where: { collegeId: user.collegeId, status: "ACTIVE", staffProfile: { isNot: null }, roles: { some: activeStaffRoleWhere } },
+        select: { publicId: true, roles: { where: activeStaffRoleWhere, select: { role: { select: { code: true } } } } },
+      }),
       this.prisma.department.findMany({ where: { collegeId: user.collegeId, isActive: true } }),
       this.prisma.block.findMany({ where: { isActive: true, campus: { collegeId: user.collegeId } }, include: { campus: true } }),
       this.prisma.floor.findMany({ where: { isActive: true, block: { campus: { collegeId: user.collegeId } } }, include: { block: { include: { campus: true } } } }),
       this.prisma.room.findMany({ where: { isActive: true, floor: { block: { campus: { collegeId: user.collegeId } } } }, include: { floor: { include: { block: true } } } }),
     ]);
     for (const profile of staff) {
-      const roles = profile.user.roles.map((role) => role.role.code);
-      const targetType: FeedbackTargetType = roles.includes("PRINCIPAL") ? "PRINCIPAL" : roles.includes("VICE_PRINCIPAL") ? "VICE_PRINCIPAL" : roles.includes("HOD") ? "HOD" : "STAFF";
-      await ensureTarget({ targetType, staffUserId: profile.userId, departmentId: profile.departmentId, targetName: profile.user.fullName, description: profile.designation ?? undefined, isActive: true });
+      const targetType = this.feedbackTargetTypeForRoles(profile.roles.map((assignment) => assignment.role.code));
+      if (!targetType || !allowed.has(targetType)) continue;
+      try {
+        const ensured = await this.ensureStaffQrRecord(user, profile.publicId);
+        if (ensured.contract.created?.target) targetsCreated += 1;
+        if (ensured.contract.created?.qr) qrCreated += 1;
+      } catch (error) {
+        // A staff account may become ineligible between discovery and its locked ensure transaction.
+        if (error instanceof NotFoundException) continue;
+        throw error;
+      }
     }
     for (const department of departments) await ensureTarget({ targetType: "DEPARTMENT", departmentId: department.id, targetName: department.name, description: department.code, isActive: true });
     for (const block of blocks) {
@@ -741,7 +905,7 @@ export class FeedbackService {
       data: { secureTokenHash: this.hashToken(token), qrUrl: this.webFeedbackUrl(token), status: "ACTIVE", scanCount: 0, lastScannedAt: null },
     });
     await this.audit.record({ actorId: user.id, action: "feedback.qr_regenerated", entityType: "FeedbackQrCode", entityId: qr.id, afterValue: { qrUuid, targetUuid: qr.target.targetUuid }, requestId });
-    return { id: updated.qrUuid, secureUrl: updated.qrUrl, status: updated.status };
+    return { id: updated.qrUuid, secureUrl: this.canonicalFeedbackQrUrl(updated), status: updated.status };
   }
 
   async downloadQr(user: AuthPrincipal, qrUuid: string, format: string, requestId: string) {
@@ -751,22 +915,23 @@ export class FeedbackService {
     }
     const qr = await this.prisma.feedbackQrCode.findFirst({ where: { qrUuid, target: { collegeId: user.collegeId } }, include: { target: { include: this.targetInclude() } } });
     if (!qr) throw new NotFoundException("QR code not found.");
+    const canonicalUrl = this.canonicalFeedbackQrUrl(qr);
     const baseName = `${qr.target.targetName.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "feedback-qr"}-${qr.qrUuid}`;
     await this.audit.record({ actorId: user.id, action: "feedback.qr_downloaded", entityType: "FeedbackQrCode", entityId: qr.id, afterValue: { qrUuid, targetType: qr.target.targetType, format }, requestId });
     if (format === "svg") {
-      return { fileName: `${baseName}.svg`, contentType: "image/svg+xml; charset=utf-8", body: Buffer.from(await QRCode.toString(qr.qrUrl, { type: "svg", margin: 2, width: 960 }), "utf8") };
+      return { fileName: `${baseName}.svg`, contentType: "image/svg+xml; charset=utf-8", body: Buffer.from(await QRCode.toString(canonicalUrl, { type: "svg", margin: 2, width: 960 }), "utf8") };
     }
     if (format === "pdf") {
       return {
         fileName: `${baseName}-poster.pdf`,
         contentType: "application/pdf",
-        body: await createQrPosterPdf(qr.qrUrl, qr.target),
+        body: await createQrPosterPdf(canonicalUrl, qr.target),
       };
     }
     if (format === "poster") {
       return { fileName: `${baseName}-poster.svg`, contentType: "image/svg+xml; charset=utf-8", body: Buffer.from(await this.posterSvg(qr), "utf8") };
     }
-    return { fileName: `${baseName}.png`, contentType: "image/png", body: await QRCode.toBuffer(qr.qrUrl, { type: "png", margin: 2, width: 960 }) };
+    return { fileName: `${baseName}.png`, contentType: "image/png", body: await QRCode.toBuffer(canonicalUrl, { type: "png", margin: 2, width: 960 }) };
   }
 
   async listSubmissions(user: AuthPrincipal, query: FeedbackSubmissionQueryDto) {
@@ -1195,6 +1360,280 @@ export class FeedbackService {
     return submission;
   }
 
+  private activeFeedbackStaffRoleWhere(now: Date): Prisma.UserRoleWhereInput {
+    return {
+      validFrom: { lte: now },
+      OR: [{ validUntil: null }, { validUntil: { gt: now } }],
+      role: { isActive: true, code: { in: [...feedbackStaffRoleCodes] } },
+    };
+  }
+
+  private feedbackTargetTypeForRoles(
+    roleCodes: readonly string[],
+  ): FeedbackTargetType | null {
+    if (roleCodes.includes("PRINCIPAL")) return "PRINCIPAL";
+    if (roleCodes.includes("VICE_PRINCIPAL")) return "VICE_PRINCIPAL";
+    if (roleCodes.includes("HOD")) return "HOD";
+    if (roleCodes.length) return "STAFF";
+    return null;
+  }
+
+  private async eligibleFeedbackStaff(
+    client: FeedbackStaffPrismaClient,
+    collegeId: string,
+    staffPublicId: string,
+    now: Date,
+  ): Promise<EligibleFeedbackStaff | null> {
+    const activeRoleWhere = this.activeFeedbackStaffRoleWhere(now);
+    const staff = await client.user.findFirst({
+      where: {
+        publicId: staffPublicId,
+        collegeId,
+        status: "ACTIVE",
+        staffProfile: { isNot: null },
+        roles: { some: activeRoleWhere },
+      },
+      select: {
+        id: true,
+        publicId: true,
+        collegeIdentityId: true,
+        fullName: true,
+        staffProfile: {
+          select: {
+            employeeId: true,
+            designation: true,
+            departmentId: true,
+            department: { select: { id: true, code: true, name: true } },
+          },
+        },
+        roles: {
+          where: activeRoleWhere,
+          select: { role: { select: { code: true } } },
+        },
+      },
+    });
+    if (!staff?.staffProfile) return null;
+    const targetType = this.feedbackTargetTypeForRoles(
+      staff.roles.map((assignment) => assignment.role.code),
+    );
+    if (!targetType) return null;
+    return {
+      id: staff.id,
+      publicId: staff.publicId,
+      collegeIdentityId: staff.collegeIdentityId,
+      fullName: staff.fullName,
+      staffProfile: staff.staffProfile,
+      targetType,
+    };
+  }
+
+  private feedbackStaffTargetSelect() {
+    return {
+      id: true,
+      targetUuid: true,
+      targetType: true,
+      targetName: true,
+      description: true,
+      isActive: true,
+      departmentId: true,
+      updatedAt: true,
+    } satisfies Prisma.FeedbackTargetSelect;
+  }
+
+  private feedbackStaffQrSelect() {
+    return {
+      id: true,
+      qrUuid: true,
+      qrUrl: true,
+      secureTokenHash: true,
+      status: true,
+      expiryDate: true,
+      createdAt: true,
+    } satisfies Prisma.FeedbackQrCodeSelect;
+  }
+
+  private preferredStaffQr(
+    rows: FeedbackStaffQrRow[],
+    now: Date,
+  ): FeedbackStaffQrRow | null {
+    return (
+      rows.find(
+        (row) =>
+          row.status === "ACTIVE" && (!row.expiryDate || row.expiryDate > now),
+      ) ??
+      rows[0] ??
+      null
+    );
+  }
+
+  private feedbackStaffQrContract(
+    staff: EligibleFeedbackStaff,
+    target: FeedbackStaffTargetRow | null,
+    qr: FeedbackStaffQrRow | null,
+    created?: { target: boolean; qr: boolean },
+  ): FeedbackStaffQrContract {
+    return {
+      staff: {
+        publicId: staff.publicId,
+        staffId: staff.staffProfile.employeeId,
+        name: staff.fullName,
+        designation: staff.staffProfile.designation,
+        department: staff.staffProfile.department,
+        targetType: staff.targetType,
+      },
+      target: target
+        ? {
+            id: target.targetUuid,
+            targetType: target.targetType,
+            targetName: target.targetName,
+            description: target.description,
+            isActive: target.isActive,
+          }
+        : null,
+      qr: qr
+        ? {
+            id: qr.qrUuid,
+            secureUrl: this.canonicalFeedbackQrUrl(qr),
+            status: qr.status,
+            expiryDate: qr.expiryDate,
+            createdAt: qr.createdAt,
+          }
+        : null,
+      ...(created ? { created } : {}),
+    };
+  }
+
+  private async ensureStaffQrRecord(
+    user: AuthPrincipal,
+    staffPublicId: string,
+  ) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`feedback-staff-qr:${user.collegeId}:${staffPublicId}`}))`;
+        const now = new Date();
+        const staff = await this.eligibleFeedbackStaff(
+          tx,
+          user.collegeId,
+          staffPublicId,
+          now,
+        );
+        if (!staff)
+          throw new NotFoundException(
+            "Eligible active staff account not found.",
+          );
+
+        const targets = await tx.feedbackTarget.findMany({
+          where: {
+            collegeId: user.collegeId,
+            staffUserId: staff.id,
+            targetType: { in: staffTargetTypeList },
+          },
+          orderBy: [{ isActive: "desc" }, { updatedAt: "desc" }],
+          select: this.feedbackStaffTargetSelect(),
+        });
+        let target = targets[0];
+        const targetCreated = !target;
+        if (!target) {
+          target = await tx.feedbackTarget.create({
+            data: {
+              collegeId: user.collegeId,
+              targetType: staff.targetType,
+              staffUserId: staff.id,
+              departmentId: staff.staffProfile.departmentId,
+              targetName: staff.fullName,
+              description: staff.staffProfile.designation,
+              isActive: true,
+              createdById: user.id,
+            },
+            select: this.feedbackStaffTargetSelect(),
+          });
+        } else if (
+          target.targetType !== staff.targetType ||
+          target.departmentId !== staff.staffProfile.departmentId ||
+          target.targetName !== staff.fullName ||
+          target.description !== staff.staffProfile.designation ||
+          !target.isActive
+        ) {
+          target = await tx.feedbackTarget.update({
+            where: { id: target.id },
+            data: {
+              targetType: staff.targetType,
+              departmentId: staff.staffProfile.departmentId,
+              targetName: staff.fullName,
+              description: staff.staffProfile.designation,
+              isActive: true,
+            },
+            select: this.feedbackStaffTargetSelect(),
+          });
+        }
+
+        const duplicateTargetIds = targets.slice(1).map((row) => row.id);
+        if (duplicateTargetIds.length) {
+          await tx.feedbackTarget.updateMany({
+            where: { id: { in: duplicateTargetIds }, isActive: true },
+            data: { isActive: false },
+          });
+          await tx.feedbackQrCode.updateMany({
+            where: { targetId: { in: duplicateTargetIds }, status: "ACTIVE" },
+            data: { status: "DISABLED" },
+          });
+        }
+
+        const qrRows = await tx.feedbackQrCode.findMany({
+          where: { targetId: target.id },
+          orderBy: { createdAt: "desc" },
+          select: this.feedbackStaffQrSelect(),
+        });
+        let qr = qrRows.find(
+          (row) =>
+            row.status === "ACTIVE" &&
+            (!row.expiryDate || row.expiryDate > now),
+        );
+        const expiredActiveIds = qrRows
+          .filter(
+            (row) =>
+              row.status === "ACTIVE" &&
+              row.expiryDate &&
+              row.expiryDate <= now,
+          )
+          .map((row) => row.id);
+        if (expiredActiveIds.length) {
+          await tx.feedbackQrCode.updateMany({
+            where: { id: { in: expiredActiveIds } },
+            data: { status: "EXPIRED" },
+          });
+        }
+        const supersededActiveIds = qrRows
+          .filter(
+            (row) =>
+              row.status === "ACTIVE" &&
+              row.id !== qr?.id &&
+              !expiredActiveIds.includes(row.id),
+          )
+          .map((row) => row.id);
+        if (supersededActiveIds.length) {
+          await tx.feedbackQrCode.updateMany({
+            where: { id: { in: supersededActiveIds } },
+            data: { status: "DISABLED" },
+          });
+        }
+        const qrCreated = !qr;
+        if (!qr) {
+          qr = await this.createQrForTarget(target.id, user.id, undefined, tx);
+        }
+        return {
+          contract: this.feedbackStaffQrContract(staff, target, qr, {
+            target: targetCreated,
+            qr: qrCreated,
+          }),
+          targetId: target.id,
+          qrId: qr.id,
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  }
+
   private async validatedTargetData(user: AuthPrincipal, input: CreateFeedbackTargetDto): Promise<Omit<Prisma.FeedbackTargetUncheckedCreateInput, "id" | "targetUuid" | "targetName" | "description" | "createdAt" | "updatedAt" | "collegeId" | "createdById">> {
     let staffUserId: string | undefined;
     if (input.staffPublicId) {
@@ -1224,9 +1663,9 @@ export class FeedbackService {
     if (input.roomId && !(await this.prisma.room.findFirst({ where: { id: input.roomId, floor: { block: { campus: { collegeId } } } }, select: { id: true } }))) throw new BadRequestException("Room target is not in this college.");
   }
 
-  private async createQrForTarget(targetId: string, createdById?: string, expiryDate?: Date) {
+  private async createQrForTarget(targetId: string, createdById?: string, expiryDate?: Date, client: Pick<Prisma.TransactionClient, "feedbackQrCode"> = this.prisma) {
     const token = this.newToken();
-    return this.prisma.feedbackQrCode.create({ data: { targetId, secureTokenHash: this.hashToken(token), qrUrl: this.webFeedbackUrl(token), createdById, expiryDate } });
+    return client.feedbackQrCode.create({ data: { targetId, secureTokenHash: this.hashToken(token), qrUrl: this.webFeedbackUrl(token), createdById, expiryDate } });
   }
 
   private async targetDiscoveryWhere(user: AuthPrincipal, departmentId?: string): Promise<Prisma.FeedbackTargetWhereInput> {
@@ -1271,9 +1710,18 @@ export class FeedbackService {
     if (!permissions.some((permission) => user.permissions.includes(permission))) throw new ForbiddenException("You do not have permission to perform this action.");
   }
 
+  private requireAll(user: AuthPrincipal, permissions: string[]): void {
+    if (
+      !permissions.every((permission) => user.permissions.includes(permission))
+    )
+      throw new ForbiddenException(
+        "You do not have permission to perform this action.",
+      );
+  }
+
   private targetInclude() {
     return {
-      staff: { select: { publicId: true, collegeIdentityId: true, fullName: true, profilePhotoKey: true, staffProfile: { select: { employeeId: true, designation: true, department: { select: { id: true, code: true, name: true } } } } } },
+      staff: { select: { publicId: true, collegeIdentityId: true, fullName: true, profilePhotoKey: true, status: true, staffProfile: { select: { employeeId: true, designation: true, department: { select: { id: true, code: true, name: true } } } }, roles: { where: this.activeFeedbackStaffRoleWhere(new Date()), select: { role: { select: { code: true } } } } } },
       department: { select: { id: true, code: true, name: true } },
       campus: { select: { id: true, code: true, name: true } },
       block: { select: { id: true, code: true, name: true } },
@@ -1312,8 +1760,25 @@ export class FeedbackService {
     return questions.map((question) => ({ id: question.id, category: question.category, questionText: question.questionText, questionType: question.questionType, displayOrder: question.displayOrder, isRequired: question.isRequired }));
   }
 
-  private qrValidationError(qr: { status: FeedbackQrStatus; expiryDate: Date | null; target: { isActive: boolean } }): string | undefined {
+  private staffTargetUnavailable(
+    target: Pick<PublicTargetPayload, "targetType" | "staff">,
+  ): boolean {
+    if (!staffTargetTypes.has(target.targetType)) return false;
+    if (
+      !target.staff ||
+      target.staff.status !== "ACTIVE" ||
+      !target.staff.staffProfile
+    )
+      return true;
+    const currentTargetType = this.feedbackTargetTypeForRoles(
+      target.staff.roles.map((assignment) => assignment.role.code),
+    );
+    return currentTargetType === null || currentTargetType !== target.targetType;
+  }
+
+  private qrValidationError(qr: { status: FeedbackQrStatus; expiryDate: Date | null; target: Pick<PublicTargetPayload, "isActive" | "targetType" | "staff"> }): string | undefined {
     if (!qr.target.isActive) return "This feedback target is inactive.";
+    if (this.staffTargetUnavailable(qr.target)) return "This staff feedback target is unavailable.";
     if (qr.status !== "ACTIVE") return `This QR code is ${qr.status.toLowerCase()}.`;
     if (qr.expiryDate && qr.expiryDate < new Date()) return "This QR code has expired.";
     return undefined;
@@ -1516,8 +1981,8 @@ export class FeedbackService {
     };
   }
 
-  private async posterSvg(qr: { qrUrl: string; target: PublicTargetPayload }) {
-    const qrSvg = await QRCode.toString(qr.qrUrl, { type: "svg", margin: 1, width: 640 });
+  private async posterSvg(qr: { qrUrl: string; secureTokenHash: string; target: PublicTargetPayload }) {
+    const qrSvg = await QRCode.toString(this.canonicalFeedbackQrUrl(qr), { type: "svg", margin: 1, width: 640 });
     const encodedQr = Buffer.from(qrSvg, "utf8").toString("base64");
     const target = this.escapeXml(qr.target.targetName);
     const location = this.escapeXml([qr.target.block?.name, qr.target.floor?.name, qr.target.room?.roomNumber ?? qr.target.room?.name].filter(Boolean).join(" / "));
@@ -1745,6 +2210,37 @@ export class FeedbackService {
 
   private hashToken(token: string): string {
     return createHash("sha256").update(token).digest("hex");
+  }
+
+  private canonicalFeedbackQrUrl(qr: {
+    qrUrl: string;
+    secureTokenHash: string;
+  }): string {
+    let token: string;
+    try {
+      const raw = qr.qrUrl.trim();
+      const candidate =
+        raw.startsWith("http://") || raw.startsWith("https://")
+          ? (new URL(raw).pathname.split("/").filter(Boolean).pop() ?? "")
+          : (raw.split("/").filter(Boolean).pop() ?? raw);
+      token = this.extractToken(candidate);
+    } catch {
+      throw new BadRequestException("The stored feedback QR token is invalid.");
+    }
+    const actualHash = this.hashToken(token);
+    const storedHash = qr.secureTokenHash.toLowerCase();
+    if (
+      !/^[a-f0-9]{64}$/.test(storedHash) ||
+      !timingSafeEqual(
+        Buffer.from(actualHash, "hex"),
+        Buffer.from(storedHash, "hex"),
+      )
+    ) {
+      throw new BadRequestException(
+        "The stored feedback QR token does not match its security record.",
+      );
+    }
+    return this.webFeedbackUrl(token);
   }
 
   private webFeedbackUrl(token: string): string {
