@@ -2,9 +2,9 @@
 
 # Final Production Release Report
 
-**Report state:** LIVE - ACADEMIC HIERARCHY DEPLOYED AND VERIFIED
+**Report state:** LIVE — STUDENT REGISTRATION ACADEMIC RELEASE ACCEPTED
 
-**Last updated:** 2026-08-13 (Asia/Kolkata)
+**Last updated:** 2026-08-14 (Asia/Kolkata)
 
 **Public URL:** https://avs-college-portal.onrender.com/
 
@@ -12,297 +12,234 @@
 
 ## Release Identity
 
-| Item                               | Verified value                                            |
-| ---------------------------------- | --------------------------------------------------------- |
-| Current release commit             | `78762683ee43c3082784e654d510b70f0335df57`                |
-| Initial corrected deployment       | `dep-d9uadv5bedkc7394aibg`                                |
-| Same-commit persistence deployment | `dep-d9uaqi9t0dsc73cvoqpg` (`live`)                       |
-| Existing Render service            | `avs-college-portal`; no replacement service created      |
-| Database mode                      | `EXTERNAL_PERSISTENT`                                     |
-| Production database                | `avs_college_import_20260806` on Supabase PostgreSQL      |
-| Current migration state            | 41 applied, 4 historical rolled back, 0 failed, 0 pending |
+| Item                      | Verified value                                       |
+| ------------------------- | ---------------------------------------------------- |
+| Final executable commit   | `dcd790de3793da10139b40d1b57ff59423ab1844`           |
+| Render deployment         | `dep-d9v6jrfavr4c73abi2s0`                           |
+| Deployment status         | `live`                                               |
+| Deployment completed      | 2026-08-14 06:40:53 IST                              |
+| Feature acceptance commit | `741c3047001c734efa120b4a3ad83edc1310068b`           |
+| Existing Render service   | `avs-college-portal`; no replacement service created |
+| Database                  | Existing persistent Supabase PostgreSQL              |
+| Schema state              | 42 migrations applied; schema up to date             |
 
-Local `HEAD`, `origin/main`, the current Render deployment, the tested browser
-release, and the backup-gated acceptance flow all reference the same release
-commit. A first rollout attempt applied the academic uniqueness migration but
-failed before startup because a seed dependency was missing from the runtime
-image. The image packaging was corrected and covered with a build-time import
-check. PostgreSQL was not reset and the already-applied migration was not
-force-replayed.
+The complete Student Registration Academic acceptance ran against application
+commit `741c3047001c734efa120b4a3ad83edc1310068b`. Final commit
+`dcd790de3793da10139b40d1b57ff59423ab1844` changes only the production
+`nanoid` dependency pin and the dependency-tree validator/test. The accepted
+application code was rebuilt, passed the full gates again, and was redeployed as
+`dep-d9v6jrfavr4c73abi2s0`.
 
-## Academic Hierarchy Delivered
+PostgreSQL was not reset. Existing production data was not replaced with JSON,
+browser storage, or Render filesystem state.
 
-Production now contains the required normalized hierarchy. Department codes and
-professional names are stored separately, and sections are child records rather
-than malformed department names.
+## Academic Masters and Hierarchy
 
-| Department | Professional name                            | Sections |
-| ---------- | -------------------------------------------- | -------- |
-| AI & ML    | Artificial Intelligence and Machine Learning | A        |
-| AI & DS    | Artificial Intelligence and Data Science     | A, B, C  |
-| CSE        | Computer Science and Engineering             | A, B, C  |
-| IT         | Information Technology                       | A, B     |
-| ECE        | Electronics and Communication Engineering    | A, B     |
-| EEE        | Electrical and Electronics Engineering       | A        |
-| MECH       | Mechanical Engineering                       | A        |
-| BME        | Biomedical Engineering                       | A        |
+Production contains the normalized hierarchy:
 
-Read-only PostgreSQL verification confirmed:
+```text
+College
+  -> Department
+    -> Programme
+      -> Academic Year
+        -> Study Year
+          -> Semester
+            -> Section
+              -> Student academic membership
+```
 
-- 8 departments, 8 programmes, 1 current academic year, 8 semesters, and 14
-  sections.
-- Every section is active, unarchived, and has a maximum capacity of 70.
-- Zero duplicate department codes or names after normalized comparison.
-- Zero duplicate programmes, academic years, semesters, section codes, or
-  section names within their database scopes.
-- Zero malformed legacy departments, hierarchy relationship mismatches, or
-  over-capacity sections.
-- Database constraints enforce normalized per-college department uniqueness,
-  normalized per-department programme uniqueness, normalized per-semester
-  section uniqueness, and section capacity between 1 and 70.
+Department short codes and professional names are stored separately. Sections
+are children of their academic scope and are not encoded as fake department
+names such as `CSE(A)`.
 
-Safe, explicitly configured import aliases are active for the approved variants,
-including `AIDS`, `AI&DS`, `AI-DS`, `AIML`, `AI&ML`, `AI-ML`, spaced forms, the
-legacy `CSE(AI&ML)` label, and `ME` to `MECH`. Dangerous fuzzy matching is not
-used.
+| Short code | Professional name                            | Degree  | Logical sections |
+| ---------- | -------------------------------------------- | ------- | ---------------- |
+| AI & ML    | Artificial Intelligence and Machine Learning | B.E.    | A                |
+| AI & DS    | Artificial Intelligence and Data Science     | B.Tech. | A, B, C          |
+| CSE        | Computer Science and Engineering             | B.E.    | A, B, C          |
+| IT         | Information Technology                       | B.Tech. | A, B             |
+| ECE        | Electronics and Communication Engineering    | B.E.    | A, B             |
+| EEE        | Electrical and Electronics Engineering       | B.E.    | A                |
+| MECH       | Mechanical Engineering                       | B.E.    | A                |
+| BME        | Biomedical Engineering                       | B.E.    | A                |
 
-## Admin Data Entry and Lifecycle
+The configured Academic Years are `2022-2023` through `2029-2030`, with
+`2026-2027` current. Study Years and their valid semesters are:
 
-The authenticated Academic Setup workspace is available at:
+| Study Year | Allowed semesters |
+| ---------: | ----------------- |
+|          1 | 1 and 2           |
+|          2 | 3 and 4           |
+|          3 | 5 and 6           |
+|          4 | 7 and 8           |
 
-`/admin/academic/departments-sections`
+Read-only production verification returned:
 
-It provides a desktop department master-detail layout and phone department cards
-with section counts. Authorized administrators can add and edit departments and
-sections, manage active/archive state, restore records after ancestor validation,
-view dependencies, and use guarded safe deletion. Section setup supports the
-academic year, study year, semester, capacity, room, coordinator, and prospective
-class staff fields.
+| Item                          | Verified value |
+| ----------------------------- | -------------: |
+| Degree types                  |              2 |
+| Departments                   |              8 |
+| Programmes                    |              8 |
+| Academic Years                |              8 |
+| Semester rows                 |            512 |
+| Section rows                  |            896 |
+| Minimum / maximum section cap |        70 / 70 |
+| Active student memberships    |              0 |
+| Non-active student profiles   |              2 |
+| Historical membership records |              4 |
 
-The student-entry workflow at `/admin/people/new` now includes student-specific
-personal, academic, and account fields. Department, programme, academic year,
-study year, semester, and section choices cascade, and inactive or archived
-sections are excluded. The backend serializes placement against hierarchy
-lifecycle and capacity changes, rechecks active ancestors inside the transaction,
-and rejects student 71 with a section-full response rather than relying on the
-browser.
+The 14 logical AVS department-section combinations are materialized within the
+appropriate programme, Academic Year, Study Year, and semester scopes, producing
+896 persistent section rows. This supersedes older reports that described only
+14 database rows.
 
-The Students flow in `/admin/imports` supports preview-before-confirmation with
-the requested template columns:
+Verification found zero duplicate departments, programmes, Academic Years,
+semesters, or scoped sections, and zero over-capacity sections. Import aliases
+remain explicit and deterministic; uncertain values are not fuzzy-matched.
 
-`full_name`, `official_email`, `college_id`, `register_number`,
-`department_code`, `academic_year`, `study_year`, `semester`, `section`,
-`temporary_password`, and `mobile`.
+## Student Registration and Academic Lifecycle
 
-Programme inference is allowed only when a department has one unambiguous active
-programme. Preview and queued confirmation use the same parser-invalid and
-transactional capacity rules; invalid rows cannot reserve seats from later valid
-rows. Imported students use the same canonical placement service as manual
-entry.
+The Admin Add Person workflow at `/admin/people/new` now provides the complete
+student registration path:
 
-Department, programme, semester, academic-year, and section lifecycle mutations
-share deterministic hierarchy locks with student placement. Archive, restore,
-status, capacity, and safe-delete operations re-read their state inside the
-transaction to prevent placement and deletion races.
+1. Personal information.
+2. Degree and department.
+3. Programme and Academic Year.
+4. Study Year, semester, and department-filtered section.
+5. Account review and creation.
 
-## Live Academic Acceptance
+The selection chain is enforced in both the UI and API. Changing a parent value
+clears invalid child selections, inactive or archived academic records are not
+selectable, and a department cannot display another department's sections.
 
-A uniquely marked TEST student was used only for the authorized acceptance flow.
-The full sequence passed:
+Student placement is persisted in PostgreSQL with academic membership history.
+Promotion or transfer closes the previous membership, opens the new membership,
+and updates section counts. Section capacity is 70 and is enforced
+transactionally by the backend. Automated coverage verifies that student 71 is
+rejected; production acceptance did not fill a real section merely to exercise
+that boundary.
 
-1. Main Admin login and authorization.
-2. Exact 8-department/14-section UI verification on desktop and at 320px.
-3. Creation through the production student form into CSE-A.
-4. PostgreSQL verification of the user, STUDENT role, SECTION scope, profile,
-   and active membership.
-5. Browser refresh and a Render redeploy of the exact same commit.
-6. Verification that the same database identity and creation timestamp persisted.
-7. UI move from CSE-A to CSE-B, including count and membership-history checks.
-8. UI archive with active capacity released.
-9. A fresh post-archive `PRE_DELETION`, `RESTORE_TESTED` backup.
-10. Safe permanent cleanup through the application endpoint.
+The responsive Admin flow was exercised at 320×568, 360×800, 375×812, 390×844,
+412×915, and 430×932. All tested widths completed without detected horizontal
+overflow.
 
-Cleanup removed the TEST account's credential, roles, scopes, contacts, and raw
-student identifiers. Both historical section memberships are inactive and ended.
-A database-wide scan found zero occurrences of the raw TEST identifier prefixes
-in text or JSON columns. One archived, anonymized student profile and its two
-ended memberships remain intentionally as historical integrity records; there is
-no active TEST student and no TEST authentication path.
+## Production Acceptance Results
 
-## Current Production Data State
+One uniquely marked temporary TEST student was used. No real student record was
+deleted or repurposed.
 
-The previous report described the database before the user's separately
-authorized non-admin data purge. It must not be used as the current count
-baseline. The final repeatable-read production snapshot is:
+| Acceptance check                                   | Result |
+| -------------------------------------------------- | ------ |
+| Main Admin login and authorization                 | PASS   |
+| B.E. and B.Tech. masters                           | PASS   |
+| Degree-to-department/programme filtering           | PASS   |
+| Previous, current, and future Academic Years       | PASS   |
+| Study Years 1–4                                    | PASS   |
+| Exact semester filtering                           | PASS   |
+| Department-to-section filtering                    | PASS   |
+| Create TEST student in CSE-A                       | PASS   |
+| PostgreSQL role, scope, profile, and membership    | PASS   |
+| Refresh persistence                                | PASS   |
+| Same-code Render redeploy persistence              | PASS   |
+| Promote to CSE-B in the next academic scope        | PASS   |
+| Membership history and section-count update        | PASS   |
+| Archive and active-capacity release                | PASS   |
+| Backup-gated safe cleanup                          | PASS   |
+| Duplicate academic-master protection               | PASS   |
+| Same section name allowed in different departments | PASS   |
+| Archived section excluded from new placement       | PASS   |
+| Backend rejection of student 71                    | PASS   |
+| Tested phone viewport matrix                       | PASS   |
 
-| Data                                  |                   Current count |
-| ------------------------------------- | ------------------------------: |
-| Public PostgreSQL tables              |                             143 |
-| Total rows at fact-check snapshot     |                           3,128 |
-| Users                                 |                               5 |
-| Active users                          |                               4 |
-| Archived anonymized TEST tombstones   |                               1 |
-| Credentials                           |                               4 |
-| Active Main Admin accounts            |                               1 |
-| Staff profiles                        |                               3 |
-| Student profiles                      | 1 anonymized historical profile |
-| Active students                       |                               0 |
-| Active section memberships            |                               0 |
-| Ended TEST membership history         |                               2 |
-| Roles / permissions                   |                        19 / 104 |
-| Issues                                |                               0 |
-| Conversations / messages              |                          33 / 0 |
-| Announcements                         |                               0 |
-| Attendance sessions / records         |                           0 / 0 |
-| Skill courses / modules / lessons     |                   17 / 34 / 513 |
-| Assessments / progress / certificates |                   1,019 / 0 / 0 |
-| Audit logs at fact-check snapshot     |                             152 |
+After archive, safe cleanup removed the temporary credential, user roles,
+authorization scopes, contacts, and raw TEST identifiers. A database-wide scan
+of text and JSON columns found no raw TEST identifier residue. An anonymized
+student tombstone and ended memberships are retained intentionally for
+referential and audit history. Together with one earlier safely anonymized
+acceptance record, production now has two valid anonymized student tombstones;
+neither has an authentication path. The current totals are two non-active
+student profiles, four historical membership records, and zero active student
+memberships.
 
-The four active accounts predate this academic acceptance run and were not
-modified or removed by its cleanup. Production currently has no real active
-student record to migrate or delete. The acceptance workflow added no remaining
-active user or credential. Total rows, audit logs, sessions, and request metadata
-are operationally volatile; the figures above are the final read-only snapshot,
-not immutable quotas.
+## Backup and Cleanup Evidence
 
-## Current Object Storage
+The release used the mandatory backup gates; no database reset was performed.
 
-The user's separately authorized purge also superseded the old 108-object storage
-baseline. Final read-only enumeration found 3 private objects totaling 3,453,098
-bytes. The current database contains one storage reference, that reference is
-present, and there are zero missing referenced objects. No object key or signed
-URL is included in this report.
+| Gate                   | Evidence                                                                               |
+| ---------------------- | -------------------------------------------------------------------------------------- |
+| Pre-migration backup   | Run `31716643093` on `6a3eaea69d90df563beee798dabcaa9873a61025`; isolated restore PASS |
+| Pre-migration artifact | `avs-2026-08-13_21-10-39-IST`; 682,317 encrypted bytes                                 |
+| Pre-deletion backup    | Run `31755162342` on `741c3047001c734efa120b4a3ad83edc1310068b`; isolated restore PASS |
+| Pre-deletion artifact  | `avs-2026-08-14_05-18-57-IST`; 935,084 encrypted bytes                                 |
+| Restore status         | Manifest, encryption round trip, isolated restore, and backup registration all PASS    |
+| Artifact expiry        | Pre-deletion artifact retained through 2026-09-12                                      |
+| Plaintext handling     | Temporary plaintext cleanup PASS                                                       |
 
-## Main Admin Authentication
+The post-archive backup was registered as restore-tested before the safe cleanup
+endpoint was allowed to proceed. No backup key, database URL, provider UUID, or
+other secret is included here. Google Drive upload was skipped because that
+integration is disabled.
 
-| Check                          | Result                             |
-| ------------------------------ | ---------------------------------- |
-| Account status and role        | `ACTIVE`, `MAIN_ADMIN`             |
-| Forced password change         | Disabled after controlled rotation |
-| Replacement credential storage | Protected local file outside Git   |
-| Fresh login                    | HTTP 200                           |
-| Authenticated identity lookup  | HTTP 200; identity matched         |
-| Logout                         | HTTP 204                           |
-| Same access token after logout | HTTP 401                           |
+## Final Automated Quality Gates
 
-The previously exposed password is not the live password. No password, hash,
-session token, signed URL, or other secret is included in this report, source
-control, logs, or chat.
-
-## Backup and Cleanup Gate
-
-GitHub Actions run
-https://github.com/devanand2008/AVSEC-ISSUES/actions/runs/31616042796
-completed successfully before the initial academic rollout and verified an
-isolated restore.
-
-After the TEST student was archived, run
-https://github.com/devanand2008/AVSEC-ISSUES/actions/runs/31623250036
-created the backup that authorized safe cleanup.
-
-| Post-archive backup gate              | Result                             |
-| ------------------------------------- | ---------------------------------- |
-| Type                                  | `PRE_DELETION`                     |
-| Workflow commit                       | Exact release commit `78762683...` |
-| PostgreSQL custom archive             | PASS                               |
-| AES-256-GCM encryption and round trip | PASS                               |
-| Isolated restore                      | PASS                               |
-| Immutable restored-table manifest     | PASS                               |
-| Latest restore test                   | `PASSED`                           |
-| Database status                       | `RESTORE_TESTED`                   |
-| Encrypted artifact                    | `avs-2026-08-12_23-04-20-IST`      |
-| Artifact size                         | 671,312 bytes                      |
-| Artifact expiry                       | 2026-09-11                         |
-| Temporary plaintext cleanup           | PASS                               |
-
-The safe-delete backend independently required the same-college, fresh
-`PRE_DELETION` backup and its latest restore test to be passed. An older passed
-test cannot override a later failed restore test.
-
-The encrypted artifact is GitHub-hosted. Because this repository is public, the
-ciphertext must not be described as private; the separate encryption key remains
-outside Git. Google Drive upload was skipped because that integration is
-disabled.
-
-The configured daily schedule has also executed successfully. Scheduled run
-https://github.com/devanand2008/AVSEC-ISSUES/actions/runs/31641202321 ran on the
-exact release commit, verified the encryption round trip, and retained encrypted
-artifact `avs-2026-08-13_02-40-00-IST` (671,867 bytes) through 2026-09-11. Daily
-scheduled runs intentionally do not perform an isolated restore. Restore
-assurance therefore relies on protected, manually dispatched restore-tested runs
-such as `31623250036`.
-
-## Automated Quality Gates
-
-All final gates ran on Node.js 22.23.2 against the exact released tree.
+All final gates ran on Node.js 22.23.2 against executable commit
+`dcd790de3793da10139b40d1b57ff59423ab1844`.
 
 | Gate                               | Result                             |
 | ---------------------------------- | ---------------------------------- |
-| API Jest                           | 67/67 suites, 529/529 tests passed |
-| Web Vitest                         | 23/23 files, 145/145 tests passed  |
-| API typecheck and ESLint           | PASS; zero warnings/errors         |
-| Web typecheck and ESLint           | PASS; zero warnings/errors         |
+| API Jest                           | 70/70 suites, 564/564 tests passed |
+| Web Vitest                         | 28/28 files, 193/193 tests passed  |
+| API typecheck                      | PASS                               |
+| API lint                           | PASS                               |
 | API production build               | PASS                               |
-| Web production build               | PASS; 86/86 pages generated        |
-| Prisma validate/generate           | PASS                               |
-| Production dependency audit        | 0 vulnerabilities                  |
-| Dependency-tree security assertion | PASS                               |
-| Sensitive-file scan                | PASS                               |
-
-Focused coverage includes the exact AVS matrix, normalized duplicates, same
-section names in different departments, transactional capacity, student 71
-rejection, manual and import placement, section filtering, archive/restore and
-safe-delete dependencies, hierarchy concurrency, backup-proof freshness, and
-responsive academic workspace styles.
+| Web typecheck                      | PASS                               |
+| Web lint                           | PASS                               |
+| Web production build               | PASS; 90 pages generated           |
+| Production dependency audit        | PASS; 0 vulnerabilities            |
+| Dependency-tree security validator | PASS                               |
+| Validator mutation tests           | PASS; 4/4                          |
+| Production `nanoid` version        | `3.3.18`                           |
 
 ## Live Runtime Verification
 
-At the final independent check:
+The final deployment was checked after the application reported ready:
 
-| Endpoint                     | Result                                       |
-| ---------------------------- | -------------------------------------------- |
-| `/health`                    | HTTP 200, ready, `EXTERNAL_PERSISTENT`       |
-| `/health/live`               | HTTP 200                                     |
-| `/health/ready`              | HTTP 200, PostgreSQL up, configuration valid |
-| `/health/ready/dependencies` | HTTP 200, ready                              |
+| Check                        | Result                                                  |
+| ---------------------------- | ------------------------------------------------------- |
+| `/health`                    | HTTP 200; ready; `EXTERNAL_PERSISTENT`                  |
+| `/health/live`               | HTTP 200; ok                                            |
+| `/health/ready`              | HTTP 200; Prisma generated; PostgreSQL up; config valid |
+| `/health/ready/dependencies` | HTTP 200; ready; `EXTERNAL_PERSISTENT`                  |
+| Prisma migration status      | 42 migrations; schema up to date                        |
+| Required web routes          | HTTP 200; no route-level 404                            |
 
-Sanitized Render logs from cleanup completion through the final independent check
-covered 128 rows across two fully exhausted pages: zero errors, zero warnings,
-zero application-emitted HTTP 5xx, zero database errors, and zero process
-crashes.
+Complete sanitized logs for deployment creation through the final audit covered
+1,249 unique rows. The stabilized post-API-ready slice contained zero warnings,
+errors, HTTP 4xx/5xx responses, database/Redis/storage failures, authentication
+error signals, or crash signals. Startup contained only three known framework
+route-conversion warnings and four transient gateway-to-API connection refusals
+before Nest became ready; none continued after readiness.
 
-A temporary Render edge HTTP 503 was consistent with the free-tier service waking
-from an idle spin-down. Sanitized logs showed a normal cold-start sequence rather
-than an application crash: no application-emitted 5xx, OOM, process exit,
-database failure, or Redis failure was recorded, and the existing deployment
-recovered without a restart or redeploy. The wake took approximately 82 seconds
-for the gateway, migration/bootstrap checks, API, and web process to become
-ready.
+## Operational Scope and Limits
 
-## Remaining Operational Limits
-
-1. The Render service uses the free tier and can spin down after inactivity.
-   Eliminating cold-start delays requires an always-on paid Render instance.
-2. Google Drive backup integration and the in-app backup scheduler remain
-   disabled. GitHub Actions scheduled backups are operating successfully and
-   verify encryption integrity, while isolated-restore assurance relies on
-   manually dispatched restore-tested backups.
-3. Physical-device camera/QR testing, installed-PWA testing, a full Firefox
-   matrix, and controlled production load testing remain outside the available
-   environment.
-4. The archived acceptance profile is intentionally retained in anonymized form
-   for referential and audit history; it has no credential or authorization.
+- Render deployment `dep-d9v6jrfavr4c73abi2s0` reached `live` at
+  2026-08-14 06:40:53 IST.
+- Production schema verification found 42 applied migrations and no pending
+  application migration.
+- Responsive acceptance used Chromium viewport emulation. It is strong browser
+  layout evidence, but not a physical-device certification.
+- Firefox, Safari, installed-PWA, physical camera/QR, and controlled production
+  load testing were outside this acceptance run.
+- Google Drive mirroring remains disabled; verified encrypted GitHub Actions
+  backup artifacts provide the recorded backup evidence.
 
 ## Release Decision
 
-**Academic hierarchy and web data-entry release: LIVE AND VERIFIED.**
+**The Student Registration Academic release is live and accepted for the tested
+production workflow.**
 
-The Department -> Programme -> Academic Year -> Semester -> Section hierarchy,
-responsive administration workspace, manual student entry, import flow,
-transactional capacity protection, Supabase persistence, same-commit redeploy,
-student movement, archive, and backup-gated cleanup all passed production
-acceptance.
-
-**Formal unconditional cross-platform/disaster-recovery certification remains
-limited by the operational items above.** No unresolved blocker is known for the
-tested web academic workflows or Main Admin authentication.
+The masters, cascades, capacity controls, student creation, PostgreSQL
+persistence, refresh/redeploy persistence, promotion, history, archive, and
+backup-gated cleanup all passed. No unresolved error remains in the tested
+workflow, and no temporary TEST credential or raw identifier remains active or
+stored.

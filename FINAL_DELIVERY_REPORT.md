@@ -1,5 +1,97 @@
 # Final Delivery Report
 
+## 2026-08-14 Student Registration Academic Fix — Production Accepted
+
+**State:** LIVE, VERIFIED, AND TEST DATA CLEANED
+
+**Production:** https://avs-college-portal.onrender.com/
+
+**Final executable release:** `dcd790de3793da10139b40d1b57ff59423ab1844`
+
+**Render deployment:** `dep-d9v6jrfavr4c73abi2s0` (`live`; completed
+2026-08-14 06:40:53 IST)
+
+The Student Registration Academic release is deployed in the existing AVS
+application. The feature acceptance sequence ran against parent application
+commit `741c3047001c734efa120b4a3ad83edc1310068b`. The final executable commit
+changes only the production `nanoid` security pin and its dependency-tree
+validator/test, then rebuilds and redeploys the same accepted application code.
+
+Delivered and verified:
+
+- Degree types: B.E. and B.Tech.
+- Eight departments and eight mapped programmes with separate short codes and
+  professional names.
+- Eight Academic Years from `2022-2023` through `2029-2030`, with `2026-2027`
+  current.
+- Study Years 1–4 with exact semester pairs 1/2, 3/4, 5/6, and 7/8.
+- Department/programme/year/study-year/semester/section cascading selection in
+  the Admin student-registration wizard.
+- Transactional section capacity of 70, including automated backend coverage
+  that rejects student 71.
+- Student academic membership history, promotion, archive, safe cleanup, and
+  PostgreSQL persistence.
+- Phone layouts passed at 320×568, 360×800, 375×812, 390×844, 412×915, and
+  430×932 without detected horizontal overflow.
+
+Production PostgreSQL verification:
+
+| Item                          | Verified value |
+| ----------------------------- | -------------: |
+| Degree types                  |              2 |
+| Departments / programmes      |          8 / 8 |
+| Academic Years                |              8 |
+| Semester rows                 |            512 |
+| Section rows                  |            896 |
+| Section capacity              |             70 |
+| Applied migrations            |             42 |
+| Active student memberships    |              0 |
+| Non-active student profiles   |              2 |
+| Historical membership records |              4 |
+
+The 896 section rows are the production records scoped across programmes,
+Academic Years, Study Years, and semesters; the AVS department pattern contains
+14 logical section codes per semester. There are no duplicate department,
+programme, Academic Year, semester, or scoped section records, and no
+over-capacity section was found.
+
+Production acceptance used one temporary TEST student. Creation in CSE-A,
+database persistence, browser refresh, same-code redeploy persistence, promotion
+to CSE-B, membership history/count updates, archive, and safe cleanup all passed.
+The credential, roles, scopes, and raw TEST identifiers were removed. A
+database-wide text/JSON scan found no raw TEST identifier residue. Production
+retains two valid anonymized historical tombstones in total, including the one
+created by this acceptance, plus their ended membership history; none has an
+authentication path.
+
+Final quality gates on Node.js 22.23.2:
+
+| Gate                            | Result                             |
+| ------------------------------- | ---------------------------------- |
+| API Jest                        | 70/70 suites, 564/564 tests passed |
+| Web Vitest                      | 28/28 files, 193/193 tests passed  |
+| API typecheck, lint, and build  | PASS                               |
+| Web typecheck, lint, and build  | PASS; 90 pages generated           |
+| Production dependency audit     | PASS; 0 vulnerabilities            |
+| Dependency-tree validator tests | PASS; 4/4                          |
+| Production `nanoid` version     | `3.3.18`                           |
+
+Backup gates also passed: the pre-migration backup was encrypted and restored
+in isolation, and the post-archive `PRE_DELETION` backup was encrypted,
+round-trip verified, restored in isolation, and registered as restore-tested
+before cleanup. Google Drive mirroring was skipped because that integration is
+disabled.
+
+This acceptance used Chromium browser automation and responsive viewport
+emulation. It does not claim physical-device, Firefox/Safari, installed-PWA, or
+production load certification.
+
+## Historical Delivery Entries
+
+The entries below record earlier development passes. Their release identifiers,
+test totals, data counts, and limitations are historical and are not the current
+production baseline.
+
 ## 2026-07-19 Final Production Prompt Docs And Test-All Pass
 
 Implemented in this pass:
