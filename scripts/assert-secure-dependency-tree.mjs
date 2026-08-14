@@ -6,7 +6,7 @@ const EXPECTED = Object.freeze({
   swagger: "11.4.6",
   swaggerJsYaml: "5.2.3",
   allowedJsYaml: Object.freeze(["3.15.1", "4.3.1", "5.2.3"]),
-  nanoid: "3.3.17",
+  nanoid: "3.3.18",
 });
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));

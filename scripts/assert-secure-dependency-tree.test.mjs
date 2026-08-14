@@ -28,7 +28,7 @@ function createFixture(t) {
     dependencies: { "@nestjs/swagger": "11.4.6" },
     overrides: {
       "@nestjs/swagger": { "js-yaml": "5.2.3" },
-      nanoid: "3.3.17",
+      nanoid: "3.3.18",
     },
   };
   const apiManifest = { dependencies: { "@nestjs/swagger": "11.4.6" } };
@@ -40,7 +40,7 @@ function createFixture(t) {
       "node_modules/@nestjs/swagger": { version: "11.4.6" },
       "node_modules/@nestjs/swagger/node_modules/js-yaml": { version: "5.2.3" },
       "node_modules/js-yaml": { version: "4.3.1" },
-      "node_modules/nanoid": { version: "3.3.17" },
+      "node_modules/nanoid": { version: "3.3.18" },
     },
   };
 
@@ -65,7 +65,7 @@ function createFixture(t) {
   });
   writeJson(rootDirectory, "node_modules/nanoid/package.json", {
     name: "nanoid",
-    version: "3.3.17",
+    version: "3.3.18",
   });
   fs.mkdirSync(path.join(rootDirectory, "scripts"), { recursive: true });
   fs.copyFileSync(
@@ -122,7 +122,7 @@ test("rejects an installed nanoid downgrade even when the lock remains pinned", 
   assert.equal(result.status, 1);
   assert.match(
     result.stderr,
-    /installed nanoid at node_modules\/nanoid must be "3\.3\.17"/,
+    /installed nanoid at node_modules\/nanoid must be "3\.3\.18"/,
   );
 });
 
