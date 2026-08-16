@@ -1,14 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import {
-  AlertTriangle,
   Bell,
   Bot,
   CheckCircle2,
-  Clock3,
   FileWarning,
   Plus,
-  UserRoundX,
-  Wrench,
 } from "lucide-react";
 import Link from "next/link";
 import { ErrorState, LoadingState } from "@/components/query-state";
@@ -16,6 +12,9 @@ import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
 import { PageHeader } from "@/components/ui/page-header";
+import { OperationsSummary } from "./operations-summary";
+import { DashboardAlerts } from "./dashboard-alerts";
+import styles from "./admin-dashboard.module.css";
 
 interface Breakdown {
   name: string;
@@ -59,57 +58,13 @@ export function AdminDashboard() {
   if (query.isLoading) return <LoadingState />;
   if (query.isError || !query.data) return <ErrorState />;
   const { metrics } = query.data;
-  const cards = [
-    {
-      label: "Open issues",
-      value: metrics.openIssues,
-      icon: Wrench,
-      color: "#2563eb",
-      bg: "#eff6ff",
-    },
-    {
-      label: "New",
-      value: metrics.newIssues,
-      icon: FileWarning,
-      color: "#1e3a8a",
-      bg: "#eff6ff",
-    },
-    {
-      label: "Unassigned",
-      value: metrics.unassignedIssues,
-      icon: UserRoundX,
-      color: "#d97706",
-      bg: "#fff7ed",
-    },
-    {
-      label: "Critical",
-      value: metrics.criticalIssues,
-      icon: AlertTriangle,
-      color: "#dc2626",
-      bg: "#fff1f2",
-    },
-    {
-      label: "Overdue",
-      value: metrics.overdueIssues,
-      icon: Clock3,
-      color: "#d97706",
-      bg: "#fff7ed",
-    },
-    {
-      label: "Resolved today",
-      value: metrics.resolvedToday,
-      icon: CheckCircle2,
-      color: "#16a34a",
-      bg: "#f0fdf4",
-    },
-  ];
   const canAttendance = user?.permissions.some(
     (permission) =>
       permission.startsWith("attendance.read") ||
       permission === "attendance.session.create",
   );
   return (
-    <div className="main-with-bottom-nav">
+    <div className="main-with-bottom-nav" data-notification-ui="true">
       <PageHeader
         title={`Good day, ${user?.fullName.split(" ")[0] ?? "Admin"}`}
         description="Here is what needs attention in your authorised campus scope."
@@ -131,6 +86,9 @@ export function AdminDashboard() {
           ) : undefined
         }
       />
+
+      <DashboardAlerts />
+      <OperationsSummary metrics={metrics} />
 
       {user?.permissions.includes("ai.use") && (
         <section
@@ -172,25 +130,7 @@ export function AdminDashboard() {
         </section>
       )}
 
-      <section className="grid grid-auto-fit gap-4 mb-6">
-        {cards.map(({ label, value, icon: Icon, color, bg }) => (
-          <div
-            className="avs-stat-card"
-            key={label}
-            onClick={() => { window.location.href = "/issues"; }}
-            style={{ cursor: "pointer" }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyItems: "space-between" }}>
-              <span className="avs-stat-card-label">{label}</span>
-              <div className="avs-stat-card-icon" style={{ background: bg, color }}>
-                <Icon size={18} />
-              </div>
-            </div>
-            <span className="avs-stat-card-value">{value}</span>
-          </div>
-        ))}
-      </section>
-      <div className="dashboard-grid">
+      <div className={`dashboard-grid ${styles.dashboardGrid}`}>
         <section className="card">
           <div className="section-head">
             <div>
@@ -274,7 +214,7 @@ export function AdminDashboard() {
           </div>
         </aside>
       </div>
-      <div className="dashboard-grid" style={{ marginTop: 18 }}>
+      <div className={`dashboard-grid ${styles.dashboardGrid}`} style={{ marginTop: 18 }}>
         <BreakdownCard
           title="Issues by category"
           rows={query.data.issuesByCategory}
@@ -339,7 +279,7 @@ export function AdminDashboard() {
 function BreakdownCard({ title, rows }: { title: string; rows: Breakdown[] }) {
   const maximum = Math.max(1, ...rows.map((row) => row.count));
   return (
-    <section className="card" style={{ padding: 20 }}>
+    <section className={`card ${styles.breakdownCard}`} style={{ padding: 20 }}>
       <div className="section-head">
         <div>
           <h2>{title}</h2>
@@ -347,7 +287,7 @@ function BreakdownCard({ title, rows }: { title: string; rows: Breakdown[] }) {
         </div>
       </div>
       {rows.slice(0, 8).map((row) => (
-        <div className="subject-row" key={row.name}>
+        <div className={`subject-row ${styles.breakdownRow}`} key={row.name}>
           <span>
             <strong>{row.name}</strong>
           </span>

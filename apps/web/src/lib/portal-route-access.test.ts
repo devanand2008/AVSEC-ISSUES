@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { canAccessPortalPath } from "./portal-route-access";
 
 describe("canAccessPortalPath", () => {
+  it("gates own notification settings by the existing notification read grant", () => {
+    expect(
+      canAccessPortalPath(
+        "/settings/notifications",
+        ["notifications.read_own"],
+        ["STUDENT"],
+      ),
+    ).toBe(true);
+    expect(canAccessPortalPath("/settings/notifications", [], ["STUDENT"])).toBe(false);
+  });
+
   it("gates storage settings by its read, integration, or backup permission", () => {
     for (const permission of [
       "settings.read",

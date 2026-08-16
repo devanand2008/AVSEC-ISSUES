@@ -266,6 +266,12 @@ export const navigation: NavigationItem[] = [
     any: ["announcements.read"],
   },
   {
+    href: "/notifications",
+    label: "Notifications",
+    icon: Bell,
+    any: ["notifications.read_own"],
+  },
+  {
     href: "/admin/announcements",
     label: "Broadcast messages",
     icon: Megaphone,
@@ -466,6 +472,12 @@ export const navigation: NavigationItem[] = [
     label: "Database & backups",
     icon: HardDrive,
     any: ["settings.read", "integrations.manage", "backups.manage"],
+  },
+  {
+    href: "/settings/notifications",
+    label: "Notification settings",
+    icon: Bell,
+    any: ["notifications.read_own"],
   },
 ];
 

@@ -34,6 +34,12 @@ import type {
 } from "./dto/user.dto";
 import { OfficialGroupsService } from "../conversations/official-groups.service";
 import { SectionPlacementService } from "../academic/section-placement.service";
+import {
+  BANNER_DISMISSAL_CLOCK_SKEW_MS,
+  isBannerKey,
+  mergeNotificationPreferences,
+  type NotificationPreferencesPatch,
+} from "../notifications/notification-preferences";
 
 const ROLE_RANK: Record<string, number> = {
   SUPER_ADMIN: 100,
@@ -224,17 +230,36 @@ export class UsersService {
     input: NotificationPreferencesDto,
     requestId: string,
   ) {
-    const preferences: Prisma.InputJsonObject = {
-      in_app: input.in_app,
-      push: input.push,
-      email: input.email,
-      whatsapp: input.whatsapp,
-    };
+    for (const [bannerId, dismissedAt] of Object.entries(
+      input.dismissed_banners ?? {},
+    )) {
+      const timestamp =
+        typeof dismissedAt === "string" ? Date.parse(dismissedAt) : Number.NaN;
+      if (
+        !isBannerKey(bannerId) ||
+        bannerId.toLowerCase().startsWith("critical-") ||
+        !Number.isFinite(timestamp) ||
+        timestamp > Date.now() + BANNER_DISMISSAL_CLOCK_SKEW_MS
+      ) {
+        throw new BadRequestException(
+          "Dismissed banner preferences are invalid.",
+        );
+      }
+    }
     const saved = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.user.findUniqueOrThrow({
+        where: { id: user.id },
+        select: { notificationPreferences: true },
+      });
+      const preferences = mergeNotificationPreferences(
+        existing.notificationPreferences,
+        input as NotificationPreferencesPatch,
+      );
       const updated = await tx.user.update({
         where: { id: user.id },
         data: {
-          notificationPreferences: preferences,
+          notificationPreferences:
+            preferences as unknown as Prisma.InputJsonObject,
           version: { increment: 1 },
         },
         select: { notificationPreferences: true },
@@ -245,7 +270,8 @@ export class UsersService {
           action: "profile.notification_preferences_updated",
           entityType: "User",
           entityId: user.id,
-          afterValue: preferences,
+          beforeValue: existing.notificationPreferences,
+          afterValue: preferences as unknown as Prisma.InputJsonObject,
           requestId,
         },
         tx,
@@ -838,9 +864,7 @@ export class UsersService {
         );
       }
       if (!input.studentProfile.academicOverrideReason?.trim()) {
-        throw new BadRequestException(
-          "Academic override reason is required.",
-        );
+        throw new BadRequestException("Academic override reason is required.");
       }
     } else if (input.studentProfile?.academicOverrideReason?.trim()) {
       throw new BadRequestException(

@@ -82,6 +82,18 @@ describe("visibleNavigation", () => {
     );
   });
 
+  it("shows notifications only with read access and exposes own notification settings", () => {
+    const withoutRead = visibleNavigation([]).map((item) => item.href);
+    const withRead = visibleNavigation(["notifications.read_own"]).map(
+      (item) => item.href,
+    );
+
+    expect(withoutRead).not.toContain("/notifications");
+    expect(withRead).toContain("/notifications");
+    expect(withoutRead).not.toContain("/settings/notifications");
+    expect(withRead).toContain("/settings/notifications");
+  });
+
   it("maps each feedback administration route to its exact permission and admin role", () => {
     const permissions = [
       "feedback.targets.manage",

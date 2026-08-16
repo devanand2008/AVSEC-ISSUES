@@ -711,6 +711,11 @@ tbody tr:hover {
     0 0 0 4px rgba(37, 99, 235, 0.16),
     0 10px 24px rgba(15, 23, 42, 0.22);
 }
+
+body:has([data-notification-ui="true"]) .pwa-install-button {
+  visibility: hidden;
+  pointer-events: none;
+}
 .pwa-install-scrim {
   position: fixed;
   inset: 0;

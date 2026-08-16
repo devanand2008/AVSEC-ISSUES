@@ -1,12 +1,14 @@
 import { useAuth } from "@/providers/auth-provider";
 import { PageHeader } from "@/components/ui/page-header";
-import { Clock, Wrench } from "lucide-react";
+import { Wrench } from "lucide-react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { LoadingState, ErrorState } from "@/components/query-state";
 import { StatusBadge } from "@/components/status-badge";
 import type { DashboardResponse } from "./dashboard-types";
+import { OperationsSummary } from "./operations-summary";
+import { DashboardAlerts } from "./dashboard-alerts";
 
 export function MaintenanceDashboard() {
   const { user } = useAuth();
@@ -24,7 +26,7 @@ export function MaintenanceDashboard() {
   const { metrics, recentIssues } = query.data;
   
   return (
-    <div className="main-with-bottom-nav">
+    <div className="main-with-bottom-nav" data-notification-ui="true">
       <PageHeader
         title={`Maintenance Dashboard`}
         description={`Hello, ${user?.fullName}. Here are your tasks for today.`}
@@ -39,27 +41,8 @@ export function MaintenanceDashboard() {
         ]}
       />
 
-      <section className="grid grid-auto-fit gap-4 mb-6">
-        <div className="avs-stat-card" onClick={() => { window.location.href = "/issues"; }} style={{ cursor: "pointer" }}>
-           <div style={{ display: "flex", alignItems: "center", justifyItems: "space-between" }}>
-              <span className="avs-stat-card-label">Open Issues</span>
-              <div className="avs-stat-card-icon" style={{ background: "#eff6ff", color: "#2563eb" }}>
-                <Wrench size={18} />
-              </div>
-            </div>
-            <span className="avs-stat-card-value">{metrics.openIssues}</span>
-        </div>
-        
-        <div className="avs-stat-card" onClick={() => { window.location.href = "/issues"; }} style={{ cursor: "pointer" }}>
-           <div style={{ display: "flex", alignItems: "center", justifyItems: "space-between" }}>
-              <span className="avs-stat-card-label">Overdue</span>
-              <div className="avs-stat-card-icon" style={{ background: "#fff7ed", color: "#d97706" }}>
-                <Clock size={18} />
-              </div>
-            </div>
-            <span className="avs-stat-card-value">{metrics.overdueIssues}</span>
-        </div>
-      </section>
+      <DashboardAlerts />
+      <OperationsSummary metrics={metrics} />
 
       <div className="dashboard-grid">
          <section className="card">

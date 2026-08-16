@@ -2,6 +2,7 @@ import { plainToInstance } from "class-transformer";
 import { validate } from "class-validator";
 import { CompleteProfilePhotoDto, PresignProfilePhotoDto } from "../src/modules/storage/dto/storage.dto";
 import { NotificationPreferencesDto } from "../src/modules/users/dto/user.dto";
+import { NOTIFICATION_CATEGORY_KEYS } from "../src/modules/notifications/notification-preferences";
 
 describe("profile persistence validation", () => {
   it.each(["image/jpeg", "image/png", "image/webp"])("accepts supported profile photo type %s", async (mimeType) => {
@@ -34,18 +35,21 @@ describe("profile persistence validation", () => {
     expect((await validate(incomplete)).length).toBeGreaterThan(0);
   });
 
-  it("requires explicit booleans for every persisted notification channel", async () => {
+  it("accepts merge-safe partial notification preferences and rejects invalid channel values", async () => {
     const valid = plainToInstance(NotificationPreferencesDto, {
       in_app: true,
       push: true,
       email: false,
       whatsapp: false,
     });
-    const missing = plainToInstance(NotificationPreferencesDto, {
-      in_app: true,
-      push: true,
+    const partial = plainToInstance(NotificationPreferencesDto, {
+      display_density: "compact",
+      quiet_hours: { enabled: true, start: "22:00", end: "06:00", allow_critical: true },
+      categories: Object.fromEntries(NOTIFICATION_CATEGORY_KEYS.map((category) => [category, { in_app: true, push: true, email: true, whatsapp: false }])),
     });
+    const invalid = plainToInstance(NotificationPreferencesDto, { push: "yes" });
     expect(await validate(valid, { whitelist: true, forbidNonWhitelisted: true })).toHaveLength(0);
-    expect((await validate(missing)).length).toBeGreaterThan(0);
+    expect(await validate(partial, { whitelist: true, forbidNonWhitelisted: true })).toHaveLength(0);
+    expect((await validate(invalid)).length).toBeGreaterThan(0);
   });
 });

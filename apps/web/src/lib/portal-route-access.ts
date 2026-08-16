@@ -46,6 +46,10 @@ const portalRouteRules: readonly PortalRouteRule[] = [
     any: ["settings.read", "integrations.manage", "backups.manage"],
   },
   {
+    prefix: "/settings/notifications",
+    any: ["notifications.read_own"],
+  },
+  {
     prefix: "/admin/feedback/dashboard",
     roles: adminRoles,
     any: ["feedback.read_college"],

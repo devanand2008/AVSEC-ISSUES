@@ -11,6 +11,7 @@ export function PushMessageListener() {
     let unsubscribe: () => void = () => undefined;
     void listenForForegroundMessages((payload) => {
       void client.invalidateQueries({ queryKey: ["notifications"] });
+      void client.invalidateQueries({ queryKey: ["notification-summary"] });
       if (Notification.permission === "granted" && payload.notification?.title) {
         const notification = new Notification(payload.notification.title, {
           body: payload.notification.body,

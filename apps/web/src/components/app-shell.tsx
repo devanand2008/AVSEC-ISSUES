@@ -12,6 +12,7 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { CollegeBranding, LoadingLogo } from "@/components/college-branding";
 import { useAuth } from "@/providers/auth-provider";
 import { GlobalSearch } from "@/components/global-search";
@@ -27,6 +28,12 @@ import {
 } from "@/components/announcement-modal";
 import { MobileBottomNavigation } from "@/components/ui/mobile-bottom-navigation";
 import { AvsBotWidget } from "@/components/avs-bot-widget";
+import {
+  compactBadgeCount,
+  navigationBadgeCount,
+  type NotificationSummary,
+} from "@/features/shell/notification-summary";
+import styles from "./app-shell.module.css";
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, loading, logout } = useAuth();
   const pathname = usePathname();
@@ -37,6 +44,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [pendingAnnouncements, setPendingAnnouncements] = useState<
     PendingAnnouncement[]
   >([]);
+  const canReadNotifications = Boolean(
+    user?.permissions.includes("notifications.read_own"),
+  );
+  const notificationSummary = useQuery({
+    queryKey: ["notification-summary"],
+    queryFn: ({ signal }) =>
+      api.get<NotificationSummary>("/notifications/summary", { signal }),
+    enabled:
+      !loading && Boolean(user) && !user?.mustChangePassword && canReadNotifications,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: false,
+  });
   const routeAllowed =
     !user || canAccessPortalPath(pathname, user.permissions, user.roles);
   function handleLogout() {
@@ -131,15 +151,33 @@ export function AppShell({ children }: { children: ReactNode }) {
           {nav.map((item) => {
             const active = item.href === activeNavigationHref;
             const Icon = item.icon;
+            const badgeCount = navigationBadgeCount(
+              item.href,
+              notificationSummary.data,
+            );
             return (
               <Link
-                className={active ? "active" : ""}
+                className={`${styles.navigationLink} ${active ? "active" : ""}`.trim()}
                 href={item.href}
                 key={item.href}
                 onClick={() => setOpen(false)}
               >
                 <Icon size={19} />
-                <span>{item.label}</span>
+                <span className={styles.navLabel}>{item.label}</span>
+                {badgeCount != null && (
+                  <span
+                    className={`${styles.counterBadge} ${
+                      item.href === "/admin/escalation" ||
+                      (item.href === "/issues" &&
+                        notificationSummary.data?.overdueIssues)
+                        ? styles.criticalCounter
+                        : ""
+                    }`}
+                    aria-label={`${badgeCount} ${item.label.toLowerCase()}`}
+                  >
+                    {compactBadgeCount(badgeCount)}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -179,13 +217,24 @@ export function AppShell({ children }: { children: ReactNode }) {
             <CollegeBranding compact />
           </div>
           <GlobalSearch />
-          <Link
-            href="/notifications"
-            className="icon-button"
-            aria-label="Notifications"
-          >
-            <Bell size={20} />
-          </Link>
+          {canReadNotifications && (
+            <Link
+              href="/notifications"
+              className={`icon-button ${styles.notificationButton}`}
+              aria-label={
+                notificationSummary.data?.unread
+                  ? `Notifications, ${notificationSummary.data.unread} unread`
+                  : "Notifications"
+              }
+            >
+              <Bell size={20} />
+              {Boolean(notificationSummary.data?.unread) && (
+                <span className={styles.topbarBadge} aria-hidden="true">
+                  {compactBadgeCount(notificationSummary.data!.unread)}
+                </span>
+              )}
+            </Link>
+          )}
           <div className="profile-menu">
             <button
               className="profile-button"
@@ -215,6 +264,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <Settings size={17} />
                   Security & sessions
                 </Link>
+                {canReadNotifications && (
+                  <Link href="/settings/notifications">
+                    <Bell size={17} />
+                    Notification settings
+                  </Link>
+                )}
                 <button
                   aria-busy={signingOut}
                   disabled={signingOut}

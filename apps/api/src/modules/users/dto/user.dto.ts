@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from "class-validator";
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from "class-validator";
 import { AccountStatus, AdmissionType, ScopeType, StudentAcademicStatus } from "../../../generated/prisma/enums";
 
 export class UserScopeDto {
@@ -147,9 +147,40 @@ export class UpdateRoleDto {
   @ApiProperty() @IsString() @Length(3, 500) reason!: string;
 }
 
-export class NotificationPreferencesDto {
-  @ApiProperty() @IsBoolean() in_app!: boolean;
-  @ApiProperty() @IsBoolean() push!: boolean;
-  @ApiProperty() @IsBoolean() email!: boolean;
-  @ApiProperty() @IsBoolean() whatsapp!: boolean;
+export class NotificationChannelPreferencesDto {
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() in_app?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() push?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() email?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() whatsapp?: boolean;
+}
+
+export class NotificationCategoryPreferencesDto {
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) issue_assignment?: NotificationChannelPreferencesDto;
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) issue_updates?: NotificationChannelPreferencesDto;
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) overdue_warnings?: NotificationChannelPreferencesDto;
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) maintenance_alerts?: NotificationChannelPreferencesDto;
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) escalations?: NotificationChannelPreferencesDto;
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) attendance_alerts?: NotificationChannelPreferencesDto;
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) announcements?: NotificationChannelPreferencesDto;
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) messages?: NotificationChannelPreferencesDto;
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) system_alerts?: NotificationChannelPreferencesDto;
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) academic_alerts?: NotificationChannelPreferencesDto;
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) avs_learn?: NotificationChannelPreferencesDto;
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) avs_skill?: NotificationChannelPreferencesDto;
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) import_failures?: NotificationChannelPreferencesDto;
+  @IsOptional() @ValidateNested() @Type(() => NotificationChannelPreferencesDto) backup_alerts?: NotificationChannelPreferencesDto;
+}
+
+export class QuietHoursDto {
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() enabled?: boolean;
+  @ApiPropertyOptional({ example: "22:00" }) @IsOptional() @Matches(/^([01]\d|2[0-3]):[0-5]\d$/) start?: string;
+  @ApiPropertyOptional({ example: "06:00" }) @IsOptional() @Matches(/^([01]\d|2[0-3]):[0-5]\d$/) end?: string;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() allow_critical?: boolean;
+}
+
+export class NotificationPreferencesDto extends NotificationChannelPreferencesDto {
+  @ApiPropertyOptional() @IsOptional() @ValidateNested() @Type(() => NotificationCategoryPreferencesDto) categories?: NotificationCategoryPreferencesDto;
+  @ApiPropertyOptional() @IsOptional() @ValidateNested() @Type(() => QuietHoursDto) quiet_hours?: QuietHoursDto;
+  @ApiPropertyOptional({ enum: ["comfortable", "compact"] }) @IsOptional() @IsIn(["comfortable", "compact"]) display_density?: "comfortable" | "compact";
+  @ApiPropertyOptional({ type: Object }) @IsOptional() @IsObject() dismissed_banners?: Record<string, string>;
 }

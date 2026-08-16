@@ -1,21 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BadgeCheck, Bell, BellOff, Camera, KeyRound, Mail, ShieldCheck, Trash2, UserRound, MapPin, Phone, GraduationCap, AlertCircle } from "lucide-react";
+import { BadgeCheck, Bell, Camera, KeyRound, Mail, ShieldCheck, Trash2, UserRound, MapPin, Phone, GraduationCap, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { StatusBadge } from "@/components/status-badge";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
-
-const NOTIFICATION_CHANNELS = [
-  { key: "in_app", label: "In-app notifications", description: "Notifications shown inside the portal bell icon" },
-  { key: "push", label: "Push notifications", description: "Browser and mobile push notifications" },
-  { key: "email", label: "Email notifications", description: "Email alerts for critical events and digests" },
-  { key: "whatsapp", label: "WhatsApp messages", description: "Template messages for urgent issue updates" },
-] as const;
-
-type NotificationPreferences = Record<(typeof NOTIFICATION_CHANNELS)[number]["key"], boolean>;
 
 interface Profile {
   fullName: string;
@@ -26,7 +17,6 @@ interface Profile {
   profileCompletionStatus: string;
   profileCompletionPercentage: number;
   profileRejectionReason: string | null;
-  notificationPreferences: NotificationPreferences;
   roles: Array<{ role: { code: string; name: string } }>;
   address?: string | null;
   guardianName?: string | null;
@@ -36,20 +26,12 @@ interface Profile {
   bloodGroup?: string | null;
 }
 
-const DEFAULT_PREFERENCES: NotificationPreferences = {
-  in_app: true,
-  push: true,
-  email: true,
-  whatsapp: false,
-};
-
 type Tab = "personal" | "academic" | "contact" | "guardian" | "emergency" | "security";
 
 export default function ProfilePage() {
   const { user } = useAuth();
   const client = useQueryClient();
   const fileInput = useRef<HTMLInputElement>(null);
-  const [preferenceOverrides, setPreferenceOverrides] = useState<Partial<NotificationPreferences>>({});
   const [message, setMessage] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("personal");
 
@@ -64,22 +46,6 @@ export default function ProfilePage() {
     queryFn: () => api.get<{ downloadUrl: string }>("/profile/me/photo"),
     enabled: Boolean(profile.data?.profilePhotoKey),
     retry: false,
-  });
-
-  const prefs: NotificationPreferences = {
-    ...DEFAULT_PREFERENCES,
-    ...profile.data?.notificationPreferences,
-    ...preferenceOverrides,
-  };
-
-  const savePreferences = useMutation({
-    mutationFn: () => api.patch<NotificationPreferences>("/profile/me/notification-preferences", prefs),
-    onSuccess: () => {
-      setMessage("Preferences saved.");
-      setPreferenceOverrides({});
-      void client.invalidateQueries({ queryKey: ["profile-me"] });
-    },
-    onError: (caught) => setMessage(caught instanceof ApiError ? caught.message : "Preferences could not be saved."),
   });
 
   const uploadPhoto = useMutation({
@@ -291,20 +257,13 @@ export default function ProfilePage() {
                         </div>
                         
                         <div style={{ marginTop: 24 }}>
-                            <h3 style={{ fontSize: "1rem", marginBottom: 12 }}><Bell size={18} style={{ verticalAlign: "-3px", marginRight: 6 }} />Notification preferences</h3>
-                            <div style={{ padding: "0" }}>
-                                {NOTIFICATION_CHANNELS.map(({ key, label, description }) => (
-                                <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "14px 0", borderBottom: "1px solid var(--border)" }}>
-                                    <div><strong style={{ fontSize: 14 }}>{label}</strong><p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>{description}</p></div>
-                                    <button className="icon-button" aria-label={`${prefs[key] ? "Disable" : "Enable"} ${label}`} onClick={() => { setPreferenceOverrides((previous) => ({ ...previous, [key]: !prefs[key] })); setMessage(""); }} style={{ color: prefs[key] ? "var(--success)" : "var(--muted)", padding: 8 }}>
-                                    {prefs[key] ? <Bell size={22} /> : <BellOff size={22} />}
-                                    </button>
-                                </div>
-                                ))}
-                                <button className="btn btn-primary" style={{ marginTop: 16 }} disabled={savePreferences.isPending || profile.isLoading} onClick={() => savePreferences.mutate()}>
-                                {savePreferences.isPending ? "Saving…" : "Save preferences"}
-                                </button>
-                            </div>
+                            <h3 style={{ fontSize: "1rem", marginBottom: 8 }}><Bell size={18} style={{ verticalAlign: "-3px", marginRight: 6 }} />Notification preferences</h3>
+                            <p className="muted" style={{ margin: "0 0 14px", fontSize: 13 }}>Choose delivery channels, role-specific categories, quiet hours, and display density from one settings page.</p>
+                            {user.permissions.includes("notifications.read_own") && (
+                                <Link className="btn btn-primary" href="/settings/notifications">
+                                    <Bell size={17} />Open notification settings
+                                </Link>
+                            )}
                         </div>
                     </>
                 )}

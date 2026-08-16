@@ -1,0 +1,147 @@
+.stack {
+  display: grid;
+  gap: 9px;
+  margin: 0 0 14px;
+}
+
+.alert {
+  min-width: 0;
+  min-height: 54px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid;
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  box-shadow: var(--shadow-xs);
+}
+
+.critical {
+  border-color: #fecaca;
+  border-left-color: #b91c1c;
+  background: #fff1f2;
+  color: #881337;
+}
+
+.warning {
+  border-color: #fde68a;
+  border-left-color: #d97706;
+  background: #fffbeb;
+  color: #78350f;
+}
+
+.info {
+  border-color: #bfdbfe;
+  border-left-color: #2563eb;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+
+.success {
+  border-color: #bbf7d0;
+  border-left-color: #16a34a;
+  background: #f0fdf4;
+  color: #14532d;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+}
+
+.copy {
+  min-width: 0;
+}
+
+.copy strong,
+.copy span {
+  display: inline;
+  line-height: 1.35;
+}
+
+.copy strong {
+  margin-right: 8px;
+  font-size: 0.86rem;
+}
+
+.copy span {
+  font-size: 0.8rem;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.action,
+.dismiss {
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.action {
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  background: rgba(255, 255, 255, 0.7);
+  text-decoration: none;
+}
+
+.dismiss {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.action:hover,
+.dismiss:hover {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.action:focus-visible,
+.dismiss:focus-visible {
+  outline: 3px solid color-mix(in srgb, currentColor 30%, transparent);
+  outline-offset: 1px;
+}
+
+@media (max-width: 700px) {
+  .alert {
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-items: start;
+    padding: 10px;
+  }
+
+  .icon {
+    padding-top: 2px;
+  }
+
+  .copy strong,
+  .copy span {
+    display: block;
+  }
+
+  .copy strong {
+    margin: 0 0 2px;
+  }
+
+  .copy span {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+
+  .actions {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+}
