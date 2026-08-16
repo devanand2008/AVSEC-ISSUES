@@ -121,10 +121,13 @@ describe("automatic session refresh", () => {
     const second = api.warmup();
     await Promise.all([first, second]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
-      "/health/live",
-      "/health/ready",
-    ]);
+    const healthPaths = fetchMock.mock.calls.map(([input]) =>
+      new URL(String(input), "https://web.test.invalid").pathname,
+    );
+    expect(healthPaths).toEqual(["/health/live", "/health/ready"]);
+    expect(healthPaths.every((path) => !path.startsWith("/api/v1/"))).toBe(
+      true,
+    );
   });
 
   it("keeps operations health requests outside the versioned API prefix", async () => {
@@ -135,7 +138,12 @@ describe("automatic session refresh", () => {
 
     await api.health("ready");
 
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/health/ready");
+    const requestedUrl = new URL(
+      String(fetchMock.mock.calls[0]?.[0]),
+      "https://web.test.invalid",
+    );
+    expect(requestedUrl.pathname).toBe("/health/ready");
+    expect(requestedUrl.pathname).not.toMatch(/^\/api\/v1\//u);
   });
 
   it("retains the server request ID on API errors", async () => {
