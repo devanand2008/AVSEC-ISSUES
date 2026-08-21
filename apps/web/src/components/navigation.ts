@@ -504,7 +504,7 @@ export function visibleNavigation(
 export interface BottomNavItem {
   href: string;
   label: string;
-  iconName: "home" | "attendance" | "learn" | "messages" | "people" | "issues" | "reports" | "profile" | "assigned" | "more";
+  iconName: "home" | "attendance" | "learn" | "messages" | "people" | "campus" | "issues" | "reports" | "profile" | "assigned" | "more";
 }
 
 function normalizedNavigationPath(value: string): string {
@@ -577,24 +577,31 @@ export function getMobileBottomNav(
   if (isAdmin) {
     const items: BottomNavItem[] = [
       { href: "/", label: "Dashboard", iconName: "home" },
-      { href: "/issues", label: "Issues", iconName: "issues" },
-      { href: "/profile", label: "Profile", iconName: "profile" },
     ];
     if (granted.has("users.read")) {
-      items.splice(1, 0, {
+      items.push({
         href: "/admin/people",
         label: "People",
         iconName: "people",
       });
     }
+    if (granted.has("locations.manage")) {
+      items.push({
+        href: "/admin/locations",
+        label: "Campus",
+        iconName: "campus",
+      });
+    }
+    items.push({ href: "/issues", label: "Issues", iconName: "issues" });
     if (granted.has("attendance.export") || granted.has("issues.export")) {
-      items.splice(items.length - 1, 0, {
+      items.push({
         href: "/admin/exports",
         label: "Reports",
         iconName: "reports",
       });
     }
-    return items;
+    items.push({ href: "/profile", label: "Profile", iconName: "profile" });
+    return [items[0]!, ...items.slice(1, -1).slice(0, 3), items.at(-1)!];
   }
 
   if (isMaintenance) {

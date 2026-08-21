@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Bell,
   Bot,
+  Building2,
   CheckCircle2,
   FileWarning,
   Plus,
@@ -262,6 +263,17 @@ export function AdminDashboard() {
             <small>{metrics.unreadNotifications} unread updates</small>
           </div>
         </Link>
+        {user?.permissions.includes("locations.manage") && (
+          <Link href="/admin/locations">
+            <span>
+              <Building2 />
+            </span>
+            <div>
+              <strong>Campus setup</strong>
+              <small>Blocks, floors, rooms and labs</small>
+            </div>
+          </Link>
+        )}
         <Link href="/analytics">
           <span>
             <span style={{ display: "grid", placeItems: "center" }}>📊</span>

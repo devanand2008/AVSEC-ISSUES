@@ -15,6 +15,7 @@ import { api, ApiError } from "@/lib/api";
 import type { SelectOption } from "@/lib/types";
 
 type ManagedKind = "campus" | "block" | "floor" | "room";
+type CreateKind = ManagedKind;
 interface ManagedLocation extends SelectOption {
   isActive: boolean;
   isTestData: boolean;
@@ -34,6 +35,17 @@ const ROOM_TYPES = [
   "STAIRCASE", "PARKING_AREA", "PLAYGROUND", "OTHER",
 ];
 
+function emptyLocationForm() {
+  return {
+    code: "",
+    name: "",
+    level: 1,
+    roomType: "CLASSROOM",
+    roomNumber: "",
+    capacity: "",
+  };
+}
+
 export default function LocationsAdminPage() {
   const client = useQueryClient();
   const [campusId, setCampus] = useState("");
@@ -42,8 +54,8 @@ export default function LocationsAdminPage() {
   const [search, setSearch] = useState("");
 
   // Create form
-  const [kind, setKind] = useState<"block" | "floor" | "room">("block");
-  const [form, setForm] = useState({ code: "", name: "", level: 1, roomType: "CLASSROOM" });
+  const [kind, setKind] = useState<CreateKind>("campus");
+  const [form, setForm] = useState(emptyLocationForm());
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
 
@@ -58,13 +70,24 @@ export default function LocationsAdminPage() {
   const rooms = useQuery({ queryKey: ["rooms", floorId], queryFn: () => api.get<Array<SelectOption & { roomType: string }>>(`/locations/rooms?floorId=${floorId}`), enabled: Boolean(floorId) });
 
   const create = useMutation({
-    mutationFn: () => kind === "block" ? api.post("/locations/blocks", { campusId, code: form.code, name: form.name })
-      : kind === "floor" ? api.post("/locations/floors", { blockId, code: form.code, name: form.name, level: form.level })
-        : api.post("/locations/rooms", { floorId, code: form.code, name: form.name, roomType: form.roomType.replaceAll(" ", "_") }),
+    mutationFn: () => {
+      if (kind === "campus") return api.post("/admin/campuses", { code: form.code, name: form.name });
+      if (kind === "block") return api.post("/locations/blocks", { campusId, code: form.code, name: form.name });
+      if (kind === "floor") return api.post("/locations/floors", { blockId, code: form.code, name: form.name, level: form.level });
+      return api.post("/locations/rooms", {
+        floorId,
+        code: form.code,
+        name: form.name,
+        roomType: form.roomType.replaceAll(" ", "_"),
+        ...(form.roomNumber.trim() ? { roomNumber: form.roomNumber.trim() } : {}),
+        ...(form.capacity.trim() ? { capacity: Number(form.capacity) } : {}),
+      });
+    },
     onSuccess: () => {
-      setForm({ code: "", name: "", level: 1, roomType: "CLASSROOM" });
+      setForm(emptyLocationForm());
       setShowCreate(false);
-      void client.invalidateQueries({ queryKey: [kind === "block" ? "blocks" : kind === "floor" ? "floors" : "rooms"] });
+      void client.invalidateQueries({ queryKey: [kind === "campus" ? "campuses" : kind === "block" ? "blocks" : kind === "floor" ? "floors" : "rooms"] });
+      void client.invalidateQueries({ queryKey: ["managed-locations"] });
     },
     onError: (caught) => setError(caught instanceof ApiError ? caught.message : "Location could not be created."),
   });
@@ -95,6 +118,13 @@ export default function LocationsAdminPage() {
       setError(caught instanceof Error ? caught.message : "Location action failed."),
   });
 
+  function openCreate(nextKind: CreateKind, roomType = "CLASSROOM") {
+    setKind(nextKind);
+    setForm({ ...emptyLocationForm(), roomType });
+    setError("");
+    setShowCreate(true);
+  }
+
   function submit(event: FormEvent) { event.preventDefault(); setError(""); create.mutate(); }
 
   // Build breadcrumb trail
@@ -123,6 +153,8 @@ export default function LocationsAdminPage() {
 
   // Determine what level to show
   const currentLevel = floorId ? "room" : blockId ? "floor" : campusId ? "block" : "campus";
+  const createDisabled = kind === "campus" ? false : kind === "block" ? !campusId : kind === "floor" ? !blockId : !floorId;
+  const createLabel = kind === "room" && form.roomType === "LABORATORY" ? "lab" : kind;
 
   if (campuses.isLoading) return <LoadingState />;
   if (campuses.isError) return <ErrorState />;
@@ -130,12 +162,17 @@ export default function LocationsAdminPage() {
   return <>
     <PageHeader
       title="Campus Setup"
-      description="Build and manage the campus → block → floor → room hierarchy."
+      description="Build and manage the campus -> block -> floor -> room and lab hierarchy."
       breadcrumbs={[{ label: "Admin" }, { label: "Campus Setup" }]}
       actions={
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {floorId && <Link className="avs-btn avs-btn-secondary" href={`/admin/locations/qr-sheet?floorId=${floorId}`}><QrCode size={16} />Print QR Sheet</Link>}
-          <button className="avs-btn avs-btn-primary" onClick={() => setShowCreate(!showCreate)}><Plus size={16} />Add Location</button>
+          {currentLevel !== "campus" && <button className="avs-btn avs-btn-secondary" type="button" onClick={() => openCreate("campus")}><MapPin size={16} />Add Campus</button>}
+          {currentLevel === "campus" && <button className="avs-btn avs-btn-primary" type="button" onClick={() => openCreate("campus")}><Plus size={16} />Add Campus</button>}
+          {currentLevel === "block" && <button className="avs-btn avs-btn-primary" type="button" onClick={() => openCreate("block")}><Plus size={16} />Add Block</button>}
+          {currentLevel === "floor" && <button className="avs-btn avs-btn-primary" type="button" onClick={() => openCreate("floor")}><Plus size={16} />Add Floor</button>}
+          {currentLevel === "room" && <button className="avs-btn avs-btn-secondary" type="button" onClick={() => openCreate("room", "CLASSROOM")}><DoorOpen size={16} />Add Room</button>}
+          {currentLevel === "room" && <button className="avs-btn avs-btn-primary" type="button" onClick={() => openCreate("room", "LABORATORY")}><FlaskConical size={16} />Add Lab</button>}
         </div>
       }
     />
@@ -235,7 +272,7 @@ export default function LocationsAdminPage() {
             <div key={room.id} className="avs-card" style={{ padding: 20 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <div style={{ width: 44, height: 44, borderRadius: "var(--radius-md)", background: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <DoorOpen size={22} />
+                  {room.roomType === "LABORATORY" ? <FlaskConical size={22} /> : <DoorOpen size={22} />}
                 </div>
                 <div>
                   <strong style={{ display: "block", fontSize: "1rem" }}>{room.name}</strong>
@@ -255,49 +292,62 @@ export default function LocationsAdminPage() {
     {/* Add Location Collapsible Form */}
     {showCreate && (
       <section className="avs-card avs-animate-slide-up" style={{ marginBottom: 24, padding: 24 }}>
-        <h2 style={{ margin: "0 0 16px", fontSize: "1.1rem" }}>Add New Location</h2>
+        <h2 style={{ margin: "0 0 16px", fontSize: "1.1rem" }}>Add New {createLabel[0]?.toUpperCase()}{createLabel.slice(1)}</h2>
         <form onSubmit={submit} style={{ display: "grid", gap: 14, maxWidth: 500 }}>
           {error && <div className="error-box">{error}</div>}
           <div className="field">
             <label>Location type</label>
-            <select className="input" value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
+            <select aria-label="Location type" className="input" value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
+              <option value="campus">Campus</option>
               <option value="block">Block</option>
               <option value="floor">Floor</option>
               <option value="room">Room</option>
             </select>
           </div>
-          <div className="field">
-            <label>Parent</label>
-            <input className="input" disabled value={
-              kind === "block" ? selectedCampus?.name ?? "Select a campus first"
-                : kind === "floor" ? selectedBlock?.name ?? "Select a block first"
-                  : selectedFloor?.name ?? "Select a floor first"
-            } />
-          </div>
+          {kind !== "campus" && (
+            <div className="field">
+              <label>Parent</label>
+              <input className="input" disabled value={
+                kind === "block" ? selectedCampus?.name ?? "Select a campus first"
+                  : kind === "floor" ? selectedBlock?.name ?? "Select a block first"
+                    : selectedFloor?.name ?? "Select a floor first"
+              } />
+            </div>
+          )}
           <div className="field">
             <label>Code</label>
-            <input className="input" required maxLength={40} placeholder="e.g. B1, F2, R101" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} />
+            <input aria-label="Code" className="input" required maxLength={40} placeholder={kind === "campus" ? "e.g. MAIN" : "e.g. B1, F2, R101"} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} />
           </div>
           <div className="field">
             <label>Display name</label>
-            <input className="input" required placeholder="e.g. Main Block, Ground Floor" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <input aria-label="Display name" className="input" required placeholder={kind === "campus" ? "e.g. Main Campus" : "e.g. Main Block, Ground Floor"} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </div>
           {kind === "floor" && (
             <div className="field">
               <label>Level</label>
-              <input className="input" type="number" value={form.level} onChange={(e) => setForm({ ...form, level: Number(e.target.value) })} />
+              <input aria-label="Level" className="input" type="number" value={form.level} onChange={(e) => setForm({ ...form, level: Number(e.target.value) })} />
             </div>
           )}
           {kind === "room" && (
-            <div className="field">
-              <label>Room type</label>
-              <select className="input" value={form.roomType} onChange={(e) => setForm({ ...form, roomType: e.target.value })}>
-                {ROOM_TYPES.map((t) => <option key={t} value={t}>{t.replaceAll("_", " ")}</option>)}
-              </select>
-            </div>
+            <>
+              <div className="field">
+                <label>Room type</label>
+                <select aria-label="Room type" className="input" value={form.roomType} onChange={(e) => setForm({ ...form, roomType: e.target.value })}>
+                  {ROOM_TYPES.map((t) => <option key={t} value={t}>{t.replaceAll("_", " ")}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Room number</label>
+                <input aria-label="Room number" className="input" maxLength={40} placeholder="e.g. 101" value={form.roomNumber} onChange={(e) => setForm({ ...form, roomNumber: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Capacity</label>
+                <input aria-label="Capacity" className="input" type="number" min={1} max={100000} placeholder={form.roomType === "LABORATORY" ? "e.g. 40" : "e.g. 60"} value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
+              </div>
+            </>
           )}
-          <button className="btn btn-primary" disabled={create.isPending || (kind === "block" ? !campusId : kind === "floor" ? !blockId : !floorId)} style={{ justifySelf: "start" }}>
-            <Plus size={17} />{create.isPending ? "Creating…" : `Add ${kind}`}
+          <button className="btn btn-primary" disabled={create.isPending || createDisabled} style={{ justifySelf: "start" }}>
+            <Plus size={17} />{create.isPending ? "Creating..." : `Add ${createLabel}`}
           </button>
         </form>
       </section>

@@ -199,6 +199,16 @@ describe("getMobileBottomNav", () => {
     ).not.toContain("/admin/people");
   });
 
+  it("shows Campus setup in the admin app tabs when location management is allowed", () => {
+    const items = getMobileBottomNav(["MAIN_ADMIN"], ["locations.manage"]);
+
+    expect(items.map((item) => item.href)).toContain("/admin/locations");
+    expect(items.find((item) => item.href === "/admin/locations")?.label).toBe(
+      "Campus",
+    );
+    expect(items.length).toBeLessThanOrEqual(5);
+  });
+
   it.each([
     "MAINTENANCE_ADMIN",
     "MAINTENANCE_SUPERVISOR",

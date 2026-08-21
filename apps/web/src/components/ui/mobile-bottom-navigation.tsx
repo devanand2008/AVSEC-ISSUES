@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
   BookOpen,
+  Building2,
   ClipboardCheck,
   ClipboardList,
   Download,
@@ -27,6 +28,7 @@ const iconMap: Record<BottomNavItem["iconName"], LucideIcon> = {
   learn: BookOpen,
   messages: MessageCircle,
   people: Users,
+  campus: Building2,
   issues: FileWarning,
   reports: Download,
   profile: User,
