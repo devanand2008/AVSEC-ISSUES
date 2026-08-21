@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive, Building2, ChevronRight, DoorOpen, FlaskConical, Layers3,
-  MapPin, Plus, QrCode, RotateCcw, ShieldCheck, Trash2,
+  MapPin, Pencil, Plus, QrCode, RotateCcw, ShieldCheck, Trash2, X,
 } from "lucide-react";
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
@@ -16,6 +16,7 @@ import type { SelectOption } from "@/lib/types";
 
 type ManagedKind = "campus" | "block" | "floor" | "room";
 type CreateKind = ManagedKind;
+type EditableKind = Extract<ManagedKind, "campus" | "block">;
 interface ManagedLocation extends SelectOption {
   isActive: boolean;
   isTestData: boolean;
@@ -59,6 +60,11 @@ export default function LocationsAdminPage() {
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
 
+  // Campus and block identity editing
+  const [editing, setEditing] = useState<{ kind: EditableKind; record: SelectOption } | null>(null);
+  const [editForm, setEditForm] = useState({ code: "", name: "" });
+  const [editError, setEditError] = useState("");
+
   // Management panel
   const [managedKind, setManagedKind] = useState<ManagedKind>("campus");
   const [managedStatus, setManagedStatus] = useState("ALL");
@@ -92,6 +98,23 @@ export default function LocationsAdminPage() {
     onError: (caught) => setError(caught instanceof ApiError ? caught.message : "Location could not be created."),
   });
 
+  const updateIdentity = useMutation({
+    mutationFn: ({ kind: updateKind, id, code, name }: { kind: EditableKind; id: string; code: string; name: string }) =>
+      api.patch(`/admin/${updateKind === "campus" ? "campuses" : "blocks"}/${id}`, {
+        code: code.trim().toUpperCase(),
+        name: name.trim(),
+      }),
+    onSuccess: () => {
+      setEditing(null);
+      setEditForm({ code: "", name: "" });
+      void client.invalidateQueries({ queryKey: ["campuses"] });
+      void client.invalidateQueries({ queryKey: ["blocks"] });
+      void client.invalidateQueries({ queryKey: ["managed-locations"] });
+    },
+    onError: (caught) =>
+      setEditError(caught instanceof ApiError ? caught.message : "Campus or block could not be updated."),
+  });
+
   const managedPlural = managedKind === "campus" ? "campuses" : `${managedKind}s`;
   const managed = useQuery({
     queryKey: ["managed-locations", managedKind, managedStatus],
@@ -122,10 +145,34 @@ export default function LocationsAdminPage() {
     setKind(nextKind);
     setForm({ ...emptyLocationForm(), roomType });
     setError("");
+    setEditing(null);
     setShowCreate(true);
   }
 
+  function openEdit(editKind: EditableKind, record: SelectOption) {
+    setEditing({ kind: editKind, record });
+    setEditForm({ code: record.code ?? "", name: record.name });
+    setEditError("");
+    setShowCreate(false);
+  }
+
+  function closeEdit() {
+    if (updateIdentity.isPending) return;
+    setEditing(null);
+    setEditError("");
+  }
+
   function submit(event: FormEvent) { event.preventDefault(); setError(""); create.mutate(); }
+  function submitEdit(event: FormEvent) {
+    event.preventDefault();
+    if (!editing) return;
+    if (!editForm.code.trim() || editForm.name.trim().length < 2) {
+      setEditError("Enter a code and a display name with at least 2 characters.");
+      return;
+    }
+    setEditError("");
+    updateIdentity.mutate({ kind: editing.kind, id: editing.record.id, ...editForm });
+  }
 
   // Build breadcrumb trail
   const selectedCampus = campuses.data?.find((c) => c.id === campusId);
@@ -203,20 +250,25 @@ export default function LocationsAdminPage() {
       {currentLevel === "campus" && (
         <div className="grid grid-auto-fit gap-4">
           {filterBySearch(campuses.data).map((campus) => (
-            <button key={campus.id} className="avs-card" onClick={() => setCampus(campus.id)} style={{ cursor: "pointer", padding: 20, textAlign: "left", border: "none", width: "100%" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 44, height: 44, borderRadius: "var(--radius-md)", background: "var(--very-light-blue)", color: "var(--primary)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <MapPin size={22} />
+            <article key={campus.id} className="avs-card" style={{ padding: 20 }}>
+              <button type="button" aria-label={`View blocks in ${campus.name}`} onClick={() => setCampus(campus.id)} style={{ cursor: "pointer", padding: 0, textAlign: "left", border: "none", background: "transparent", color: "inherit", width: "100%" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 44, height: 44, borderRadius: "var(--radius-md)", background: "var(--very-light-blue)", color: "var(--primary)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <MapPin size={22} />
+                  </div>
+                  <div>
+                    <strong style={{ display: "block", fontSize: "1rem" }}>{campus.name}</strong>
+                    <span className="muted" style={{ fontSize: "0.85rem" }}>{campus.code}</span>
+                  </div>
                 </div>
-                <div>
-                  <strong style={{ display: "block", fontSize: "1rem" }}>{campus.name}</strong>
-                  <span className="muted" style={{ fontSize: "0.85rem" }}>{campus.code}</span>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginTop: 12, color: "var(--primary)", fontSize: "0.85rem", fontWeight: 600, gap: 4 }}>
+                  View blocks <ChevronRight size={14} />
                 </div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginTop: 12, color: "var(--primary)", fontSize: "0.85rem", fontWeight: 600, gap: 4 }}>
-                View blocks <ChevronRight size={14} />
-              </div>
-            </button>
+              </button>
+              <button type="button" className="btn btn-secondary" aria-label={`Edit ${campus.name}`} onClick={() => openEdit("campus", campus)} style={{ marginTop: 12, minHeight: 44 }}>
+                <Pencil size={15} />Edit name and code
+              </button>
+            </article>
           ))}
           {!filterBySearch(campuses.data).length && <EmptyState title="No campuses" description={search ? "No campuses match your search." : "No campuses have been created yet."} />}
         </div>
@@ -225,20 +277,25 @@ export default function LocationsAdminPage() {
       {currentLevel === "block" && (
         <div className="grid grid-auto-fit gap-4">
           {blocks.isLoading ? <LoadingState /> : filterBySearch(blocks.data).map((block) => (
-            <button key={block.id} className="avs-card" onClick={() => setBlock(block.id)} style={{ cursor: "pointer", padding: 20, textAlign: "left", border: "none", width: "100%" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 44, height: 44, borderRadius: "var(--radius-md)", background: "#fef3c7", color: "#d97706", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <Building2 size={22} />
+            <article key={block.id} className="avs-card" style={{ padding: 20 }}>
+              <button type="button" aria-label={`View floors in ${block.name}`} onClick={() => setBlock(block.id)} style={{ cursor: "pointer", padding: 0, textAlign: "left", border: "none", background: "transparent", color: "inherit", width: "100%" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 44, height: 44, borderRadius: "var(--radius-md)", background: "#fef3c7", color: "#d97706", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <Building2 size={22} />
+                  </div>
+                  <div>
+                    <strong style={{ display: "block", fontSize: "1rem" }}>{block.name}</strong>
+                    <span className="muted" style={{ fontSize: "0.85rem" }}>{block.code}</span>
+                  </div>
                 </div>
-                <div>
-                  <strong style={{ display: "block", fontSize: "1rem" }}>{block.name}</strong>
-                  <span className="muted" style={{ fontSize: "0.85rem" }}>{block.code}</span>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginTop: 12, color: "var(--primary)", fontSize: "0.85rem", fontWeight: 600, gap: 4 }}>
+                  View floors <ChevronRight size={14} />
                 </div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginTop: 12, color: "var(--primary)", fontSize: "0.85rem", fontWeight: 600, gap: 4 }}>
-                View floors <ChevronRight size={14} />
-              </div>
-            </button>
+              </button>
+              <button type="button" className="btn btn-secondary" aria-label={`Edit ${block.name}`} onClick={() => openEdit("block", block)} style={{ marginTop: 12, minHeight: 44 }}>
+                <Pencil size={15} />Edit name and code
+              </button>
+            </article>
           ))}
           {!blocks.isLoading && !filterBySearch(blocks.data).length && <EmptyState title="No blocks" description={search ? "No blocks match your search." : "No blocks in this campus yet."} />}
         </div>
@@ -288,6 +345,51 @@ export default function LocationsAdminPage() {
         </div>
       )}
     </section>
+
+    {editing && (
+      <div
+        className="avs-dialog-backdrop"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) closeEdit();
+        }}
+      >
+        <form
+          className="avs-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-location-title"
+          onSubmit={submitEdit}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") closeEdit();
+          }}
+        >
+          <header className="avs-dialog-header">
+            <h2 id="edit-location-title">Edit {editing.kind === "campus" ? "Campus" : "Block"}</h2>
+            <button className="avs-btn avs-btn-ghost avs-btn-icon" type="button" aria-label="Close edit dialog" disabled={updateIdentity.isPending} onClick={closeEdit}>
+              <X size={17} />
+            </button>
+          </header>
+          <div className="avs-dialog-body" style={{ display: "grid", gap: 16 }}>
+            <p className="muted" style={{ margin: 0 }}>Update only the display name and code for {editing.record.name}.</p>
+            {editError && <div className="error-box" role="alert">{editError}</div>}
+            <div className="field">
+              <label htmlFor="location-edit-code">Code</label>
+              <input id="location-edit-code" className="input" autoFocus required minLength={1} maxLength={30} value={editForm.code} onChange={(event) => setEditForm({ ...editForm, code: event.target.value.toUpperCase() })} />
+            </div>
+            <div className="field">
+              <label htmlFor="location-edit-name">Display name</label>
+              <input id="location-edit-name" className="input" required minLength={2} maxLength={editing.kind === "campus" ? 160 : 120} value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} />
+            </div>
+          </div>
+          <footer className="avs-dialog-footer" style={{ flexWrap: "wrap" }}>
+            <button className="avs-btn avs-btn-secondary" type="button" disabled={updateIdentity.isPending} onClick={closeEdit}>Cancel</button>
+            <button className="avs-btn avs-btn-primary" disabled={updateIdentity.isPending}>
+              <Pencil size={16} />{updateIdentity.isPending ? "Saving..." : "Save changes"}
+            </button>
+          </footer>
+        </form>
+      </div>
+    )}
 
     {/* Add Location Collapsible Form */}
     {showCreate && (
@@ -385,6 +487,9 @@ export default function LocationsAdminPage() {
                 </div>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {(managedKind === "campus" || managedKind === "block") && (
+                  <button className="btn btn-secondary" style={{ fontSize: "0.8rem", padding: "6px 10px" }} onClick={() => openEdit(managedKind, record)}><Pencil size={14} />Edit</button>
+                )}
                 <button className="btn btn-secondary" style={{ fontSize: "0.8rem", padding: "6px 10px" }} onClick={() => manage.mutate({ action: "dependencies", record })}><ShieldCheck size={14} />Dependencies</button>
                 <button className="btn btn-secondary" style={{ fontSize: "0.8rem", padding: "6px 10px" }} onClick={() => manage.mutate({ action: "test", record })}><FlaskConical size={14} />{record.isTestData ? "Unmark" : "Test Data"}</button>
                 {record.archivedAt

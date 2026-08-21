@@ -61,6 +61,7 @@ beforeEach(() => {
     return Promise.reject(new Error(`Unexpected GET ${path}`));
   });
   mocks.post.mockResolvedValue({ id: "created" });
+  mocks.patch.mockResolvedValue({ id: "updated" });
 });
 
 afterEach(() => {
@@ -88,8 +89,8 @@ describe("LocationsAdminPage", () => {
   it("exposes a direct Add Lab action after selecting a floor", async () => {
     renderLocations();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Main Campus/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /Academic Block A/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "View blocks in Main Campus" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View floors in Academic Block A" }));
     fireEvent.click(await screen.findByRole("button", { name: /First Floor/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Add Lab" }));
 
@@ -109,6 +110,46 @@ describe("LocationsAdminPage", () => {
         roomType: "LABORATORY",
         roomNumber: "101",
         capacity: 40,
+      }),
+    );
+  });
+
+  it("edits a campus name and code through the admin endpoint", async () => {
+    renderLocations();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Main Campus" }));
+    expect(screen.getByRole("dialog", { name: "Edit Campus" })).toBeVisible();
+    expect(screen.getByLabelText("Code")).toHaveValue("MAIN");
+    expect(screen.getByLabelText("Display name")).toHaveValue("Main Campus");
+
+    fireEvent.change(screen.getByLabelText("Code"), { target: { value: "central" } });
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Central Campus" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(mocks.patch).toHaveBeenCalledWith("/admin/campuses/campus-1", {
+        code: "CENTRAL",
+        name: "Central Campus",
+      }),
+    );
+  });
+
+  it("edits a block name and code without navigating into the block", async () => {
+    renderLocations();
+
+    fireEvent.click(await screen.findByRole("button", { name: "View blocks in Main Campus" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Academic Block A" }));
+    expect(screen.getByRole("dialog", { name: "Edit Block" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /First Floor/ })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Code"), { target: { value: "science" } });
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Science Block" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(mocks.patch).toHaveBeenCalledWith("/admin/blocks/block-1", {
+        code: "SCIENCE",
+        name: "Science Block",
       }),
     );
   });
