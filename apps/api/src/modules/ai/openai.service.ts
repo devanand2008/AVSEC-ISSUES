@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  ServiceUnavailableException,
-} from "@nestjs/common";
+import { Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import OpenAI, { toFile } from "openai";
 import type { AiProviderStreamEvent } from "./ai.types";
@@ -22,20 +19,17 @@ export class OpenAiService {
       "OPENAI_MAX_OUTPUT_TOKENS",
       1_200,
     );
-    this.vectorStoreId =
-      config.get<string>("OPENAI_VECTOR_STORE_ID") ?? null;
-    this.knowledgeProvider = config.get<
-      "internal" | "openai_file_search"
-    >("AI_KNOWLEDGE_PROVIDER", "internal");
+    this.vectorStoreId = config.get<string>("OPENAI_VECTOR_STORE_ID") ?? null;
+    this.knowledgeProvider = config.get<"internal" | "openai_file_search">(
+      "AI_KNOWLEDGE_PROVIDER",
+      "internal",
+    );
     const apiKey = config.get<string>("OPENAI_API_KEY");
     this.client =
       this.enabled && apiKey
         ? new OpenAI({
             apiKey,
-            timeout: config.get<number>(
-              "OPENAI_REQUEST_TIMEOUT_MS",
-              45_000,
-            ),
+            timeout: config.get<number>("OPENAI_REQUEST_TIMEOUT_MS", 45_000),
             maxRetries: 2,
           })
         : null;
@@ -123,6 +117,13 @@ export class OpenAiService {
           inputTokens: event.response.usage?.input_tokens ?? 0,
           outputTokens: event.response.usage?.output_tokens ?? 0,
         };
+      } else if (
+        event.type === "response.failed" ||
+        event.type === "response.incomplete"
+      ) {
+        throw new ServiceUnavailableException(
+          "The OpenAI response ended before completion.",
+        );
       }
     }
   }

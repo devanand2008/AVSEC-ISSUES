@@ -730,13 +730,24 @@ export class DataMaintenanceService {
           where: {
             id: { in: await this.deletableImportIds(user.collegeId, before) },
           },
-          select: { id: true, sourceStorageKey: true, resultStorageKey: true },
+          select: {
+            id: true,
+            sourceStorageKey: true,
+            resultStorageKey: true,
+            pendingResultStorageKey: true,
+          },
         });
-        const keys = jobs.flatMap((job) =>
-          [job.sourceStorageKey, job.resultStorageKey].filter(
-            (key): key is string => Boolean(key),
+        const keys = [
+          ...new Set(
+            jobs.flatMap((job) =>
+              [
+                job.sourceStorageKey,
+                job.resultStorageKey,
+                job.pendingResultStorageKey,
+              ].filter((key): key is string => Boolean(key)),
+            ),
           ),
-        );
+        ];
         const storage = await this.storage.deleteMaintenanceObjects(keys);
         if (storage.failed)
           throw new ConflictException(
@@ -1047,7 +1058,7 @@ export class DataMaintenanceService {
     const jobs = await this.prisma.importJob.findMany({
       where: {
         collegeId,
-        status: { in: ["FAILED", "ROLLED_BACK"] },
+        status: { in: ["FAILED", "ROLLED_BACK", "CANCELLED"] },
         createdAt: { lt: before },
       },
       select: { id: true },

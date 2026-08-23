@@ -47,7 +47,11 @@ interface PersonRow {
   studentProfile: {
     studentId: string;
     department: { code: string; name: string };
-    section: { code: string; name: string };
+    section: {
+      code: string;
+      name: string;
+      assignedRoom?: { id: string; code: string; name: string; roomNumber: string | null } | null;
+    };
   } | null;
   staffProfile: {
     employeeId: string;
@@ -74,6 +78,18 @@ interface BackupListResponse {
     createdAt: string;
     completedAt?: string;
     lastRestoreTest?: { status: string };
+  }>;
+}
+
+interface PeopleFilterOptions {
+  departments: Array<{ id: string; code: string; name: string }>;
+  rooms: Array<{
+    id: string;
+    code: string;
+    name: string;
+    roomNumber: string | null;
+    departmentId: string | null;
+    floor: { name: string; block: { name: string; campus: { name: string } } };
   }>;
 }
 
@@ -112,6 +128,9 @@ export default function PeopleManagementPage() {
   const [roleFilter, setRoleFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [deptFilter, setDeptFilter] = useState("");
+  const [studyYearFilter, setStudyYearFilter] = useState("");
+  const [roomFilter, setRoomFilter] = useState("");
+  const [roomSearch, setRoomSearch] = useState("");
 
   // ── Dialogs ──
   const [archiveTarget, setArchiveTarget] = useState<PersonRow | null>(null);
@@ -131,6 +150,19 @@ export default function PeopleManagementPage() {
     enabled: canDeletePermanently && canManageBackups,
   });
 
+  const filterOptions = useQuery({
+    queryKey: ["people", "filter-options", deptFilter, roomSearch],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (deptFilter) params.set("departmentId", deptFilter);
+      if (roomSearch) params.set("roomSearch", roomSearch);
+      return api.get<PeopleFilterOptions>(
+        `/admin/people/filter-options${params.size ? `?${params}` : ""}`,
+      );
+    },
+    enabled: showFilters,
+  });
+
   // ── Tab → API params mapping ──
   const tabParams = useMemo(() => {
     const params: Record<string, string> = {};
@@ -144,7 +176,7 @@ export default function PeopleManagementPage() {
 
   // ── People Query ──
   const people = useQuery({
-    queryKey: ["people", search, page, activeTab, roleFilter, statusFilter, deptFilter],
+    queryKey: ["people", search, page, activeTab, roleFilter, statusFilter, deptFilter, studyYearFilter, roomFilter],
     queryFn: () => {
       const params = new URLSearchParams({ page: String(page), pageSize: "25" });
       if (search) params.set("search", search);
@@ -152,7 +184,9 @@ export default function PeopleManagementPage() {
       if (roleFilter) params.set("role", roleFilter);
       if (statusFilter) params.set("status", statusFilter);
       if (deptFilter) params.set("departmentId", deptFilter);
-      return api.get<PageResponse<PersonRow>>(`/users?${params}`);
+      if (studyYearFilter) params.set("studyYear", studyYearFilter);
+      if (roomFilter) params.set("roomId", roomFilter);
+      return api.get<PageResponse<PersonRow>>(`/admin/people?${params}`);
     },
   });
 
@@ -198,7 +232,12 @@ export default function PeopleManagementPage() {
 
   // ── Helper: section info ──
   function sectionInfo(p: PersonRow): string {
-    if (p.studentProfile) return p.studentProfile.section.name;
+    if (p.studentProfile) {
+      const room = p.studentProfile.section.assignedRoom;
+      return room
+        ? `${p.studentProfile.section.name} · ${room.code}`
+        : p.studentProfile.section.name;
+    }
     return "—";
   }
 
@@ -239,21 +278,30 @@ export default function PeopleManagementPage() {
       items.push({
         label: "Suspend Account",
         icon: <Shield size={16} />,
-        onClick: () => archiveMutation.mutate({ id: p.publicId, status: "SUSPENDED", reason: "Suspended by admin" }),
+        onClick: () => {
+          archiveMutation.reset();
+          archiveMutation.mutate({ id: p.publicId, status: "SUSPENDED", reason: "Suspended by admin" });
+        },
       });
     }
     if (canSuspend && p.status !== "ARCHIVED") {
       items.push({
         label: "Archive",
         icon: <Archive size={16} />,
-        onClick: () => setArchiveTarget(p),
+        onClick: () => {
+          archiveMutation.reset();
+          setArchiveTarget(p);
+        },
       });
     }
     if (canSuspend && p.status === "ARCHIVED") {
       items.push({
         label: "Restore",
         icon: <RotateCcw size={16} />,
-        onClick: () => archiveMutation.mutate({ id: p.publicId, status: "ACTIVE", reason: "Restored by admin" }),
+        onClick: () => {
+          archiveMutation.reset();
+          archiveMutation.mutate({ id: p.publicId, status: "ACTIVE", reason: "Restored by admin" });
+        },
       });
     }
     if (
@@ -277,7 +325,10 @@ export default function PeopleManagementPage() {
       dangerItems.push({
         label: "Permanently Delete",
         icon: <Trash2 size={16} />,
-        onClick: () => setDeleteTarget(p),
+        onClick: () => {
+          deleteMutation.reset();
+          setDeleteTarget(p);
+        },
         danger: true as const,
       });
     }
@@ -286,12 +337,13 @@ export default function PeopleManagementPage() {
   }
 
   // ── Active filter count ──
-  const activeFilterCount = [roleFilter, statusFilter, deptFilter].filter(Boolean).length;
+  const activeFilterCount = [roleFilter, statusFilter, deptFilter, studyYearFilter, roomFilter].filter(Boolean).length;
 
   // ── Total / pagination ──
   const total = people.data?.meta.total ?? 0;
   const pageSize = 25;
   const totalPages = Math.ceil(total / pageSize);
+  const pageNumbers = paginationWindow(page, totalPages);
   const verifiedBackup = backups.data?.backups.find((backup) =>
     isRestoreTestedPreDeletionBackup(backup, deleteTarget?.archivedAt),
   );
@@ -348,19 +400,38 @@ export default function PeopleManagementPage() {
         actions={
           <>
             {canCreate && (
-              <Link href="/admin/people/new" className="avs-btn avs-btn-primary">
+              <Link
+                href="/admin/people/new"
+                className="avs-btn avs-btn-primary"
+                aria-label="Add Person"
+              >
                 <UserPlus size={16} />
                 <span className="hide-mobile">Add Person</span>
               </Link>
             )}
             {canImportUsers && (
-              <Link href="/admin/imports" className="avs-btn avs-btn-secondary hide-mobile">
-                <Upload size={16} /> Import
+              <Link
+                href="/admin/imports"
+                className="avs-btn avs-btn-secondary"
+                aria-label="Bulk Import"
+              >
+                <Upload size={16} /> <span className="hide-mobile">Bulk Import</span>
               </Link>
             )}
           </>
         }
       />
+
+      {archiveMutation.isError && !archiveTarget && (
+        <div className="error-box" role="alert" style={{ marginBottom: "var(--space-4)" }}>
+          {mutationErrorMessage(archiveMutation.error, "The account status could not be updated.")}
+        </div>
+      )}
+      {deleteMutation.isError && !deleteTarget && (
+        <div className="error-box" role="alert" style={{ marginBottom: "var(--space-4)" }}>
+          {mutationErrorMessage(deleteMutation.error, "The person could not be permanently deleted.")}
+        </div>
+      )}
 
       {/* ── Tabs ── */}
       <div className="avs-tabs" role="tablist">
@@ -370,7 +441,12 @@ export default function PeopleManagementPage() {
             className="avs-tab"
             role="tab"
             aria-selected={activeTab === tab.key}
-            onClick={() => { setActiveTab(tab.key); setPage(1); }}
+            onClick={() => {
+              setActiveTab(tab.key);
+              setRoleFilter("");
+              setStatusFilter("");
+              setPage(1);
+            }}
             type="button"
           >
             {tab.label}
@@ -398,22 +474,35 @@ export default function PeopleManagementPage() {
         open={showFilters}
         onClose={() => setShowFilters(false)}
         activeCount={activeFilterCount}
-        onReset={() => { setRoleFilter(""); setStatusFilter(""); setDeptFilter(""); }}
+        onReset={() => {
+          setRoleFilter("");
+          setStatusFilter("");
+          setDeptFilter("");
+          setStudyYearFilter("");
+          setRoomFilter("");
+          setRoomSearch("");
+          setPage(1);
+        }}
       >
         <div>
           <label className="avs-label" htmlFor="filter-role">Role</label>
-          <select id="filter-role" className="avs-input avs-select" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
+          <select id="filter-role" className="avs-input avs-select" value={roleFilter} onChange={(e) => { setActiveTab(""); setRoleFilter(e.target.value); setPage(1); }}>
             <option value="">All Roles</option>
             <option value="STUDENT">Student</option>
             <option value="FACULTY">Faculty</option>
             <option value="HOD">HOD</option>
             <option value="CLASS_COORDINATOR">Class Coordinator</option>
+            <option value="PRINCIPAL">Principal</option>
+            <option value="VICE_PRINCIPAL">Vice Principal</option>
+            <option value="MAINTENANCE_ADMIN">Maintenance Admin</option>
+            <option value="MAINTENANCE_SUPERVISOR">Maintenance Supervisor</option>
+            <option value="MAINTENANCE_STAFF">Maintenance Staff</option>
             <option value="MAIN_ADMIN">Admin</option>
           </select>
         </div>
         <div>
           <label className="avs-label" htmlFor="filter-status">Account Status</label>
-          <select id="filter-status" className="avs-input avs-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <select id="filter-status" className="avs-input avs-select" value={statusFilter} onChange={(e) => { setActiveTab(""); setStatusFilter(e.target.value); setPage(1); }}>
             <option value="">All Statuses</option>
             <option value="ACTIVE">Active</option>
             <option value="PENDING">Pending</option>
@@ -424,10 +513,76 @@ export default function PeopleManagementPage() {
         </div>
         <div>
           <label className="avs-label" htmlFor="filter-dept">Department</label>
-          <select id="filter-dept" className="avs-input avs-select" value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}>
+          <select
+            id="filter-dept"
+            className="avs-input avs-select"
+            value={deptFilter}
+            disabled={filterOptions.isLoading || filterOptions.isError}
+            onChange={(event) => {
+              setDeptFilter(event.target.value);
+              setRoomFilter("");
+              setRoomSearch("");
+              setPage(1);
+            }}
+          >
             <option value="">All Departments</option>
+            {filterOptions.data?.departments.map((department) => (
+              <option key={department.id} value={department.id}>
+                {department.code} - {department.name}
+              </option>
+            ))}
           </select>
         </div>
+        <div>
+          <label className="avs-label" htmlFor="filter-study-year">Study Year</label>
+          <select
+            id="filter-study-year"
+            className="avs-input avs-select"
+            value={studyYearFilter}
+            onChange={(event) => { setStudyYearFilter(event.target.value); setPage(1); }}
+          >
+            <option value="">All Study Years</option>
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((year) => (
+              <option key={year} value={String(year)}>Year {year}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="avs-label" htmlFor="filter-room">Classroom</label>
+          <SearchBar
+            id="filter-room-search"
+            value={roomSearch}
+            onChange={(value) => {
+              setRoomSearch(value);
+              setRoomFilter("");
+              setPage(1);
+            }}
+            placeholder="Search classroom code or name"
+            debounceMs={300}
+          />
+          <select
+            id="filter-room"
+            className="avs-input avs-select"
+            value={roomFilter}
+            disabled={filterOptions.isLoading || filterOptions.isError}
+            onChange={(event) => { setRoomFilter(event.target.value); setPage(1); }}
+          >
+            <option value="">All Classrooms</option>
+            {filterOptions.data?.rooms.map((room) => (
+              <option key={room.id} value={room.id}>
+                {room.code} - {room.name} ({room.floor.block.campus.name})
+              </option>
+            ))}
+          </select>
+        </div>
+        {filterOptions.isLoading && (
+          <p className="muted" role="status">Loading Department and Classroom options...</p>
+        )}
+        {filterOptions.isError && (
+          <div className="error-box" role="alert">
+            Department and Classroom filters could not be loaded. Close and reopen filters to try again.
+          </div>
+        )}
       </FilterBottomSheet>
 
       {/* ── Content ── */}
@@ -442,11 +597,11 @@ export default function PeopleManagementPage() {
 
       {people.isSuccess && people.data.data.length === 0 && (
         <EmptyState
-          preset={search ? "no-results" : "no-people"}
-          title={search ? "No results found" : "No people yet"}
-          description={search ? `No results for "${search}". Try a different search.` : "Add students and staff to get started."}
+          preset={search || activeTab || activeFilterCount > 0 ? "no-results" : "no-people"}
+          title={search || activeTab || activeFilterCount > 0 ? "No results found" : "No people yet"}
+          description={search || activeTab || activeFilterCount > 0 ? "No people match the current search and filters." : "Add students and staff to get started."}
           action={
-            !search && canCreate ? (
+            !search && !activeTab && activeFilterCount === 0 && canCreate ? (
               <Link href="/admin/people/new" className="avs-btn avs-btn-primary">
                 <UserPlus size={16} /> Add Person
               </Link>
@@ -541,7 +696,11 @@ export default function PeopleManagementPage() {
                   </div>
                 </div>
                 <div className="avs-entity-card-actions">
-                  <a href={`/admin/people/${p.publicId}`} className="avs-btn avs-btn-ghost avs-btn-sm">
+                  <a
+                    href={`/admin/people/${p.publicId}`}
+                    className="avs-btn avs-btn-ghost avs-btn-sm"
+                    aria-label={`View ${p.fullName}`}
+                  >
                     <Eye size={14} />
                   </a>
                   <ActionMenu items={actions(p)} />
@@ -557,18 +716,21 @@ export default function PeopleManagementPage() {
                 Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
               </span>
               <div className="avs-pagination-controls">
-                <button className="avs-pagination-btn" disabled={page <= 1} onClick={() => setPage(page - 1)} type="button">
+                <button className="avs-pagination-btn" aria-label="Previous page" disabled={page <= 1} onClick={() => setPage(page - 1)} type="button">
                   <ChevronLeft size={16} />
                 </button>
-                {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-                  const p = i + 1;
-                  return (
-                    <button key={p} className={`avs-pagination-btn ${p === page ? "active" : ""}`} onClick={() => setPage(p)} type="button">
-                      {p}
-                    </button>
-                  );
-                })}
-                <button className="avs-pagination-btn" disabled={page >= totalPages} onClick={() => setPage(page + 1)} type="button">
+                {pageNumbers.map((pageNumber) => (
+                  <button
+                    key={pageNumber}
+                    className={`avs-pagination-btn ${pageNumber === page ? "active" : ""}`}
+                    aria-current={pageNumber === page ? "page" : undefined}
+                    onClick={() => setPage(pageNumber)}
+                    type="button"
+                  >
+                    {pageNumber}
+                  </button>
+                ))}
+                <button className="avs-pagination-btn" aria-label="Next page" disabled={page >= totalPages} onClick={() => setPage(page + 1)} type="button">
                   <ChevronRight size={16} />
                 </button>
               </div>
@@ -580,7 +742,10 @@ export default function PeopleManagementPage() {
       {/* ── Archive Dialog ── */}
       <ArchiveDialog
         open={!!archiveTarget}
-        onClose={() => setArchiveTarget(null)}
+        onClose={() => {
+          setArchiveTarget(null);
+          archiveMutation.reset();
+        }}
         onConfirm={(reason) => {
           if (archiveTarget) {
             archiveMutation.mutate({ id: archiveTarget.publicId, status: "ARCHIVED", reason });
@@ -588,6 +753,7 @@ export default function PeopleManagementPage() {
         }}
         userName={archiveTarget?.fullName ?? ""}
         loading={archiveMutation.isPending}
+        error={archiveMutation.isError ? mutationErrorMessage(archiveMutation.error, "The person could not be archived.") : undefined}
       />
 
       {/* ── Dependency Dialog ── */}
@@ -608,7 +774,10 @@ export default function PeopleManagementPage() {
       {/* ── Permanent Delete Dialog ── */}
       <PermanentDeleteDialog
         open={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
+        onClose={() => {
+          setDeleteTarget(null);
+          deleteMutation.reset();
+        }}
         onDelete={(data) => {
           if (deleteTarget) {
             deleteMutation.mutate({ id: deleteTarget.publicId, data });
@@ -624,7 +793,23 @@ export default function PeopleManagementPage() {
           createdAt: verifiedBackup?.completedAt ?? verifiedBackup?.createdAt,
         }}
         loading={deleteMutation.isPending}
+        error={deleteMutation.isError ? mutationErrorMessage(deleteMutation.error, "The person could not be permanently deleted.") : undefined}
       />
     </div>
   );
+}
+
+function paginationWindow(currentPage: number, totalPages: number, size = 5): number[] {
+  if (totalPages <= 0) return [];
+  const windowSize = Math.min(size, totalPages);
+  const halfWindow = Math.floor(windowSize / 2);
+  const start = Math.min(
+    Math.max(1, currentPage - halfWindow),
+    totalPages - windowSize + 1,
+  );
+  return Array.from({ length: windowSize }, (_, index) => start + index);
+}
+
+function mutationErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim() ? error.message : fallback;
 }

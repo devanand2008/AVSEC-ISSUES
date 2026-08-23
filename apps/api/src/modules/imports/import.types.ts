@@ -1,4 +1,5 @@
 export const IMPORT_ENTITY_TYPES = [
+  "PEOPLE",
   "USERS",
   "STUDENTS",
   "STAFF",
@@ -26,6 +27,16 @@ export const IMPORT_MODES = [
 export type ImportMode = (typeof IMPORT_MODES)[number];
 export type ImportStudyYear = "1" | "2" | "3" | "4";
 
+export const PEOPLE_IMPORT_HEADERS = [
+  "User Name",
+  "User ID",
+  "User Password",
+  "Department",
+  "Year",
+  "Class Room Number",
+  "Mobile Number",
+] as const;
+
 export interface ImportRow {
   [key: string]: string;
   first_name: string; last_name: string; legacy_path: string;
@@ -39,6 +50,7 @@ export interface ImportRow {
   academic_year: string; year: string; semester: string; admission_number: string;
   employee_id: string; designation: string; joined_on: string; campus_scope: string; assigned_year: string; assigned_semester: string;
   assigned_section: string; assigned_block: string; assigned_floor: string; assigned_room: string; specialization: string; assigned_issue_category: string; shift: string;
+  class_room_number: string;
   code: string; name: string; campus_code: string; sort_order: string; degree_type_code: string; duration_years: string; total_semesters: string;
   semester_number: string; capacity: string; block_code: string; floor_code: string; level: string;
   room_number: string; room_type: string; room_code: string; category_name: string; serial_number: string; installed_on: string;
@@ -55,12 +67,27 @@ export interface ImportTemplate {
   optional: string[];
   downloadHeaders?: string[];
   example: Partial<ImportRow>;
+  includeExampleRow?: boolean;
 }
 
 export interface ImportRowError {
   rowNumber: number;
   field?: string;
   message: string;
+  userId?: string;
+  userName?: string;
+}
+
+export function importRowNumber(
+  entityType: ImportEntityType,
+  row: ImportRow | undefined,
+  fallback: number,
+): number {
+  if (entityType !== "PEOPLE") return fallback;
+  const sourceRowNumber = Number(row?.source_row_number);
+  return Number.isInteger(sourceRowNumber) && sourceRowNumber >= 2
+    ? sourceRowNumber
+    : fallback;
 }
 
 export interface ImportedRecord {
@@ -93,25 +120,42 @@ export interface ImportResultReport {
 }
 
 export const IMPORT_TEMPLATES: Record<ImportEntityType, ImportTemplate> = {
+  PEOPLE: {
+    entityType: "PEOPLE",
+    permission: "users.import",
+    required: [
+      "full_name",
+      "college_identity_id",
+      "temporary_password",
+      "department_code",
+      "year",
+      "class_room_number",
+      "mobile",
+    ],
+    optional: [],
+    downloadHeaders: [...PEOPLE_IMPORT_HEADERS],
+    example: {},
+    includeExampleRow: false,
+  },
   USERS: {
     entityType: "USERS",
     permission: "users.import",
-    required: ["full_name", "email", "temporary_password", "department_code"],
-    optional: ["role_codes", "college_identity_id", "mobile", "whatsapp_number", "scope_type", "scope_code", "account_status", "user_id", "employee_or_student_id", "student_id", "employee_id", "programme_code", "academic_year", "year", "semester_number", "section_code"],
+    required: ["full_name", "email", "department_code"],
+    optional: ["temporary_password", "role_codes", "college_identity_id", "mobile", "whatsapp_number", "scope_type", "scope_code", "account_status", "user_id", "employee_or_student_id", "student_id", "employee_id", "programme_code", "academic_year", "year", "semester_number", "section_code"],
     example: { full_name: "Sample Student One", temporary_password: "001234", role_codes: "STUDENT", email: "sample1@example.edu", department_code: "CSE-AIML", account_status: "ACTIVE" },
   },
   STUDENTS: {
     entityType: "STUDENTS",
     permission: "users.import",
-    required: ["full_name", "email", "college_identity_id", "register_number", "department_code", "academic_year", "year", "semester_number", "section_code", "temporary_password"],
-    optional: ["first_name", "last_name", "role_codes", "student_id", "mobile", "whatsapp_number", "roll_number", "legacy_id", "legacy_path", "programme_code", "admission_year", "account_status", "admission_number", "gender", "date_of_birth", "parent_name", "parent_mobile_number", "blood_group", "address", "profile_photo_url", "batch", "source_sheet", "source_row_number", "source_department_code", "password_status"],
+    required: ["full_name", "email", "college_identity_id", "register_number", "department_code", "academic_year", "year", "semester_number", "section_code"],
+    optional: ["temporary_password", "first_name", "last_name", "role_codes", "student_id", "mobile", "whatsapp_number", "roll_number", "legacy_id", "legacy_path", "programme_code", "admission_year", "account_status", "admission_number", "gender", "date_of_birth", "parent_name", "parent_mobile_number", "blood_group", "address", "profile_photo_url", "batch", "source_sheet", "source_row_number", "source_department_code", "password_status"],
     downloadHeaders: ["full_name", "official_email", "college_id", "register_number", "department_code", "programme_code", "academic_year", "study_year", "semester", "section", "temporary_password", "mobile"],
     example: { full_name: "Sample Student One", official_email: "sample1@example.edu", college_id: "AVS26CSE001", register_number: "620124104001", department_code: "CSE", programme_code: "CSE", academic_year: "2026-2027", study_year: "3", semester: "5", section: "A", temporary_password: "AvsTemp@2026!", mobile: "9876543210" },
   },
   STAFF: {
     entityType: "STAFF",
     permission: "users.import",
-    required: ["full_name", "email", "temporary_password", "department_code"],
+    required: ["full_name", "email", "department_code"],
     optional: ["role_codes", "college_identity_id", "employee_id", "temporary_password", "email", "mobile", "whatsapp_number", "department_code", "designation", "joined_on", "account_status", "campus_scope", "programme_code", "academic_year", "year", "semester_number", "section_code", "assigned_year", "assigned_semester", "assigned_section", "assigned_block", "assigned_floor", "assigned_room", "specialization", "assigned_issue_category", "shift", "profile_photo_url"],
     example: { full_name: "Sample Faculty One", email: "faculty1@example.edu", temporary_password: "005678", role_codes: "FACULTY", department_code: "CSE", account_status: "ACTIVE" },
   },

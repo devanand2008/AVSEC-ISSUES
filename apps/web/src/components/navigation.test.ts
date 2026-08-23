@@ -134,6 +134,13 @@ describe("visibleNavigation", () => {
     ).toContain("/admin/imports");
   });
 
+  it("uses the canonical People route in desktop navigation", () => {
+    const routes = visibleNavigation(["users.read"]).map((item) => item.href);
+
+    expect(routes).toContain("/admin/people");
+    expect(routes).not.toContain("/admin/users");
+  });
+
   it("selects only the most specific matching sidebar route", () => {
     const candidates = [
       { href: "/attendance" },

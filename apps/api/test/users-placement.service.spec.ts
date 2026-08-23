@@ -45,7 +45,7 @@ function harness() {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     userScope: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
-    $executeRawUnsafe: jest.fn().mockResolvedValue(undefined),
+    $queryRawUnsafe: jest.fn().mockResolvedValue([]),
   };
   const prisma = {
     user: { findFirst: jest.fn() },
@@ -84,11 +84,23 @@ describe("UsersService student placement integration", () => {
       studentProfile: { sectionId: "section-id" },
       roles: [{ role: { code: "STUDENT" } }],
     });
-    tx.user.findFirst.mockResolvedValue({
-      status: AccountStatus.PENDING,
-      collegeIdentityId: "AVS001",
-      studentProfile: { sectionId: "section-id" },
-    });
+    tx.user.findFirst
+      .mockResolvedValueOnce({
+        roles: [
+          {
+            role: {
+              code: "MAIN_ADMIN",
+              permissions: [{ permission: { code: "users.suspend" } }],
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: AccountStatus.PENDING,
+        collegeIdentityId: "AVS001",
+        roles: [{ role: { code: "STUDENT" } }],
+        studentProfile: { sectionId: "section-id" },
+      });
 
     await service.status(
       actor,
@@ -106,8 +118,9 @@ describe("UsersService student placement integration", () => {
         accountStatus: AccountStatus.ACTIVE,
       }),
     );
-    expect(tx.$executeRawUnsafe).toHaveBeenCalledWith(
-      "SELECT id FROM users WHERE id = $1 FOR UPDATE",
+    expect(tx.$queryRawUnsafe).toHaveBeenCalledWith(
+      "SELECT id FROM users WHERE id IN ($1::uuid, $2::uuid) ORDER BY id FOR UPDATE",
+      actor.id,
       "student-id",
     );
   });
@@ -123,11 +136,23 @@ describe("UsersService student placement integration", () => {
       studentProfile: { sectionId: "section-id" },
       roles: [{ role: { code: "STUDENT" } }],
     });
-    tx.user.findFirst.mockResolvedValue({
-      status: AccountStatus.ARCHIVED,
-      collegeIdentityId: "DELETED-STUDENT-PUBLIC-ID",
-      studentProfile: { sectionId: "section-id" },
-    });
+    tx.user.findFirst
+      .mockResolvedValueOnce({
+        roles: [
+          {
+            role: {
+              code: "MAIN_ADMIN",
+              permissions: [{ permission: { code: "users.suspend" } }],
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: AccountStatus.ARCHIVED,
+        collegeIdentityId: "DELETED-STUDENT-PUBLIC-ID",
+        roles: [{ role: { code: "STUDENT" } }],
+        studentProfile: { sectionId: "section-id" },
+      });
 
     await expect(
       service.status(
@@ -141,7 +166,7 @@ describe("UsersService student placement integration", () => {
       ),
     ).rejects.toThrow("Permanently deleted accounts cannot be reactivated");
 
-    expect(tx.$executeRawUnsafe).toHaveBeenCalled();
+    expect(tx.$queryRawUnsafe).toHaveBeenCalled();
     expect(placements.placeStudent).not.toHaveBeenCalled();
     expect(tx.user.update).not.toHaveBeenCalled();
   });
@@ -157,12 +182,24 @@ describe("UsersService student placement integration", () => {
       studentProfile: { sectionId: "section-id" },
       roles: [{ role: { code: "CLASS_REPRESENTATIVE" } }],
     });
-    tx.user.findFirst.mockResolvedValue({
-      status: AccountStatus.ACTIVE,
-      collegeIdentityId: "AVS001",
-      studentProfile: { sectionId: "section-id" },
-      sectionMemberships: [],
-    });
+    tx.user.findFirst
+      .mockResolvedValueOnce({
+        roles: [
+          {
+            role: {
+              code: "MAIN_ADMIN",
+              permissions: [{ permission: { code: "users.suspend" } }],
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: AccountStatus.ACTIVE,
+        collegeIdentityId: "AVS001",
+        roles: [{ role: { code: "CLASS_REPRESENTATIVE" } }],
+        studentProfile: { sectionId: "section-id" },
+        sectionMemberships: [],
+      });
 
     await service.status(
       actor,
@@ -223,12 +260,24 @@ describe("UsersService student placement integration", () => {
       studentProfile: { sectionId: "section-id" },
       roles: [{ role: { code: "STUDENT" } }],
     });
-    tx.user.findFirst.mockResolvedValue({
-      status: AccountStatus.ACTIVE,
-      collegeIdentityId: "AVS001",
-      studentProfile: { sectionId: "section-id" },
-      sectionMemberships: [{ startsOn: futureStartsOn }],
-    });
+    tx.user.findFirst
+      .mockResolvedValueOnce({
+        roles: [
+          {
+            role: {
+              code: "MAIN_ADMIN",
+              permissions: [{ permission: { code: "users.suspend" } }],
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: AccountStatus.ACTIVE,
+        collegeIdentityId: "AVS001",
+        roles: [{ role: { code: "STUDENT" } }],
+        studentProfile: { sectionId: "section-id" },
+        sectionMemberships: [{ startsOn: futureStartsOn }],
+      });
 
     await service.status(
       actor,
@@ -283,9 +332,7 @@ describe("UsersService student placement integration", () => {
         },
         "request-id",
       ),
-    ).rejects.toThrow(
-      "Students cannot change their academic placement",
-    );
+    ).rejects.toThrow("Students cannot change their academic placement");
     expect(placements.placeStudent).not.toHaveBeenCalled();
   });
 

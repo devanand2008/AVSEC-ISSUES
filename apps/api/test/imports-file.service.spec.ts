@@ -1,10 +1,15 @@
+import { BadRequestException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Workbook } from "exceljs";
 import { createHash } from "node:crypto";
 import * as XLSX from "xlsx";
 
 import type { AuthPrincipal } from "../src/common/http/request-context";
-import type { CredentialExportRow, ImportRow } from "../src/modules/imports/import.types";
+import { RoomType } from "../src/generated/prisma/enums";
+import type {
+  CredentialExportRow,
+  ImportRow,
+} from "../src/modules/imports/import.types";
 import { ImportsFileService } from "../src/modules/imports/imports-file.service";
 import { ImportsService } from "../src/modules/imports/imports.service";
 
@@ -51,6 +56,23 @@ describe("ImportsFileService", () => {
     }),
   );
 
+  it("rejects cross-tenant and nested import source cleanup keys", async () => {
+    await expect(
+      service.deleteSource(
+        "college-1",
+        "colleges/college-2/imports/source/people.xlsx",
+      ),
+    ).rejects.toThrow(
+      "The import source is outside the authorized college storage path.",
+    );
+    await expect(
+      service.deleteSource(
+        "college-1",
+        "colleges/college-1/imports/source/nested/people.xlsx",
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
   it("parses a valid room template and normalizes headers", async () => {
     const parsed = await service.parse(
       csvFile(
@@ -60,6 +82,27 @@ describe("ImportsFileService", () => {
     );
     expect(parsed.headers).toContain("campus_code");
     expect(parsed.rows[0]?.code).toBe("A-101");
+    expect(parsed.errors).toEqual([]);
+  });
+
+  it("accepts every current Prisma room type", async () => {
+    const rows = Object.values(RoomType).map(
+      (roomType, index) =>
+        `MAIN,A,F1,A-${index + 1},Room ${index + 1},${roomType}`,
+    );
+    const parsed = await service.parse(
+      csvFile(
+        [
+          "campus_code,block_code,floor_code,code,name,room_type",
+          ...rows,
+        ].join("\n"),
+      ),
+      "ROOMS",
+    );
+
+    expect(parsed.rows.map((row) => row.room_type)).toEqual(
+      Object.values(RoomType),
+    );
     expect(parsed.errors).toEqual([]);
   });
 
@@ -215,10 +258,22 @@ describe("ImportsFileService", () => {
     });
     expect(parsed.errors).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ field: "email", message: "email is required." }),
-        expect.objectContaining({ field: "register_number", message: "register_number is required." }),
-        expect.objectContaining({ field: "year", message: "year is required." }),
-        expect.objectContaining({ field: "semester_number", message: "semester_number is required." }),
+        expect.objectContaining({
+          field: "email",
+          message: "email is required.",
+        }),
+        expect.objectContaining({
+          field: "register_number",
+          message: "register_number is required.",
+        }),
+        expect.objectContaining({
+          field: "year",
+          message: "year is required.",
+        }),
+        expect.objectContaining({
+          field: "semester_number",
+          message: "semester_number is required.",
+        }),
       ]),
     );
   });
@@ -240,10 +295,22 @@ describe("ImportsFileService", () => {
     expect(parsed.rows[0]?.full_name).toBeUndefined();
     expect(parsed.errors).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ field: "full_name", message: "full_name is required." }),
-        expect.objectContaining({ field: "college_identity_id", message: "college_identity_id is required." }),
-        expect.objectContaining({ field: "department_code", message: "department_code is required." }),
-        expect.objectContaining({ field: "section_code", message: "section_code is required." }),
+        expect.objectContaining({
+          field: "full_name",
+          message: "full_name is required.",
+        }),
+        expect.objectContaining({
+          field: "college_identity_id",
+          message: "college_identity_id is required.",
+        }),
+        expect.objectContaining({
+          field: "department_code",
+          message: "department_code is required.",
+        }),
+        expect.objectContaining({
+          field: "section_code",
+          message: "section_code is required.",
+        }),
       ]),
     );
   });
@@ -252,16 +319,30 @@ describe("ImportsFileService", () => {
     const workbook = new Workbook();
     const worksheet = workbook.addWorksheet("Basic Users");
     worksheet.addRow(["Name", "Email", "Password", "Department"]);
-    worksheet.addRow(["Sample Student", "sample.student@example.edu", "", "CSE-AIML"]);
+    worksheet.addRow([
+      "Sample Student",
+      "sample.student@example.edu",
+      "",
+      "CSE-AIML",
+    ]);
     worksheet.getCell("C2").value = 1234;
     worksheet.getCell("C2").numFmt = "000000";
     const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
     const parsed = await service.parse(
-      { buffer, originalname: "avs-user-import-template.xlsx", size: buffer.length } as Express.Multer.File,
+      {
+        buffer,
+        originalname: "avs-user-import-template.xlsx",
+        size: buffer.length,
+      } as Express.Multer.File,
       "USERS",
     );
 
-    expect(parsed.headers).toEqual(["full_name", "email", "temporary_password", "department_code"]);
+    expect(parsed.headers).toEqual([
+      "full_name",
+      "email",
+      "temporary_password",
+      "department_code",
+    ]);
     expect(parsed.rows[0]).toMatchObject({
       college_identity_id: "sample.student@example.edu",
       full_name: "Sample Student",
@@ -277,13 +358,25 @@ describe("ImportsFileService", () => {
     const cse = workbook.addWorksheet("CSE");
     cse.addRows([
       ["FIRST NAME", "LAST NAME", "EMAIL ID", "PASSWORD", "/PATH"],
-      ["Safe", "Student", "safe.student@avsenggcollege.ac.in", "TempPass@123", "/students/1"],
+      [
+        "Safe",
+        "Student",
+        "safe.student@avsenggcollege.ac.in",
+        "TempPass@123",
+        "/students/1",
+      ],
     ]);
     const mechanical = workbook.addWorksheet("MECH");
     mechanical.addRows([
       [],
       ["FIRST NAME", "LAST NAME", "EMAIL ID", "PASSWORD", "/PATH"],
-      ["Second", "Student", "second.student@avsenggcollege.ac.in", "", "/students/2"],
+      [
+        "Second",
+        "Student",
+        "second.student@avsenggcollege.ac.in",
+        "",
+        "/students/2",
+      ],
     ]);
     mechanical.getCell("D3").value = 1234;
     mechanical.getCell("D3").numFmt = "000000";
@@ -319,8 +412,16 @@ describe("ImportsFileService", () => {
     expect(parsed.passwordWarnings).toBe(1);
     expect(parsed.sheetInspections).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ sheetName: "CSE", headerRowNumber: 1, rowCount: 1 }),
-        expect.objectContaining({ sheetName: "MECH", headerRowNumber: 2, rowCount: 1 }),
+        expect.objectContaining({
+          sheetName: "CSE",
+          headerRowNumber: 1,
+          rowCount: 1,
+        }),
+        expect.objectContaining({
+          sheetName: "MECH",
+          headerRowNumber: 2,
+          rowCount: 1,
+        }),
       ]),
     );
     expect(parsed.errors).toEqual(
@@ -337,12 +438,24 @@ describe("ImportsFileService", () => {
       {
         CSE: [
           ["FIRST NAME", "LAST NAME", "EMAIL ID", "PASSWORD", "/PATH"],
-          ["First", "Copy", "duplicate@avsenggcollege.ac.in", "TempPass@123", "/one"],
+          [
+            "First",
+            "Copy",
+            "duplicate@avsenggcollege.ac.in",
+            "TempPass@123",
+            "/one",
+          ],
         ],
         ECE: [
           [],
           ["FIRST NAME", "LAST NAME", "EMAIL ID", "PASSWORD", "/PATH"],
-          ["Second", "Copy", "DUPLICATE@avsenggcollege.ac.in", "TempPass@456", "/two"],
+          [
+            "Second",
+            "Copy",
+            "DUPLICATE@avsenggcollege.ac.in",
+            "TempPass@456",
+            "/two",
+          ],
         ],
       },
       "THIRD YEAR USERS.xlsx",
@@ -402,7 +515,9 @@ describe("ImportsFileService", () => {
         }),
         expect.objectContaining({
           field: "temporary_password",
-          message: expect.stringContaining("without losing precision") as string,
+          message: expect.stringContaining(
+            "without losing precision",
+          ) as string,
         }),
       ]),
     );
@@ -532,23 +647,26 @@ describe("ImportsFileService", () => {
     },
   );
 
-  it.each(["5", "8", "9"])("rejects study year %s outside 1 through 4", async (studyYear) => {
-    const parsed = await service.parse(
-      csvFile(
-        `full_name,official_email,college_id,register_number,department_code,academic_year,study_year,semester,section,temporary_password\nInvalid Year,invalid.year${studyYear}@college.edu,AVS${studyYear},REG${studyYear},CSE,2026-27,${studyYear},1,A,AvsTemp@2026!\n`,
-      ),
-      "STUDENTS",
-    );
+  it.each(["5", "8", "9"])(
+    "rejects study year %s outside 1 through 4",
+    async (studyYear) => {
+      const parsed = await service.parse(
+        csvFile(
+          `full_name,official_email,college_id,register_number,department_code,academic_year,study_year,semester,section,temporary_password\nInvalid Year,invalid.year${studyYear}@college.edu,AVS${studyYear},REG${studyYear},CSE,2026-27,${studyYear},1,A,AvsTemp@2026!\n`,
+        ),
+        "STUDENTS",
+      );
 
-    expect(parsed.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          field: "year",
-          message: "study_year must be an integer from 1 to 4.",
-        }),
-      ]),
-    );
-  });
+      expect(parsed.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "year",
+            message: "study_year must be an integer from 1 to 4.",
+          }),
+        ]),
+      );
+    },
+  );
 
   it("accepts combined user sheets with separate login and profile IDs", async () => {
     const parsed = await service.parse(
@@ -665,7 +783,10 @@ describe("ImportsFileService", () => {
     ]);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Legacy");
-    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xls" }) as Buffer;
+    const buffer = XLSX.write(workbook, {
+      type: "buffer",
+      bookType: "xls",
+    }) as Buffer;
     const file = {
       buffer,
       originalname: "students.xls",
@@ -687,12 +808,135 @@ describe("ImportsFileService", () => {
       ]),
     );
   });
+
+  it("accepts only the exact seven People headers and keeps physical Excel row numbers", async () => {
+    const parsed = await service.parse(
+      csvFile(
+        [
+          "User Name,User ID,User Password,Department,Year,Class Room Number,Mobile Number",
+          "",
+          "Arun Kumar,AVS001,Strong!Pass123,CSE,2,CSE-201,9876543210",
+        ].join("\n"),
+      ),
+      "PEOPLE",
+    );
+
+    expect(parsed.headers).toEqual([
+      "full_name",
+      "college_identity_id",
+      "temporary_password",
+      "department_code",
+      "year",
+      "class_room_number",
+      "mobile",
+    ]);
+    expect(parsed.rows[0]).toMatchObject({
+      source_row_number: "3",
+      full_name: "Arun Kumar",
+      college_identity_id: "AVS001",
+      temporary_password: "Strong!Pass123",
+    });
+    expect(parsed.errors).toEqual([]);
+  });
+
+  it("reports renamed People columns as friendly missing and unexpected headers", async () => {
+    const password = "Strong!Pass123";
+    const parsed = await service.parse(
+      csvFile(
+        [
+          "User Name,User ID,User Password,Department,Year,Classroom Number,Mobile Number",
+          `Arun Kumar,AVS001,${password},CSE,2,CSE-201,9876543210`,
+        ].join("\n"),
+      ),
+      "PEOPLE",
+    );
+
+    expect(parsed.errors).toContainEqual(
+      expect.objectContaining({
+        rowNumber: 2,
+        userId: "AVS001",
+        userName: "Arun Kumar",
+        message: expect.stringMatching(
+          /Missing required headers: Class Room Number.*Unexpected headers: Classroom Number/,
+        ) as string,
+      }),
+    );
+    expect(JSON.stringify(parsed.errors)).not.toContain(password);
+  });
+
+  it("rejects duplicate canonical People headers", async () => {
+    const password = "Strong!Pass123";
+    const parsed = await service.parse(
+      csvFile(
+        [
+          "User Name,User ID,User Password,Department,Year,Class Room Number,Mobile Number,User ID",
+          `Arun Kumar,AVS001,${password},CSE,2,CSE-201,9876543210,AVS002`,
+        ].join("\n"),
+      ),
+      "PEOPLE",
+    );
+
+    expect(parsed.errors).toContainEqual(
+      expect.objectContaining({
+        rowNumber: 2,
+        message: expect.stringContaining(
+          "Unexpected duplicate headers: User ID",
+        ) as string,
+      }),
+    );
+    expect(JSON.stringify(parsed.errors)).not.toContain(password);
+  });
+
+  it("does not silently trim People identity or password cells in XLSX", async () => {
+    const parsed = await service.parse(
+      await workbookFile(
+        [
+          [
+            "User Name",
+            "User ID",
+            "User Password",
+            "Department",
+            "Year",
+            "Class Room Number",
+            "Mobile Number",
+          ],
+          [
+            "Arun Kumar",
+            " AVS001",
+            "Strong!Pass123 ",
+            "CSE",
+            "2",
+            "CSE-201",
+            "9876543210",
+          ],
+        ],
+        "people.xlsx",
+      ),
+      "PEOPLE",
+    );
+
+    expect(parsed.rows[0]?.college_identity_id).toBe(" AVS001");
+    expect(parsed.rows[0]?.temporary_password).toBe("Strong!Pass123 ");
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "college_identity_id",
+          message: "User ID must not begin or end with whitespace.",
+        }),
+        expect.objectContaining({
+          field: "temporary_password",
+          message: "User Password must not begin or end with whitespace.",
+        }),
+      ]),
+    );
+  });
 });
 
 describe("ImportsService Excel workbooks", () => {
   const service = Object.create(ImportsService.prototype) as ImportsService;
 
   it("previews and confirms the canonical student template without a source student_id column", async () => {
+    const persistenceEvents: string[] = [];
     const files = new ImportsFileService(
       new ConfigService({
         S3_BUCKET: "private",
@@ -702,24 +946,34 @@ describe("ImportsService Excel workbooks", () => {
         S3_SECRET_KEY: "test",
       }),
     );
-    jest.spyOn(files, "saveSource").mockResolvedValue({
-      key: "colleges/college-1/imports/source/students.csv",
-      sha256: "sha256",
-    });
+    jest
+      .spyOn(files, "saveSource")
+      .mockImplementation(async (_collegeId, _entityType, sourceFile, key) => {
+        persistenceEvents.push("source-uploaded");
+        return {
+          key,
+          sha256: createHash("sha256").update(sourceFile.buffer).digest("hex"),
+        };
+      });
     const createdAt = new Date("2026-08-11T00:00:00.000Z");
     let storedJob: Record<string, unknown> | undefined;
-    const prisma = {
+    const prisma: Record<string, unknown> = {
       department: {
         findMany: jest.fn().mockResolvedValue([
-          { id: "department-cse", code: "CSE", name: "Computer Science and Engineering", shortName: "CSE" },
+          {
+            id: "department-cse",
+            code: "CSE",
+            name: "Computer Science and Engineering",
+            shortName: "CSE",
+          },
         ]),
       },
       appSetting: { findUnique: jest.fn().mockResolvedValue(null) },
       role: { findMany: jest.fn().mockResolvedValue([]) },
       importJob: {
         create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          persistenceEvents.push("job-persisted");
           storedJob = {
-            id: "job-1",
             ...data,
             resultStorageKey: null,
             createdAt,
@@ -728,13 +982,33 @@ describe("ImportsService Excel workbooks", () => {
           return storedJob;
         }),
         findFirst: jest.fn(async () => storedJob),
-        update: jest.fn().mockResolvedValue(undefined),
+        update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          storedJob = { ...storedJob, ...data };
+          return storedJob;
+        }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      $transaction: jest.fn(
+        async (work: (tx: unknown) => Promise<unknown>) => work(prisma),
+      ),
     };
     const handler = { validate: jest.fn().mockResolvedValue([]) };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
-    const queue = { add: jest.fn().mockResolvedValue(undefined) };
-    const importService = Object.create(ImportsService.prototype) as ImportsService;
+    let queuedJob:
+      | { getState: jest.Mock<Promise<string>, []>; remove: jest.Mock }
+      | undefined;
+    const queue = {
+      getJob: jest.fn(async () => queuedJob),
+      add: jest.fn(async () => {
+        queuedJob = {
+          getState: jest.fn().mockResolvedValue("waiting"),
+          remove: jest.fn(),
+        };
+      }),
+    };
+    const importService = Object.create(
+      ImportsService.prototype,
+    ) as ImportsService;
     Object.defineProperties(importService, {
       prisma: { value: prisma },
       files: { value: files },
@@ -759,21 +1033,26 @@ describe("ImportsService Excel workbooks", () => {
       "request-1",
       { importMode: "CREATE_ONLY" },
     );
-    expect(preview.job).toMatchObject({ id: "job-1", validRows: 1, errorRows: 0 });
+    expect(preview.job).toMatchObject({
+      id: expect.any(String),
+      validRows: 1,
+      errorRows: 0,
+    });
     expect(preview.previewRows[0]?.values).toMatchObject({
       college_identity_id: "AVS001",
       student_id: "AVS001",
       register_number: "620124104001",
     });
     expect(preview.previewRows[0]?.values.temporary_password).toBeUndefined();
+    expect(persistenceEvents).toEqual(["job-persisted", "source-uploaded"]);
 
     await expect(
-      importService.confirm(user, "job-1", "request-2"),
-    ).resolves.toEqual({ id: "job-1", status: "QUEUED" });
+      importService.confirm(user, preview.job.id, "request-2"),
+    ).resolves.toEqual({ id: preview.job.id, status: "QUEUED" });
     expect(queue.add).toHaveBeenCalledWith(
       "process",
-      { jobId: "job-1" },
-      expect.objectContaining({ jobId: "job-1" }),
+      { jobId: preview.job.id },
+      expect.objectContaining({ jobId: preview.job.id }),
     );
   });
 
@@ -808,15 +1087,20 @@ describe("ImportsService Excel workbooks", () => {
       sourceSha256: createHash("sha256").update(source).digest("hex"),
       status: "QUEUED",
     };
-    const transactionImportUpdate = jest.fn().mockResolvedValue(undefined);
+    const transactionImportUpdate = jest.fn().mockResolvedValue({ count: 1 });
     const prisma = {
       appSetting: { findUnique: jest.fn().mockResolvedValue(null) },
+      importJobRecord: { findMany: jest.fn().mockResolvedValue([]) },
       importJob: {
         findUnique: jest.fn().mockResolvedValue(importJob),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ pendingResultStorageKey: null }),
         update: jest.fn().mockResolvedValue(undefined),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       $transaction: jest.fn(async (work: (tx: unknown) => Promise<void>) =>
-        work({ importJob: { update: transactionImportUpdate } }),
+        work({ importJob: { updateMany: transactionImportUpdate } }),
       ),
     };
     const files = {
@@ -825,9 +1109,11 @@ describe("ImportsService Excel workbooks", () => {
         rows: [firstRow, secondRow],
         errors: [parserError],
       }),
-      saveReport: jest.fn().mockResolvedValue(
-        "colleges/college-1/imports/results/job-capacity.json",
-      ),
+      saveReport: jest
+        .fn()
+        .mockResolvedValue(
+          "colleges/college-1/imports/results/job-capacity.json",
+        ),
       deleteSource: jest.fn().mockResolvedValue(undefined),
     };
     const handler = {
@@ -844,11 +1130,14 @@ describe("ImportsService Excel workbooks", () => {
             const rowNumber = index + 2;
             if (preInvalidRows.has(rowNumber)) return [];
             if (reservedSeats === 1) {
-              return [{
-                rowNumber,
-                field: "section_code",
-                message: "Section A is full. Current capacity: 1 / 1. Please select another Section.",
-              }];
+              return [
+                {
+                  rowNumber,
+                  field: "section_code",
+                  message:
+                    "Section A is full. Current capacity: 1 / 1. Please select another Section.",
+                },
+              ];
             }
             reservedSeats += 1;
             return [];
@@ -863,7 +1152,9 @@ describe("ImportsService Excel workbooks", () => {
       }),
     };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
-    const importService = Object.create(ImportsService.prototype) as ImportsService;
+    const importService = Object.create(
+      ImportsService.prototype,
+    ) as ImportsService;
     Object.defineProperties(importService, {
       prisma: { value: prisma },
       files: { value: files },
@@ -871,12 +1162,14 @@ describe("ImportsService Excel workbooks", () => {
       audit: { value: audit },
     });
     const updateProgress = jest.fn().mockResolvedValue(undefined);
-    const process = (importService as unknown as {
-      process(job: {
-        data: { jobId: string };
-        updateProgress(progress: number): Promise<void>;
-      }): Promise<void>;
-    }).process.bind(importService);
+    const process = (
+      importService as unknown as {
+        process(job: {
+          data: { jobId: string };
+          updateProgress(progress: number): Promise<void>;
+        }): Promise<void>;
+      }
+    ).process.bind(importService);
 
     await process({ data: { jobId: importJob.id }, updateProgress });
 
@@ -897,6 +1190,7 @@ describe("ImportsService Excel workbooks", () => {
       "admin-1",
       "CREATE_ONLY",
       { resetExistingPasswords: false },
+      expect.any(String),
     );
     expect(files.saveReport).toHaveBeenCalledWith(
       "college-1",
@@ -904,56 +1198,339 @@ describe("ImportsService Excel workbooks", () => {
         successful: [expect.objectContaining({ rowNumber: 3, id: "user-2" })],
         errors: [parserError],
       }),
+      expect.any(String),
     );
   });
 
-  it("resolves only exact configured aliases and exposes unknown departments", () => {
-    const mappingPreview = (service as unknown as {
-      departmentMappingPreview(
-        rows: Array<Partial<ImportRow>>,
-        context: {
-          mappings: Record<string, string>;
-          departments: Array<{ id: string; code: string; name: string; shortName: string | null }>;
+  it("processes 1000 People rows through one queued source and never persists supplied passwords", async () => {
+    const source = Buffer.from("stored 1000-row people import", "utf8");
+    const suppliedPassword = "Scale!Pass123";
+    const rows = Array.from(
+      { length: 1_000 },
+      (_, index) =>
+        ({
+          full_name: `Scale Person ${index + 1}`,
+          college_identity_id: `SCALE${String(index + 1).padStart(4, "0")}`,
+          temporary_password: suppliedPassword,
+          department_code: "CSE",
+          year: "2",
+          class_room_number: "CSE-201",
+          mobile: `9${String(index).padStart(9, "0")}`,
+          source_row_number: String(index + 2),
+        }) as ImportRow,
+    );
+    const importJob = {
+      id: "00000000-0000-4000-8000-000000000030",
+      collegeId: "college-1",
+      requestedById: "admin-1",
+      entityType: "PEOPLE",
+      importMode: "CREATE_ONLY",
+      selectedSheetName: "People",
+      columnMapping: { __selected_import_role: "STUDENT" },
+      sourceStorageKey: "colleges/college-1/imports/source/scale-people.xlsx",
+      sourceSha256: createHash("sha256").update(source).digest("hex"),
+      status: "QUEUED",
+    };
+    const finalImportUpdate = jest.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      appSetting: { findUnique: jest.fn().mockResolvedValue(null) },
+      importJobRecord: { findMany: jest.fn().mockResolvedValue([]) },
+      importJob: {
+        findUnique: jest.fn().mockResolvedValue(importJob),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ pendingResultStorageKey: null }),
+        update: jest.fn().mockResolvedValue(undefined),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      $transaction: jest.fn(async (work: (tx: unknown) => Promise<void>) =>
+        work({ importJob: { updateMany: finalImportUpdate } }),
+      ),
+    };
+    const files = {
+      loadSource: jest.fn().mockResolvedValue(source),
+      parse: jest.fn().mockResolvedValue({ rows, errors: [] }),
+      saveReport: jest
+        .fn()
+        .mockResolvedValue(
+          "colleges/college-1/imports/results/scale-people.json",
+        ),
+      deleteSource: jest.fn().mockResolvedValue(undefined),
+    };
+    const importedRecord = (row: ImportRow, rowNumber: number) => ({
+      rowNumber,
+      model: "User",
+      id: "00000000-0000-4000-8000-000000000031",
+      label: `${row.college_identity_id} - ${row.full_name}`,
+      credential: {
+        rowNumber,
+        userId: "00000000-0000-4000-8000-000000000032",
+        fullName: row.full_name,
+        role: "STUDENT",
+        loginId: row.college_identity_id,
+        temporaryPassword: row.temporary_password,
+        firstLoginRequired: true,
+      },
+    });
+    const handler = {
+      validate: jest.fn().mockResolvedValue([]),
+      createPeopleBatch: jest.fn(
+        async (
+          _collegeId: string,
+          batch: Array<{ row: ImportRow; rowNumber: number }>,
+        ) => batch.map((item) => importedRecord(item.row, item.rowNumber)),
+      ),
+      create: jest.fn(
+        async (
+          _entityType: string,
+          _collegeId: string,
+          row: ImportRow,
+          rowNumber: number,
+        ) => importedRecord(row, rowNumber),
+      ),
+    };
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const importService = Object.create(
+      ImportsService.prototype,
+    ) as ImportsService;
+    Object.defineProperties(importService, {
+      prisma: { value: prisma },
+      files: { value: files },
+      handler: { value: handler },
+      audit: { value: audit },
+    });
+    const updateProgress = jest.fn().mockResolvedValue(undefined);
+    const process = (
+      importService as unknown as {
+        process(job: {
+          data: { jobId: string };
+          updateProgress(progress: number): Promise<void>;
+        }): Promise<void>;
+      }
+    ).process.bind(importService);
+
+    await process({ data: { jobId: importJob.id }, updateProgress });
+
+    expect(files.loadSource).toHaveBeenCalledTimes(1);
+    expect(files.parse).toHaveBeenCalledTimes(1);
+    expect(handler.validate).toHaveBeenCalledTimes(1);
+    expect(handler.createPeopleBatch).toHaveBeenCalledTimes(100);
+    expect(handler.create).not.toHaveBeenCalled();
+    expect(files.saveReport).toHaveBeenCalledTimes(1);
+    expect(updateProgress).toHaveBeenCalledTimes(100);
+    expect(updateProgress).toHaveBeenLastCalledWith(100);
+    const report = files.saveReport.mock.calls[0]?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(report.successful).toHaveLength(1_000);
+    expect(report.credentials).toBeUndefined();
+    expect(JSON.stringify(report)).not.toContain(suppliedPassword);
+    expect(files.deleteSource).toHaveBeenCalledWith(
+      importJob.collegeId,
+      importJob.sourceStorageKey,
+    );
+  }, 30_000);
+
+  it("falls back from a failed People batch to exact row-level outcomes", async () => {
+    const source = Buffer.from("stored mixed people import", "utf8");
+    const suppliedPassword = "Fallback!Pass123";
+    const rows = [
+      {
+        full_name: "Valid Person",
+        college_identity_id: "FALLBACK001",
+        temporary_password: suppliedPassword,
+        source_row_number: "2",
+      },
+      {
+        full_name: "Late Invalid Person",
+        college_identity_id: "FALLBACK002",
+        temporary_password: suppliedPassword,
+        source_row_number: "3",
+      },
+    ] as ImportRow[];
+    const importJob = {
+      id: "00000000-0000-4000-8000-000000000080",
+      collegeId: "college-1",
+      requestedById: "admin-1",
+      entityType: "PEOPLE",
+      importMode: "CREATE_ONLY",
+      selectedSheetName: "People",
+      columnMapping: null,
+      sourceStorageKey: "colleges/college-1/imports/source/mixed-people.xlsx",
+      sourceSha256: createHash("sha256").update(source).digest("hex"),
+      status: "QUEUED",
+    };
+    const prisma = {
+      appSetting: { findUnique: jest.fn().mockResolvedValue(null) },
+      importJobRecord: { findMany: jest.fn().mockResolvedValue([]) },
+      importJob: {
+        findUnique: jest.fn().mockResolvedValue(importJob),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ pendingResultStorageKey: null }),
+        update: jest.fn().mockResolvedValue(undefined),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      $transaction: jest.fn(async (work: (tx: unknown) => Promise<void>) =>
+        work({
+          importJob: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        }),
+      ),
+    };
+    const files = {
+      loadSource: jest.fn().mockResolvedValue(source),
+      parse: jest.fn().mockResolvedValue({ rows, errors: [] }),
+      saveReport: jest
+        .fn()
+        .mockResolvedValue(
+          "colleges/college-1/imports/results/mixed-people.json",
+        ),
+      deleteSource: jest.fn().mockResolvedValue(undefined),
+    };
+    const handler = {
+      validate: jest.fn().mockResolvedValue([]),
+      createPeopleBatch: jest
+        .fn()
+        .mockRejectedValue(new Error("bounded transaction rolled back")),
+      create: jest.fn(
+        async (
+          _entityType: string,
+          _collegeId: string,
+          row: ImportRow,
+          rowNumber: number,
+        ) => {
+          if (row.college_identity_id === "FALLBACK002") {
+            throw new BadRequestException(
+              `Late conflict for ${row.temporary_password}`,
+            );
+          }
+          return {
+            rowNumber,
+            model: "User",
+            id: "00000000-0000-4000-8000-000000000081",
+            label: `${row.college_identity_id} - ${row.full_name}`,
+          };
         },
-      ): {
-        mappings: Record<string, string>;
-        unresolved: Array<{ sourceCode: string; rowCount: number }>;
-      };
-    }).departmentMappingPreview.bind(service);
+      ),
+    };
+    const importService = Object.create(
+      ImportsService.prototype,
+    ) as ImportsService;
+    Object.defineProperties(importService, {
+      prisma: { value: prisma },
+      files: { value: files },
+      handler: { value: handler },
+      audit: { value: { record: jest.fn().mockResolvedValue(undefined) } },
+    });
+    const process = (
+      importService as unknown as {
+        process(job: {
+          data: { jobId: string };
+          updateProgress(progress: number): Promise<void>;
+        }): Promise<void>;
+      }
+    ).process.bind(importService);
+
+    await process({
+      data: { jobId: importJob.id },
+      updateProgress: jest.fn().mockResolvedValue(undefined),
+    });
+
+    expect(handler.createPeopleBatch).toHaveBeenCalledTimes(1);
+    expect(handler.create).toHaveBeenCalledTimes(2);
+    const report = files.saveReport.mock.calls[0]?.[1] as {
+      successful: unknown[];
+      errors: Array<{ rowNumber: number; message: string }>;
+    };
+    expect(report.successful).toHaveLength(1);
+    expect(report.errors).toEqual([
+      expect.objectContaining({
+        rowNumber: 3,
+        message: "Late conflict for [REDACTED]",
+      }),
+    ]);
+    expect(JSON.stringify(report)).not.toContain(suppliedPassword);
+  });
+
+  it("resolves only exact configured aliases and exposes unknown departments", () => {
+    const mappingPreview = (
+      service as unknown as {
+        departmentMappingPreview(
+          rows: Array<Partial<ImportRow>>,
+          context: {
+            mappings: Record<string, string>;
+            departments: Array<{
+              id: string;
+              code: string;
+              name: string;
+              shortName: string | null;
+            }>;
+          },
+        ): {
+          mappings: Record<string, string>;
+          unresolved: Array<{ sourceCode: string; rowCount: number }>;
+        };
+      }
+    ).departmentMappingPreview.bind(service);
     const departments = [
-      { id: "department-aiml", code: "AI & ML", name: "Artificial Intelligence and Machine Learning", shortName: "AI & ML" },
+      {
+        id: "department-aiml",
+        code: "AI & ML",
+        name: "Artificial Intelligence and Machine Learning",
+        shortName: "AI & ML",
+      },
     ];
 
     const result = mappingPreview(
       [
         { source_department_code: "AI-ML", department_code: "AI & ML" },
-        { source_department_code: "Computer Science", department_code: "Computer Science" },
+        {
+          source_department_code: "Computer Science",
+          department_code: "Computer Science",
+        },
       ],
       { mappings: { AIML: "AI & ML" }, departments },
     );
 
     expect(result.mappings).toEqual({ "AI-ML": "AI & ML" });
-    expect(result.unresolved).toEqual([{ sourceCode: "Computer Science", rowCount: 1 }]);
+    expect(result.unresolved).toEqual([
+      { sourceCode: "Computer Science", rowCount: 1 },
+    ]);
   });
 
   it("applies the built-in AI department aliases to ordinary CSV rows without fuzzy matching", async () => {
-    const mappingService = Object.create(ImportsService.prototype) as ImportsService;
+    const mappingService = Object.create(
+      ImportsService.prototype,
+    ) as ImportsService;
     Object.defineProperty(mappingService, "prisma", {
       value: {
         department: {
           findMany: jest.fn().mockResolvedValue([
-            { id: "department-aids", code: "AI & DS", name: "Artificial Intelligence and Data Science", shortName: "AI & DS" },
-            { id: "department-aiml", code: "AI & ML", name: "Artificial Intelligence and Machine Learning", shortName: "AI & ML" },
+            {
+              id: "department-aids",
+              code: "AI & DS",
+              name: "Artificial Intelligence and Data Science",
+              shortName: "AI & DS",
+            },
+            {
+              id: "department-aiml",
+              code: "AI & ML",
+              name: "Artificial Intelligence and Machine Learning",
+              shortName: "AI & ML",
+            },
           ]),
         },
         appSetting: { findUnique: jest.fn().mockResolvedValue(null) },
       },
     });
-    const context = await (mappingService as unknown as {
-      departmentImportContext(
-        collegeId: string,
-      ): Promise<{ mappings: Record<string, string> }>;
-    }).departmentImportContext("college-1");
+    const context = await (
+      mappingService as unknown as {
+        departmentImportContext(
+          collegeId: string,
+        ): Promise<{ mappings: Record<string, string> }>;
+      }
+    ).departmentImportContext("college-1");
     const parser = new ImportsFileService(
       new ConfigService({
         S3_BUCKET: "private",
@@ -1032,6 +1609,524 @@ describe("ImportsService Excel workbooks", () => {
     expect(worksheet?.getCell("A2").text).toBe("Sample Faculty One");
   });
 
+  it("generates the exact header-only People template", async () => {
+    const result = await service.template(
+      { permissions: ["users.import"] } as AuthPrincipal,
+      "PEOPLE",
+    );
+    const workbook = new Workbook();
+    await workbook.xlsx.load(
+      result.content as unknown as Parameters<typeof workbook.xlsx.load>[0],
+    );
+    const worksheet = workbook.getWorksheet("Template");
+    const headers = worksheet?.getRow(1).values as string[] | undefined;
+
+    expect(result.fileName).toBe("people-import-template.xlsx");
+    expect(headers?.slice(1)).toEqual([
+      "User Name",
+      "User ID",
+      "User Password",
+      "Department",
+      "Year",
+      "Class Room Number",
+      "Mobile Number",
+    ]);
+    expect(worksheet?.rowCount).toBe(1);
+  });
+
+  it("atomically cancels a READY People import and removes its password-bearing source", async () => {
+    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const files = { deleteSource: jest.fn().mockResolvedValue(undefined) };
+    const importService = Object.create(
+      ImportsService.prototype,
+    ) as ImportsService;
+    const job = {
+      id: "00000000-0000-4000-8000-000000000010",
+      collegeId: "college-1",
+      requestedById: "admin-1",
+      entityType: "PEOPLE",
+      status: "READY",
+      sourceStorageKey:
+        "colleges/college-1/imports/source/people-passwords.xlsx",
+    };
+    const prisma = {
+      importJob: {
+        findFirst: jest.fn().mockResolvedValue(job),
+        updateMany,
+      },
+      $transaction: jest.fn(
+        async (
+          work: (tx: {
+            importJob: { updateMany: typeof updateMany };
+          }) => Promise<void>,
+        ) => work({ importJob: { updateMany } }),
+      ),
+    };
+    Object.defineProperties(importService, {
+      prisma: { value: prisma },
+      files: { value: files },
+      audit: { value: audit },
+      logger: { value: { error: jest.fn() } },
+    });
+    const actor = {
+      id: "admin-1",
+      collegeId: "college-1",
+      permissions: ["users.import"],
+    } as AuthPrincipal;
+
+    await expect(
+      importService.cancel(actor, job.id, "request-cancel"),
+    ).resolves.toEqual({ id: job.id, status: "CANCELLED" });
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: job.id,
+        collegeId: "college-1",
+        requestedById: "admin-1",
+        status: "READY",
+      },
+      data: { status: "CANCELLED" },
+    });
+    expect(files.deleteSource).toHaveBeenCalledWith(
+      job.collegeId,
+      job.sourceStorageKey,
+    );
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        id: job.id,
+        collegeId: job.collegeId,
+        sourceStorageKey: job.sourceStorageKey,
+      },
+      data: { sourceStorageKey: null, sourceExpiresAt: null },
+    });
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "import.cancelled",
+        afterValue: { importedEntity: "PEOPLE", status: "CANCELLED" },
+      }),
+      expect.anything(),
+    );
+    expect(JSON.stringify(audit.record.mock.calls)).not.toMatch(
+      /password|temporary_password/i,
+    );
+  });
+
+  it("expires an abandoned READY source with an atomic status claim and durable deletion marker", async () => {
+    const sourceStorageKey =
+      "colleges/college-1/imports/source/expired-people.xlsx";
+    const job = {
+      id: "00000000-0000-4000-8000-000000000011",
+      collegeId: "college-1",
+      requestedById: "admin-1",
+      entityType: "PEOPLE",
+      status: "READY",
+      sourceStorageKey,
+      sourceExpiresAt: new Date("2026-08-23T00:00:00.000Z"),
+    };
+    const claim = jest.fn().mockResolvedValue({ count: 1 });
+    const clear = jest.fn().mockResolvedValue({ count: 1 });
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const files = { deleteSource: jest.fn().mockResolvedValue(undefined) };
+    const prisma = {
+      importJob: {
+        findMany: jest.fn().mockResolvedValue([job]),
+        updateMany: clear,
+      },
+      $transaction: jest.fn(
+        async (
+          work: (tx: {
+            importJob: { updateMany: typeof claim };
+          }) => Promise<unknown>,
+        ) => work({ importJob: { updateMany: claim } }),
+      ),
+    };
+    const importService = Object.create(
+      ImportsService.prototype,
+    ) as ImportsService;
+    Object.defineProperties(importService, {
+      prisma: { value: prisma },
+      files: { value: files },
+      audit: { value: audit },
+      logger: { value: { error: jest.fn(), warn: jest.fn() } },
+    });
+    const cleanup = (
+      importService as unknown as { cleanupExpiredSources(): Promise<void> }
+    ).cleanupExpiredSources.bind(importService);
+
+    await cleanup();
+
+    expect(claim).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: job.id,
+          collegeId: job.collegeId,
+          status: "READY",
+          sourceStorageKey,
+        }),
+        data: expect.objectContaining({ status: "CANCELLED" }),
+      }),
+    );
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "import.expired",
+        afterValue: { importedEntity: "PEOPLE", status: "CANCELLED" },
+      }),
+      expect.anything(),
+    );
+    expect(files.deleteSource).toHaveBeenCalledWith(
+      job.collegeId,
+      sourceStorageKey,
+    );
+    expect(clear).toHaveBeenCalledWith({
+      where: {
+        id: job.id,
+        collegeId: job.collegeId,
+        sourceStorageKey,
+      },
+      data: { sourceStorageKey: null, sourceExpiresAt: null },
+    });
+  });
+
+  it("retains the source marker after a storage error and retries terminal cleanup", async () => {
+    const sourceStorageKey =
+      "colleges/college-1/imports/source/retry-people.xlsx";
+    const job = {
+      id: "00000000-0000-4000-8000-000000000012",
+      collegeId: "college-1",
+      requestedById: "admin-1",
+      entityType: "PEOPLE",
+      status: "COMPLETED",
+      sourceStorageKey,
+      sourceExpiresAt: new Date("2026-08-23T00:00:00.000Z"),
+    };
+    const clear = jest.fn().mockResolvedValue({ count: 1 });
+    const files = {
+      deleteSource: jest
+        .fn()
+        .mockRejectedValueOnce(new Error("temporary storage outage"))
+        .mockResolvedValueOnce(undefined),
+    };
+    const logger = { error: jest.fn(), warn: jest.fn() };
+    const importService = Object.create(
+      ImportsService.prototype,
+    ) as ImportsService;
+    Object.defineProperties(importService, {
+      prisma: {
+        value: {
+          importJob: {
+            findMany: jest.fn().mockResolvedValue([job]),
+            updateMany: clear,
+          },
+        },
+      },
+      files: { value: files },
+      audit: { value: { record: jest.fn() } },
+      logger: { value: logger },
+    });
+    const cleanup = (
+      importService as unknown as { cleanupExpiredSources(): Promise<void> }
+    ).cleanupExpiredSources.bind(importService);
+
+    await cleanup();
+    expect(clear).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: job.id }),
+      "Temporary import source cleanup failed",
+    );
+
+    await cleanup();
+    expect(files.deleteSource).toHaveBeenCalledTimes(2);
+    expect(clear).toHaveBeenCalledWith({
+      where: {
+        id: job.id,
+        collegeId: job.collegeId,
+        sourceStorageKey,
+      },
+      data: { sourceStorageKey: null, sourceExpiresAt: null },
+    });
+  });
+
+  it("never replays a PROCESSING job or deletes the source owned by its active attempt", async () => {
+    const importJob = {
+      id: "00000000-0000-4000-8000-000000000090",
+      collegeId: "college-1",
+      requestedById: "admin-1",
+      entityType: "PEOPLE",
+      importMode: "CREATE_ONLY",
+      selectedSheetName: "People",
+      columnMapping: null,
+      sourceStorageKey: "colleges/college-1/imports/source/replay-people.xlsx",
+      sourceSha256: "0".repeat(64),
+      status: "PROCESSING",
+    };
+    const files = {
+      loadSource: jest.fn(),
+      deleteSource: jest.fn(),
+    };
+    const importService = Object.create(
+      ImportsService.prototype,
+    ) as ImportsService;
+    Object.defineProperties(importService, {
+      prisma: {
+        value: {
+          importJob: {
+            findUnique: jest.fn().mockResolvedValue(importJob),
+            findFirst: jest
+              .fn()
+              .mockResolvedValue({ pendingResultStorageKey: null }),
+            updateMany: jest.fn(),
+          },
+        },
+      },
+      files: { value: files },
+    });
+    const process = (
+      importService as unknown as {
+        process(job: { data: { jobId: string } }): Promise<void>;
+      }
+    ).process.bind(importService);
+
+    await process({ data: { jobId: importJob.id } });
+
+    expect(files.loadSource).not.toHaveBeenCalled();
+    expect(files.deleteSource).not.toHaveBeenCalled();
+  });
+
+  it("does not delete a queued source when another worker wins the atomic claim", async () => {
+    const importJob = {
+      id: "00000000-0000-4000-8000-000000000091",
+      collegeId: "college-1",
+      requestedById: "admin-1",
+      entityType: "PEOPLE",
+      importMode: "CREATE_ONLY",
+      selectedSheetName: "People",
+      columnMapping: null,
+      sourceStorageKey: "colleges/college-1/imports/source/claimed-people.xlsx",
+      sourceSha256: "0".repeat(64),
+      status: "QUEUED",
+    };
+    const files = {
+      loadSource: jest.fn(),
+      deleteSource: jest.fn(),
+    };
+    const claim = jest.fn().mockResolvedValue({ count: 0 });
+    const importService = Object.create(
+      ImportsService.prototype,
+    ) as ImportsService;
+    Object.defineProperties(importService, {
+      prisma: {
+        value: {
+          importJob: {
+            findUnique: jest.fn().mockResolvedValue(importJob),
+            findFirst: jest
+              .fn()
+              .mockResolvedValue({ pendingResultStorageKey: null }),
+            updateMany: claim,
+          },
+        },
+      },
+      files: { value: files },
+    });
+    const process = (
+      importService as unknown as {
+        process(job: { data: { jobId: string } }): Promise<void>;
+      }
+    ).process.bind(importService);
+
+    await process({ data: { jobId: importJob.id } });
+
+    expect(claim).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: "QUEUED" }),
+      }),
+    );
+    expect(files.loadSource).not.toHaveBeenCalled();
+    expect(files.deleteSource).not.toHaveBeenCalled();
+  });
+
+  it("fails and cleans a stale PROCESSING job only after BullMQ proves it is inactive", async () => {
+    const sourceStorageKey =
+      "colleges/college-1/imports/source/stale-processing.xlsx";
+    const job = {
+      id: "00000000-0000-4000-8000-000000000092",
+      collegeId: "college-1",
+      requestedById: "admin-1",
+      entityType: "PEOPLE",
+      status: "PROCESSING",
+      sourceStorageKey,
+      sourceExpiresAt: new Date("2026-08-23T00:00:00.000Z"),
+    };
+    const queueJob = {
+      getState: jest.fn().mockResolvedValue("completed"),
+      remove: jest.fn().mockResolvedValue(undefined),
+    };
+    const claim = jest.fn().mockResolvedValue({ count: 1 });
+    const clear = jest.fn().mockResolvedValue({ count: 1 });
+    const files = { deleteSource: jest.fn().mockResolvedValue(undefined) };
+    const importService = Object.create(
+      ImportsService.prototype,
+    ) as ImportsService;
+    Object.defineProperties(importService, {
+      prisma: {
+        value: {
+          importJob: {
+            findMany: jest.fn().mockResolvedValue([job]),
+            updateMany: clear,
+          },
+          $transaction: jest.fn(
+            async (
+              work: (tx: {
+                importJob: { updateMany: typeof claim };
+              }) => Promise<unknown>,
+            ) => work({ importJob: { updateMany: claim } }),
+          ),
+        },
+      },
+      files: { value: files },
+      audit: { value: { record: jest.fn().mockResolvedValue(undefined) } },
+      queue: { value: { getJob: jest.fn().mockResolvedValue(queueJob) } },
+      logger: { value: { error: jest.fn(), warn: jest.fn() } },
+    });
+    const cleanup = (
+      importService as unknown as { cleanupExpiredSources(): Promise<void> }
+    ).cleanupExpiredSources.bind(importService);
+
+    await cleanup();
+
+    expect(queueJob.remove).toHaveBeenCalledTimes(1);
+    expect(claim).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: job.id,
+          status: "PROCESSING",
+        }),
+        data: expect.objectContaining({ status: "FAILED" }),
+      }),
+    );
+    expect(files.deleteSource).toHaveBeenCalledWith(
+      job.collegeId,
+      sourceStorageKey,
+    );
+    expect(clear).toHaveBeenCalledWith({
+      where: {
+        id: job.id,
+        collegeId: job.collegeId,
+        sourceStorageKey,
+      },
+      data: { sourceStorageKey: null, sourceExpiresAt: null },
+    });
+  });
+
+  it("keeps an expired PROCESSING source while its BullMQ job is active", async () => {
+    const sourceStorageKey =
+      "colleges/college-1/imports/source/active-processing.xlsx";
+    const job = {
+      id: "00000000-0000-4000-8000-000000000093",
+      collegeId: "college-1",
+      requestedById: "admin-1",
+      entityType: "PEOPLE",
+      status: "PROCESSING",
+      sourceStorageKey,
+      sourceExpiresAt: new Date("2026-08-23T00:00:00.000Z"),
+    };
+    const queueJob = {
+      getState: jest.fn().mockResolvedValue("active"),
+      remove: jest.fn(),
+    };
+    const files = { deleteSource: jest.fn() };
+    const transaction = jest.fn();
+    const importService = Object.create(
+      ImportsService.prototype,
+    ) as ImportsService;
+    Object.defineProperties(importService, {
+      prisma: {
+        value: {
+          importJob: { findMany: jest.fn().mockResolvedValue([job]) },
+          $transaction: transaction,
+        },
+      },
+      files: { value: files },
+      queue: { value: { getJob: jest.fn().mockResolvedValue(queueJob) } },
+      logger: { value: { error: jest.fn(), warn: jest.fn() } },
+    });
+    const cleanup = (
+      importService as unknown as { cleanupExpiredSources(): Promise<void> }
+    ).cleanupExpiredSources.bind(importService);
+
+    await cleanup();
+
+    expect(queueJob.remove).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+    expect(files.deleteSource).not.toHaveBeenCalled();
+  });
+
+  it("refuses People rollback when preserved audit or other dependencies block user deletion", async () => {
+    const importService = Object.create(
+      ImportsService.prototype,
+    ) as ImportsService;
+    const job = {
+      id: "00000000-0000-4000-8000-000000000060",
+      collegeId: "college-1",
+      requestedById: "admin-1",
+      entityType: "PEOPLE",
+      status: "COMPLETED",
+      resultStorageKey: null,
+    };
+    const prisma = {
+      importJob: { findFirst: jest.fn().mockResolvedValue(job) },
+      importJobRecord: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            rowNumber: 2,
+            model: "User",
+            recordId: "00000000-0000-4000-8000-000000000061",
+            label: "AVS001 - Arun Kumar",
+          },
+        ]),
+      },
+      $transaction: jest.fn(
+        async (work: (tx: unknown) => Promise<unknown>) => work({}),
+      ),
+    };
+    const handler = {
+      rollback: jest.fn().mockRejectedValue(
+        Object.assign(new Error("Foreign key dependency"), {
+          code: "P2003",
+        }),
+      ),
+    };
+    Object.defineProperties(importService, {
+      prisma: { value: prisma },
+      handler: { value: handler },
+    });
+    const actor = {
+      id: "admin-1",
+      collegeId: "college-1",
+      permissions: ["users.import"],
+    } as AuthPrincipal;
+
+    await expect(
+      importService.rollback(actor, job.id, "request-rollback"),
+    ).rejects.toThrow(
+      "Rollback is no longer safe because one or more imported records are now referenced by other data.",
+    );
+    expect(handler.rollback).toHaveBeenCalledWith(
+      "college-1",
+      [
+        expect.objectContaining({
+          model: "User",
+          id: "00000000-0000-4000-8000-000000000061",
+        }),
+      ],
+      expect.objectContaining({
+        entityType: "PEOPLE",
+        importJobId: job.id,
+      }),
+      expect.any(Object),
+    );
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
   it("generates formula-safe confidential credential workbooks", async () => {
     const rows: CredentialExportRow[] = [
       {
@@ -1039,7 +2134,7 @@ describe("ImportsService Excel workbooks", () => {
         userId: "00000000-0000-0000-0000-000000000001",
         fullName: "Formula Safe",
         role: "FACULTY",
-        loginId: "=HYPERLINK(\"https://example.invalid\")",
+        loginId: '=HYPERLINK("https://example.invalid")',
         temporaryPassword: "+Temporary@123",
         firstLoginRequired: true,
       },
@@ -1056,9 +2151,9 @@ describe("ImportsService Excel workbooks", () => {
     const worksheet = workbook.getWorksheet("Credentials");
 
     expect(worksheet?.getCell("D6").text).toBe(
-      "'=HYPERLINK(\"https://example.invalid\")",
+      '\'=HYPERLINK("https://example.invalid")',
     );
-    expect(worksheet?.getCell("E6").text).toBe("'+Temporary@123");
+    expect(worksheet?.getCell("E6").text).toBe("+Temporary@123");
     expect(worksheet?.getCell("F6").text).toBe("true");
   });
 });

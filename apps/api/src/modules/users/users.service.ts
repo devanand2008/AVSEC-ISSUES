@@ -201,7 +201,22 @@ export class UsersService {
         roles: { select: { role: { select: { code: true, name: true } } } },
         scopes: { select: { scopeType: true, scopeId: true } },
         studentProfile: {
-          include: { department: true, programme: true, section: true },
+          include: {
+            department: true,
+            programme: true,
+            section: {
+              include: {
+                assignedRoom: {
+                  select: {
+                    id: true,
+                    code: true,
+                    name: true,
+                    roomNumber: true,
+                  },
+                },
+              },
+            },
+          },
         },
         staffProfile: { include: { department: true } },
       },
@@ -655,7 +670,55 @@ export class UsersService {
           : filters.campusId
             ? { scopeType: "CAMPUS" as const, scopeId: filters.campusId }
             : undefined;
-    if (placeScope) and.push({ scopes: { some: placeScope } });
+    if (placeScope) {
+      if (filters.roomId) {
+        and.push({
+          OR: [
+            { scopes: { some: placeScope } },
+            { studentProfile: { section: { assignedRoomId: filters.roomId } } },
+          ],
+        });
+      } else if (filters.floorId) {
+        and.push({
+          OR: [
+            { scopes: { some: placeScope } },
+            {
+              studentProfile: {
+                section: { assignedRoom: { floorId: filters.floorId } },
+              },
+            },
+          ],
+        });
+      } else if (filters.blockId) {
+        and.push({
+          OR: [
+            { scopes: { some: placeScope } },
+            {
+              studentProfile: {
+                section: {
+                  assignedRoom: { floor: { blockId: filters.blockId } },
+                },
+              },
+            },
+          ],
+        });
+      } else if (filters.campusId) {
+        and.push({
+          OR: [
+            { scopes: { some: placeScope } },
+            {
+              studentProfile: {
+                section: {
+                  assignedRoom: {
+                    floor: { block: { campusId: filters.campusId } },
+                  },
+                },
+              },
+            },
+          ],
+        });
+      }
+    }
     const where: Prisma.UserWhereInput = {
       collegeId: user.collegeId,
       ...(filters.archived === "ONLY" || status === "ARCHIVED"
@@ -748,6 +811,14 @@ export class UsersService {
                   code: true,
                   name: true,
                   studyYear: true,
+                  assignedRoom: {
+                    select: {
+                      id: true,
+                      code: true,
+                      name: true,
+                      roomNumber: true,
+                    },
+                  },
                   semester: {
                     select: {
                       number: true,
@@ -774,6 +845,107 @@ export class UsersService {
       data: await this.attachAssignedPlaces(data),
       meta: { page, pageSize, total, pageCount: Math.ceil(total / pageSize) },
     };
+  }
+
+  async peopleFilterOptions(
+    user: AuthPrincipal,
+    departmentId?: string,
+    roomSearch?: string,
+  ) {
+    const search = roomSearch?.trim().slice(0, 100);
+    const [departments, rooms] = await this.prisma.$transaction([
+      this.prisma.department.findMany({
+        where: {
+          collegeId: user.collegeId,
+          isActive: true,
+          archivedAt: null,
+        },
+        select: { id: true, code: true, name: true },
+        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      }),
+      this.prisma.room.findMany({
+        where: {
+          isActive: true,
+          archivedAt: null,
+          AND: [
+            ...(departmentId
+              ? [
+                  {
+                    OR: [
+                      { departmentId },
+                      {
+                        assignedSections: {
+                          some: { semester: { programme: { departmentId } } },
+                        },
+                      },
+                    ],
+                  },
+                ]
+              : []),
+            ...(search
+              ? [
+                  {
+                    OR: [
+                      {
+                        code: {
+                          contains: search,
+                          mode: "insensitive" as const,
+                        },
+                      },
+                      {
+                        name: {
+                          contains: search,
+                          mode: "insensitive" as const,
+                        },
+                      },
+                      {
+                        roomNumber: {
+                          contains: search,
+                          mode: "insensitive" as const,
+                        },
+                      },
+                    ],
+                  },
+                ]
+              : []),
+          ],
+          floor: {
+            isActive: true,
+            archivedAt: null,
+            block: {
+              isActive: true,
+              archivedAt: null,
+              campus: {
+                collegeId: user.collegeId,
+                isActive: true,
+                archivedAt: null,
+              },
+            },
+          },
+        },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          roomNumber: true,
+          departmentId: true,
+          floor: {
+            select: {
+              name: true,
+              block: {
+                select: {
+                  name: true,
+                  campus: { select: { name: true } },
+                },
+              },
+            },
+          },
+        },
+        orderBy: [{ code: "asc" }],
+        take: 100,
+      }),
+    ]);
+    return { departments, rooms };
   }
 
   async detail(actor: AuthPrincipal, publicId: string) {
@@ -816,7 +988,22 @@ export class UsersService {
           select: { scopeType: true, scopeId: true, issueCategoryId: true },
         },
         studentProfile: {
-          include: { department: true, programme: true, section: true },
+          include: {
+            department: true,
+            programme: true,
+            section: {
+              include: {
+                assignedRoom: {
+                  select: {
+                    id: true,
+                    code: true,
+                    name: true,
+                    roomNumber: true,
+                  },
+                },
+              },
+            },
+          },
         },
         staffProfile: { include: { department: true } },
         sessions: {
@@ -1084,29 +1271,103 @@ export class UsersService {
       throw new BadRequestException(
         "Use your security settings to revoke your own sessions.",
       );
-    return this.prisma.$transaction(async (tx) => {
-      const activeSessions = await tx.session.count({
-        where: { userId: target.id, revokedAt: null },
-      });
-      await this.revokeAccessSessions(
-        tx,
-        target.id,
-        "ADMIN_SESSION_REVOCATION",
-      );
-      await this.audit.record(
-        {
-          actorId: actor.id,
-          action: "user.sessions_revoked",
-          entityType: "User",
-          entityId: target.id,
-          afterValue: { revokedSessions: activeSessions },
-          reason,
-          requestId,
-        },
-        tx,
-      );
-      return { id: target.publicId, revokedSessions: activeSessions };
-    });
+    return this.prisma.$transaction(
+      async (tx) => {
+        await this.lockRoleMutationUsers(tx, actor.id, target.id);
+        const authorizationNow = new Date();
+        const currentActor = await tx.user.findFirst({
+          where: {
+            id: actor.id,
+            collegeId: actor.collegeId,
+            status: AccountStatus.ACTIVE,
+            archivedAt: null,
+          },
+          select: {
+            roles: {
+              where: {
+                validFrom: { lte: authorizationNow },
+                OR: [
+                  { validUntil: null },
+                  { validUntil: { gt: authorizationNow } },
+                ],
+                role: { isActive: true },
+              },
+              select: {
+                role: {
+                  select: {
+                    code: true,
+                    permissions: {
+                      select: { permission: { select: { code: true } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        });
+        if (!currentActor)
+          throw new ForbiddenException(
+            "Your administrative account is no longer active.",
+          );
+        const currentTarget = await tx.user.findFirst({
+          where: { id: target.id, collegeId: actor.collegeId },
+          select: {
+            id: true,
+            publicId: true,
+            roles: {
+              where: {
+                validFrom: { lte: authorizationNow },
+                OR: [
+                  { validUntil: null },
+                  { validUntil: { gt: authorizationNow } },
+                ],
+                role: { isActive: true },
+              },
+              select: { role: { select: { code: true } } },
+            },
+          },
+        });
+        if (!currentTarget) throw new NotFoundException("User not found.");
+        const currentActorRoleCodes = currentActor.roles.map(
+          (mapping) => mapping.role.code,
+        );
+        this.assertCurrentPermissions(
+          currentActor.roles.flatMap((mapping) =>
+            mapping.role.permissions.map(
+              (permission) => permission.permission.code,
+            ),
+          ),
+          ["sessions.revoke_any"],
+        );
+        this.assertMayEditAccount(
+          currentActorRoleCodes,
+          currentTarget.roles.map((mapping) => mapping.role.code),
+          "You cannot revoke sessions for an account at or above your administrative level.",
+        );
+        const activeSessions = await tx.session.count({
+          where: { userId: currentTarget.id, revokedAt: null },
+        });
+        await this.revokeAccessSessions(
+          tx,
+          currentTarget.id,
+          "ADMIN_SESSION_REVOCATION",
+        );
+        await this.audit.record(
+          {
+            actorId: actor.id,
+            action: "user.sessions_revoked",
+            entityType: "User",
+            entityId: currentTarget.id,
+            afterValue: { revokedSessions: activeSessions },
+            reason,
+            requestId,
+          },
+          tx,
+        );
+        return { id: currentTarget.publicId, revokedSessions: activeSessions };
+      },
+      { isolationLevel: "Serializable" },
+    );
   }
 
   async updateBasic(
@@ -1115,56 +1376,299 @@ export class UsersService {
     input: Record<string, unknown>,
     requestId: string,
   ) {
+    const now = new Date();
     const target = await this.prisma.user.findFirst({
       where: { publicId, collegeId: actor.collegeId, archivedAt: null },
       select: {
         id: true,
+        collegeIdentityId: true,
         fullName: true,
         email: true,
         normalizedEmail: true,
+        mobile: true,
+        whatsappNumber: true,
         status: true,
+        studentProfile: { select: { id: true, studentId: true } },
+        staffProfile: { select: { id: true, departmentId: true } },
+        roles: {
+          where: {
+            validFrom: { lte: now },
+            OR: [{ validUntil: null }, { validUntil: { gt: now } }],
+            role: { isActive: true },
+          },
+          select: { role: { select: { code: true } } },
+        },
       },
     });
     if (!target) throw new NotFoundException("User not found.");
-    const data: Prisma.UserUpdateInput = { version: { increment: 1 } };
-    if ("fullName" in input)
-      data.fullName = this.requiredString(input.fullName, "Full Name");
+    if (target.id === actor.id)
+      throw new BadRequestException(
+        "Use your profile settings to update your own account.",
+      );
+    this.assertMayEditAccount(
+      actor.roles,
+      target.roles.map((mapping) => mapping.role.code),
+    );
+
+    const data: Prisma.UserUpdateInput = {};
+    let collegeIdentityId: string | undefined;
+    if ("collegeIdentityId" in input) {
+      collegeIdentityId = this.requiredString(
+        input.collegeIdentityId,
+        "User ID",
+      );
+      if (collegeIdentityId.length < 2 || collegeIdentityId.length > 60)
+        throw new BadRequestException(
+          "User ID must contain 2 to 60 characters.",
+        );
+      data.collegeIdentityId = collegeIdentityId;
+    }
+    if ("fullName" in input) {
+      const fullName = this.requiredString(input.fullName, "Full Name");
+      if (fullName.length < 2 || fullName.length > 180)
+        throw new BadRequestException(
+          "Full Name must contain 2 to 180 characters.",
+        );
+      data.fullName = fullName;
+    }
     if ("email" in input) {
       const email = this.optionalString(input.email);
+      if (
+        email &&
+        (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      )
+        throw new BadRequestException("Official Email is not valid.");
+      const normalizedEmail = email?.toLowerCase();
       data.email = email ?? null;
-      data.normalizedEmail = email?.toLowerCase() ?? null;
+      data.normalizedEmail = normalizedEmail ?? null;
     }
-    if ("mobile" in input)
-      data.mobile = this.optionalString(input.mobile) ?? null;
+    if ("mobile" in input) {
+      const mobile = this.optionalString(input.mobile);
+      if (mobile && !/^\+?[0-9]{7,15}$/.test(mobile))
+        throw new BadRequestException(
+          "Mobile Number must contain 7 to 15 digits with an optional leading +.",
+        );
+      data.mobile = mobile ?? null;
+    }
     if ("whatsappNumber" in input)
       data.whatsappNumber = this.optionalString(input.whatsappNumber) ?? null;
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const saved = await tx.user.update({
-        where: { id: target.id },
-        data,
-        select: {
-          publicId: true,
-          fullName: true,
-          email: true,
-          mobile: true,
-          whatsappNumber: true,
-          updatedAt: true,
-        },
-      });
-      await this.audit.record(
-        {
-          actorId: actor.id,
-          action: "user.updated",
-          entityType: "User",
-          entityId: target.id,
-          beforeValue: target,
-          afterValue: saved,
-          requestId,
-        },
-        tx,
-      );
-      return saved;
-    });
+    let staffDepartmentId: string | null | undefined;
+    if ("departmentId" in input) {
+      staffDepartmentId =
+        input.departmentId === null || input.departmentId === ""
+          ? null
+          : this.requiredString(input.departmentId, "Department");
+      if (
+        staffDepartmentId &&
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          staffDepartmentId,
+        )
+      ) {
+        throw new BadRequestException("Department is not valid.");
+      }
+    }
+    const updated = await this.prisma.$transaction(
+      async (tx) => {
+        await this.lockRoleMutationUsers(tx, actor.id, target.id);
+        const authorizationNow = new Date();
+        const currentTarget = await tx.user.findFirst({
+          where: {
+            id: target.id,
+            collegeId: actor.collegeId,
+            archivedAt: null,
+          },
+          select: {
+            id: true,
+            collegeIdentityId: true,
+            fullName: true,
+            email: true,
+            normalizedEmail: true,
+            mobile: true,
+            whatsappNumber: true,
+            status: true,
+            studentProfile: { select: { id: true, studentId: true } },
+            staffProfile: { select: { id: true, departmentId: true } },
+            roles: {
+              where: {
+                validFrom: { lte: authorizationNow },
+                OR: [
+                  { validUntil: null },
+                  { validUntil: { gt: authorizationNow } },
+                ],
+                role: { isActive: true },
+              },
+              select: { role: { select: { code: true } } },
+            },
+          },
+        });
+        if (!currentTarget) throw new NotFoundException("User not found.");
+        const currentActor = await tx.user.findFirst({
+          where: {
+            id: actor.id,
+            collegeId: actor.collegeId,
+            status: AccountStatus.ACTIVE,
+            archivedAt: null,
+          },
+          select: {
+            roles: {
+              where: {
+                validFrom: { lte: authorizationNow },
+                OR: [
+                  { validUntil: null },
+                  { validUntil: { gt: authorizationNow } },
+                ],
+                role: { isActive: true },
+              },
+              select: {
+                role: {
+                  select: {
+                    code: true,
+                    permissions: {
+                      select: { permission: { select: { code: true } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        });
+        if (!currentActor)
+          throw new ForbiddenException(
+            "Your administrative account is no longer active.",
+          );
+        this.assertCurrentPermissions(
+          currentActor.roles.flatMap((mapping) =>
+            mapping.role.permissions.map(
+              (permission) => permission.permission.code,
+            ),
+          ),
+          ["users.update"],
+        );
+        this.assertMayEditAccount(
+          currentActor.roles.map((mapping) => mapping.role.code),
+          currentTarget.roles.map((mapping) => mapping.role.code),
+        );
+
+        if (staffDepartmentId !== undefined) {
+          if (!currentTarget.staffProfile) {
+            throw new BadRequestException(
+              "Department can only be updated for a staff profile.",
+            );
+          }
+          if (staffDepartmentId) {
+            const department = await tx.department.findFirst({
+              where: {
+                id: staffDepartmentId,
+                collegeId: actor.collegeId,
+                isActive: true,
+                archivedAt: null,
+              },
+              select: { id: true },
+            });
+            if (!department) {
+              throw new BadRequestException(
+                "Staff department is not active in this college.",
+              );
+            }
+          }
+        }
+
+        if (collegeIdentityId) {
+          const duplicate = await tx.user.findFirst({
+            where: {
+              id: { not: currentTarget.id },
+              collegeId: actor.collegeId,
+              collegeIdentityId: {
+                equals: collegeIdentityId,
+                mode: "insensitive",
+              },
+            },
+            select: { id: true },
+          });
+          if (duplicate)
+            throw new ConflictException("This User ID already exists.");
+        }
+        const synchronizeStudentId = Boolean(
+          collegeIdentityId &&
+            currentTarget.studentProfile?.studentId.toLowerCase() ===
+              currentTarget.collegeIdentityId.toLowerCase(),
+        );
+        if (collegeIdentityId && synchronizeStudentId) {
+          const duplicateStudentId = await tx.studentProfile.findFirst({
+            where: {
+              id: { not: currentTarget.studentProfile!.id },
+              collegeId: actor.collegeId,
+              studentId: { equals: collegeIdentityId, mode: "insensitive" },
+            },
+            select: { id: true },
+          });
+          if (duplicateStudentId)
+            throw new ConflictException(
+              "This User ID already belongs to another student.",
+            );
+        }
+        const normalizedEmail =
+          typeof data.normalizedEmail === "string"
+            ? data.normalizedEmail
+            : undefined;
+        if (normalizedEmail) {
+          const duplicateEmail = await tx.user.findFirst({
+            where: {
+              id: { not: currentTarget.id },
+              collegeId: actor.collegeId,
+              normalizedEmail,
+            },
+            select: { id: true },
+          });
+          if (duplicateEmail)
+            throw new ConflictException("This Official Email already exists.");
+        }
+        const saved = await tx.user.update({
+          where: { id: currentTarget.id },
+          data: { ...data, version: { increment: 1 } },
+          select: {
+            publicId: true,
+            collegeIdentityId: true,
+            fullName: true,
+            email: true,
+            mobile: true,
+            whatsappNumber: true,
+            updatedAt: true,
+          },
+        });
+        if (collegeIdentityId && synchronizeStudentId) {
+          await tx.studentProfile.update({
+            where: { id: currentTarget.studentProfile!.id },
+            data: { studentId: collegeIdentityId },
+          });
+        }
+        if (staffDepartmentId !== undefined) {
+          await tx.staffProfile.update({
+            where: { id: currentTarget.staffProfile!.id },
+            data: { departmentId: staffDepartmentId },
+          });
+        }
+        await this.audit.record(
+          {
+            actorId: actor.id,
+            action: "user.updated",
+            entityType: "User",
+            entityId: currentTarget.id,
+            beforeValue: currentTarget,
+            afterValue: {
+              ...saved,
+              ...(staffDepartmentId !== undefined
+                ? { staffProfile: { departmentId: staffDepartmentId } }
+                : {}),
+            },
+            requestId,
+          },
+          tx,
+        );
+        return saved;
+      },
+      { isolationLevel: "Serializable" },
+    );
     return updated;
   }
 
@@ -1304,9 +1808,7 @@ export class UsersService {
     const targetRank = this.highestRoleRank(targetRoleCodes);
     if (
       targetRank > actorRank ||
-      (targetRank === actorRank &&
-        targetRank > 0 &&
-        !actor.roles.includes("SUPER_ADMIN"))
+      (targetRank === actorRank && !actor.roles.includes("SUPER_ADMIN"))
     ) {
       throw new ForbiddenException(
         "You cannot change the status of an account at or above your administrative level.",
@@ -1322,6 +1824,7 @@ export class UsersService {
           id: { not: target.id },
           collegeId: actor.collegeId,
           status: "ACTIVE",
+          archivedAt: null,
           roles: {
             some: {
               validFrom: { lte: now },
@@ -1340,177 +1843,243 @@ export class UsersService {
           "The last active Super Admin cannot be deactivated.",
         );
     }
-    const result = await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(
-        `SELECT id FROM users WHERE id = $1 FOR UPDATE`,
-        target.id,
-      );
-      const lockedTarget = await tx.user.findFirst({
-        where: { id: target.id, collegeId: actor.collegeId },
-        select: {
-          status: true,
-          collegeIdentityId: true,
-          studentProfile: { select: { sectionId: true } },
-          sectionMemberships: {
-            where: {
-              isActive: true,
-              status: AcademicMembershipStatus.ACTIVE,
-            },
-            select: { startsOn: true },
-            take: 1,
-          },
-        },
-      });
-      if (!lockedTarget) throw new NotFoundException("User not found.");
-      if (
-        input.status === AccountStatus.ACTIVE &&
-        lockedTarget.collegeIdentityId.startsWith("DELETED-")
-      ) {
-        throw new BadRequestException(
-          "Permanently deleted accounts cannot be reactivated. Create a new account instead.",
-        );
-      }
-      if (
-        lockedTarget.status === AccountStatus.ACTIVE &&
-        input.status !== AccountStatus.ACTIVE &&
-        targetRoleCodes.includes("SUPER_ADMIN")
-      ) {
-        const otherActiveSuperAdmins = await tx.user.count({
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        await this.lockRoleMutationUsers(tx, actor.id, target.id);
+        const authorizationNow = new Date();
+        const currentActor = await tx.user.findFirst({
           where: {
-            id: { not: target.id },
+            id: actor.id,
             collegeId: actor.collegeId,
             status: AccountStatus.ACTIVE,
+            archivedAt: null,
+          },
+          select: {
             roles: {
-              some: {
-                validFrom: { lte: now },
-                OR: [{ validUntil: null }, { validUntil: { gt: now } }],
+              where: {
+                validFrom: { lte: authorizationNow },
+                OR: [
+                  { validUntil: null },
+                  { validUntil: { gt: authorizationNow } },
+                ],
+                role: { isActive: true },
+              },
+              select: {
                 role: {
-                  code: "SUPER_ADMIN",
-                  isActive: true,
-                  OR: [{ collegeId: actor.collegeId }, { collegeId: null }],
+                  select: {
+                    code: true,
+                    permissions: {
+                      select: { permission: { select: { code: true } } },
+                    },
+                  },
                 },
               },
             },
           },
         });
-        if (otherActiveSuperAdmins === 0)
-          throw new BadRequestException(
-            "The last active Super Admin cannot be deactivated.",
+        if (!currentActor)
+          throw new ForbiddenException(
+            "Your administrative account is no longer active.",
           );
-      }
-      if (
-        input.status === AccountStatus.ACTIVE &&
-        lockedTarget.status !== AccountStatus.ACTIVE &&
-        lockedTarget.studentProfile
-      ) {
-        await this.placements.placeStudent(tx, {
-          collegeId: actor.collegeId,
-          userId: target.id,
-          sectionId: lockedTarget.studentProfile.sectionId,
-          startsOn: this.dateOnly(new Date()),
-          accountStatus: AccountStatus.ACTIVE,
-          profile: {
-            changedById: actor.id,
-            academicOverrideReason: input.reason,
-          },
-        });
-      }
-      const terminalPlacementStatuses: AccountStatus[] = [
-        AccountStatus.ARCHIVED,
-        AccountStatus.GRADUATED,
-        AccountStatus.RESIGNED,
-        AccountStatus.DISABLED,
-      ];
-      const closesAcademicPlacement = terminalPlacementStatuses.includes(
-        input.status,
-      );
-      if (closesAcademicPlacement && lockedTarget.studentProfile) {
-        await this.placements.lockSection(
-          tx,
-          lockedTarget.studentProfile.sectionId,
+        this.assertCurrentPermissions(
+          currentActor.roles.flatMap((mapping) =>
+            mapping.role.permissions.map(
+              (permission) => permission.permission.code,
+            ),
+          ),
+          ["users.suspend"],
         );
-        const activeMembershipStartsOn =
-          lockedTarget.sectionMemberships[0]?.startsOn;
-        const membershipEndsOn = activeMembershipStartsOn
-          ? this.latestDate(this.dateOnly(now), activeMembershipStartsOn)
-          : this.dateOnly(now);
-        await tx.sectionMembership.updateMany({
-          where: {
-            studentUserId: target.id,
-            isActive: true,
-            status: AcademicMembershipStatus.ACTIVE,
+        const lockedTarget = await tx.user.findFirst({
+          where: { id: target.id, collegeId: actor.collegeId },
+          select: {
+            status: true,
+            collegeIdentityId: true,
+            roles: {
+              where: {
+                validFrom: { lte: authorizationNow },
+                OR: [
+                  { validUntil: null },
+                  { validUntil: { gt: authorizationNow } },
+                ],
+                role: { isActive: true },
+              },
+              select: { role: { select: { code: true } } },
+            },
+            studentProfile: { select: { sectionId: true } },
+            sectionMemberships: {
+              where: {
+                isActive: true,
+                status: AcademicMembershipStatus.ACTIVE,
+              },
+              select: { startsOn: true },
+              take: 1,
+            },
           },
-          data: {
-            isActive: false,
-            endsOn: membershipEndsOn,
-            status:
-              input.status === AccountStatus.GRADUATED
-                ? AcademicMembershipStatus.COMPLETED
-                : AcademicMembershipStatus.ARCHIVED,
-            changedById: actor.id,
-            reason: input.reason.trim(),
-          },
         });
-        await tx.userScope.deleteMany({
-          where: { userId: target.id, scopeType: ScopeType.SECTION },
-        });
-      }
-      const updated = await tx.user.update({
-        where: { id: target.id },
-        data: {
-          status: input.status,
-          archivedAt: input.status === "ARCHIVED" ? new Date() : null,
-          version: { increment: 1 },
-        },
-      });
-      if (input.status !== "ACTIVE") {
-        await tx.classRepresentativeAssignment.updateMany({
-          where: { representativeId: target.id, isActive: true },
-          data: { isActive: false, validUntil: this.dateOnly(now) },
-        });
-        await tx.userRole.updateMany({
-          where: {
+        if (!lockedTarget) throw new NotFoundException("User not found.");
+        const lockedTargetRoleCodes = lockedTarget.roles.map(
+          (mapping) => mapping.role.code,
+        );
+        this.assertMayEditAccount(
+          currentActor.roles.map((mapping) => mapping.role.code),
+          lockedTargetRoleCodes,
+          "You cannot change the status of an account at or above your administrative level.",
+        );
+        if (
+          input.status === AccountStatus.ACTIVE &&
+          lockedTarget.collegeIdentityId.startsWith("DELETED-")
+        ) {
+          throw new BadRequestException(
+            "Permanently deleted accounts cannot be reactivated. Create a new account instead.",
+          );
+        }
+        if (
+          lockedTarget.status === AccountStatus.ACTIVE &&
+          input.status !== AccountStatus.ACTIVE &&
+          lockedTargetRoleCodes.includes("SUPER_ADMIN")
+        ) {
+          const otherActiveSuperAdmins = await tx.user.count({
+            where: {
+              id: { not: target.id },
+              collegeId: actor.collegeId,
+              status: AccountStatus.ACTIVE,
+              archivedAt: null,
+              roles: {
+                some: {
+                  validFrom: { lte: authorizationNow },
+                  OR: [
+                    { validUntil: null },
+                    { validUntil: { gt: authorizationNow } },
+                  ],
+                  role: {
+                    code: "SUPER_ADMIN",
+                    isActive: true,
+                    OR: [{ collegeId: actor.collegeId }, { collegeId: null }],
+                  },
+                },
+              },
+            },
+          });
+          if (otherActiveSuperAdmins === 0)
+            throw new BadRequestException(
+              "The last active Super Admin cannot be deactivated.",
+            );
+        }
+        if (
+          input.status === AccountStatus.ACTIVE &&
+          lockedTarget.status !== AccountStatus.ACTIVE &&
+          lockedTarget.studentProfile
+        ) {
+          await this.placements.placeStudent(tx, {
+            collegeId: actor.collegeId,
             userId: target.id,
-            validFrom: { lte: now },
-            OR: [{ validUntil: null }, { validUntil: { gt: now } }],
-            role: { code: "CLASS_REPRESENTATIVE" },
-          },
-          data: { validUntil: now },
-        });
-        await tx.session.updateMany({
-          where: { userId: target.id, revokedAt: null },
+            sectionId: lockedTarget.studentProfile.sectionId,
+            startsOn: this.dateOnly(new Date()),
+            accountStatus: AccountStatus.ACTIVE,
+            profile: {
+              changedById: actor.id,
+              academicOverrideReason: input.reason,
+            },
+          });
+        }
+        const terminalPlacementStatuses: AccountStatus[] = [
+          AccountStatus.ARCHIVED,
+          AccountStatus.GRADUATED,
+          AccountStatus.RESIGNED,
+          AccountStatus.DISABLED,
+        ];
+        const closesAcademicPlacement = terminalPlacementStatuses.includes(
+          input.status,
+        );
+        if (closesAcademicPlacement && lockedTarget.studentProfile) {
+          await this.placements.lockSection(
+            tx,
+            lockedTarget.studentProfile.sectionId,
+          );
+          const activeMembershipStartsOn =
+            lockedTarget.sectionMemberships[0]?.startsOn;
+          const membershipEndsOn = activeMembershipStartsOn
+            ? this.latestDate(this.dateOnly(now), activeMembershipStartsOn)
+            : this.dateOnly(now);
+          await tx.sectionMembership.updateMany({
+            where: {
+              studentUserId: target.id,
+              isActive: true,
+              status: AcademicMembershipStatus.ACTIVE,
+            },
+            data: {
+              isActive: false,
+              endsOn: membershipEndsOn,
+              status:
+                input.status === AccountStatus.GRADUATED
+                  ? AcademicMembershipStatus.COMPLETED
+                  : AcademicMembershipStatus.ARCHIVED,
+              changedById: actor.id,
+              reason: input.reason.trim(),
+            },
+          });
+          await tx.userScope.deleteMany({
+            where: { userId: target.id, scopeType: ScopeType.SECTION },
+          });
+        }
+        const updated = await tx.user.update({
+          where: { id: target.id },
           data: {
-            revokedAt: new Date(),
-            revokeReason: `ACCOUNT_${input.status}`,
+            status: input.status,
+            archivedAt: input.status === "ARCHIVED" ? new Date() : null,
+            version: { increment: 1 },
           },
         });
-        const sessions = await tx.session.findMany({
-          where: { userId: target.id },
-          select: { id: true },
-        });
-        await tx.refreshToken.updateMany({
-          where: {
-            sessionId: { in: sessions.map((session) => session.id) },
-            revokedAt: null,
+        if (input.status !== "ACTIVE") {
+          await tx.classRepresentativeAssignment.updateMany({
+            where: { representativeId: target.id, isActive: true },
+            data: { isActive: false, validUntil: this.dateOnly(now) },
+          });
+          await tx.userRole.updateMany({
+            where: {
+              userId: target.id,
+              validFrom: { lte: now },
+              OR: [{ validUntil: null }, { validUntil: { gt: now } }],
+              role: { code: "CLASS_REPRESENTATIVE" },
+            },
+            data: { validUntil: now },
+          });
+          await tx.session.updateMany({
+            where: { userId: target.id, revokedAt: null },
+            data: {
+              revokedAt: new Date(),
+              revokeReason: `ACCOUNT_${input.status}`,
+            },
+          });
+          const sessions = await tx.session.findMany({
+            where: { userId: target.id },
+            select: { id: true },
+          });
+          await tx.refreshToken.updateMany({
+            where: {
+              sessionId: { in: sessions.map((session) => session.id) },
+              revokedAt: null,
+            },
+            data: { revokedAt: new Date() },
+          });
+        }
+        await this.audit.record(
+          {
+            actorId: actor.id,
+            action: "user.status_changed",
+            entityType: "User",
+            entityId: target.id,
+            beforeValue: { status: lockedTarget.status },
+            afterValue: { status: input.status },
+            reason: input.reason,
+            requestId,
           },
-          data: { revokedAt: new Date() },
-        });
-      }
-      await this.audit.record(
-        {
-          actorId: actor.id,
-          action: "user.status_changed",
-          entityType: "User",
-          entityId: target.id,
-          beforeValue: { status: lockedTarget.status },
-          afterValue: { status: input.status },
-          reason: input.reason,
-          requestId,
-        },
-        tx,
-      );
-      return { id: updated.publicId, status: updated.status };
-    });
+          tx,
+        );
+        return { id: updated.publicId, status: updated.status };
+      },
+      { isolationLevel: "Serializable" },
+    );
     await this.officialGroups.synchronizeCollege(actor.collegeId);
     return result;
   }
@@ -1561,9 +2130,7 @@ export class UsersService {
     const targetRank = this.highestRoleRank(targetRoleCodes);
     if (
       targetRank > actorRank ||
-      (targetRank === actorRank &&
-        targetRank > 0 &&
-        !actor.roles.includes("SUPER_ADMIN"))
+      (targetRank === actorRank && !actor.roles.includes("SUPER_ADMIN"))
     ) {
       throw new ForbiddenException(
         "You cannot reset a password for an account at or above your administrative level.",
@@ -1578,66 +2145,146 @@ export class UsersService {
       { type: argon2.argon2id },
     );
     const requirePasswordChange = input.requirePasswordChange ?? true;
-    const result = await this.prisma.$transaction(async (tx) => {
-      await tx.userCredential.upsert({
-        where: { userId: target.id },
-        create: {
-          userId: target.id,
-          passwordHash,
-          passwordChangedAt: now,
-          failedAttemptCount: 0,
-          lockedUntil: null,
-        },
-        update: {
-          passwordHash,
-          passwordChangedAt: now,
-          failedAttemptCount: 0,
-          lockedUntil: null,
-        },
-      });
-      await tx.user.update({
-        where: { id: target.id },
-        data: {
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        await this.lockRoleMutationUsers(tx, actor.id, target.id);
+        const authorizationNow = new Date();
+        const currentActor = await tx.user.findFirst({
+          where: {
+            id: actor.id,
+            collegeId: actor.collegeId,
+            status: AccountStatus.ACTIVE,
+            archivedAt: null,
+          },
+          select: {
+            roles: {
+              where: {
+                validFrom: { lte: authorizationNow },
+                OR: [
+                  { validUntil: null },
+                  { validUntil: { gt: authorizationNow } },
+                ],
+                role: { isActive: true },
+              },
+              select: {
+                role: {
+                  select: {
+                    code: true,
+                    permissions: {
+                      select: { permission: { select: { code: true } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        });
+        if (!currentActor)
+          throw new ForbiddenException(
+            "Your administrative account is no longer active.",
+          );
+        this.assertCurrentPermissions(
+          currentActor.roles.flatMap((mapping) =>
+            mapping.role.permissions.map(
+              (permission) => permission.permission.code,
+            ),
+          ),
+          ["users.reset_password"],
+        );
+        const currentTarget = await tx.user.findFirst({
+          where: {
+            id: target.id,
+            collegeId: actor.collegeId,
+            archivedAt: null,
+          },
+          select: {
+            id: true,
+            publicId: true,
+            collegeIdentityId: true,
+            fullName: true,
+            roles: {
+              where: {
+                validFrom: { lte: authorizationNow },
+                OR: [
+                  { validUntil: null },
+                  { validUntil: { gt: authorizationNow } },
+                ],
+                role: { isActive: true },
+              },
+              select: { role: { select: { code: true } } },
+            },
+          },
+        });
+        if (!currentTarget) throw new NotFoundException("User not found.");
+        this.assertMayEditAccount(
+          currentActor.roles.map((mapping) => mapping.role.code),
+          currentTarget.roles.map((mapping) => mapping.role.code),
+          "You cannot reset a password for an account at or above your administrative level.",
+        );
+        await tx.userCredential.upsert({
+          where: { userId: currentTarget.id },
+          create: {
+            userId: currentTarget.id,
+            passwordHash,
+            passwordChangedAt: now,
+            failedAttemptCount: 0,
+            lockedUntil: null,
+          },
+          update: {
+            passwordHash,
+            passwordChangedAt: now,
+            failedAttemptCount: 0,
+            lockedUntil: null,
+          },
+        });
+        await tx.user.update({
+          where: { id: currentTarget.id },
+          data: {
+            mustChangePassword: requirePasswordChange,
+            version: { increment: 1 },
+          },
+        });
+        const sessions = await tx.session.findMany({
+          where: { userId: currentTarget.id },
+          select: { id: true },
+        });
+        await tx.session.updateMany({
+          where: { userId: currentTarget.id, revokedAt: null },
+          data: { revokedAt: now, revokeReason: "ADMIN_PASSWORD_RESET" },
+        });
+        await tx.refreshToken.updateMany({
+          where: {
+            sessionId: { in: sessions.map((session) => session.id) },
+            revokedAt: null,
+          },
+          data: { revokedAt: now },
+        });
+        await this.audit.record(
+          {
+            actorId: actor.id,
+            action: "user.password_reset",
+            entityType: "User",
+            entityId: currentTarget.id,
+            afterValue: {
+              publicId: currentTarget.publicId,
+              requirePasswordChange,
+            },
+            reason: input.reason,
+            requestId,
+          },
+          tx,
+        );
+        return {
+          id: currentTarget.publicId,
+          loginId: currentTarget.collegeIdentityId,
+          fullName: currentTarget.fullName,
+          temporaryPassword,
           mustChangePassword: requirePasswordChange,
-          version: { increment: 1 },
-        },
-      });
-      const sessions = await tx.session.findMany({
-        where: { userId: target.id },
-        select: { id: true },
-      });
-      await tx.session.updateMany({
-        where: { userId: target.id, revokedAt: null },
-        data: { revokedAt: now, revokeReason: "ADMIN_PASSWORD_RESET" },
-      });
-      await tx.refreshToken.updateMany({
-        where: {
-          sessionId: { in: sessions.map((session) => session.id) },
-          revokedAt: null,
-        },
-        data: { revokedAt: now },
-      });
-      await this.audit.record(
-        {
-          actorId: actor.id,
-          action: "user.password_reset",
-          entityType: "User",
-          entityId: target.id,
-          afterValue: { publicId: target.publicId, requirePasswordChange },
-          reason: input.reason,
-          requestId,
-        },
-        tx,
-      );
-      return {
-        id: target.publicId,
-        loginId: target.collegeIdentityId,
-        fullName: target.fullName,
-        temporaryPassword,
-        mustChangePassword: requirePasswordChange,
-        sessionsRevoked: true,
-      };
-    });
+          sessionsRevoked: true,
+        };
+      },
+      { isolationLevel: "Serializable" },
+    );
     return result;
   }
 
@@ -1647,6 +2294,7 @@ export class UsersService {
     input: UpdateUserAccessDto,
     requestId: string,
   ) {
+    const now = new Date();
     const target = await this.prisma.user.findFirst({
       where: { publicId, collegeId: actor.collegeId, archivedAt: null },
       include: { roles: { include: { role: true } }, scopes: true },
@@ -1677,109 +2325,226 @@ export class UsersService {
     await this.validateScopes(actor.collegeId, input.scopes);
     this.assertScopeCompatibility(input.roleCodes, input.scopes);
 
-    const actorRank = this.highestRoleRank(actor.roles);
-    const currentRoleCodes = target.roles.map((mapping) => mapping.role.code);
-    if (
-      this.highestRoleRank(currentRoleCodes) >= actorRank &&
-      !actor.roles.includes("SUPER_ADMIN")
-    ) {
-      throw new ForbiddenException(
-        "You cannot change access for an account at or above your administrative level.",
-      );
-    }
-    if (
-      currentRoleCodes.includes("SUPER_ADMIN") &&
-      !input.roleCodes.includes("SUPER_ADMIN")
-    ) {
-      const otherSuperAdmins = await this.prisma.user.count({
-        where: {
-          id: { not: target.id },
-          collegeId: actor.collegeId,
-          status: "ACTIVE",
-          roles: { some: { role: { code: "SUPER_ADMIN", isActive: true } } },
-        },
-      });
-      if (otherSuperAdmins === 0)
-        throw new BadRequestException(
-          "The last active Super Admin cannot lose that role.",
-        );
-    }
+    this.assertMayEditAccount(
+      actor.roles,
+      target.roles
+        .filter(
+          (mapping) =>
+            mapping.role.isActive &&
+            mapping.validFrom <= now &&
+            (!mapping.validUntil || mapping.validUntil > now),
+        )
+        .map((mapping) => mapping.role.code),
+      "You cannot change access for an account at or above your administrative level.",
+    );
 
-    const result = await this.prisma.$transaction(async (tx) => {
-      await tx.userRole.deleteMany({ where: { userId: target.id } });
-      await tx.userRole.createMany({
-        data: roles.map((role) => ({ userId: target.id, roleId: role.id })),
-      });
-      await tx.userScope.deleteMany({ where: { userId: target.id } });
-      await tx.userScope.createMany({
-        data: input.scopes.map((scope) => ({
-          userId: target.id,
-          scopeType: scope.type,
-          scopeId: scope.id,
-          issueCategoryId: scope.issueCategoryId,
-        })),
-      });
-      await tx.session.updateMany({
-        where: { userId: target.id, revokedAt: null },
-        data: { revokedAt: new Date(), revokeReason: "ACCESS_CHANGED" },
-      });
-      const sessions = await tx.session.findMany({
-        where: { userId: target.id },
-        select: { id: true },
-      });
-      await tx.refreshToken.updateMany({
-        where: {
-          sessionId: { in: sessions.map((session) => session.id) },
-          revokedAt: null,
-        },
-        data: { revokedAt: new Date() },
-      });
-      await tx.user.update({
-        where: { id: target.id },
-        data: { version: { increment: 1 } },
-      });
-      await tx.roleAssignmentHistory.create({
-        data: {
-          userId: target.id,
-          changedById: actor.id,
-          previousRoles: currentRoleCodes,
-          newRoles: input.roleCodes,
-          previousScopes: target.scopes.map((scope) => ({
-            type: scope.scopeType,
-            id: scope.scopeId,
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        await this.lockRoleMutationUsers(tx, actor.id, target.id);
+        const authorizationNow = new Date();
+        const currentActor = await tx.user.findFirst({
+          where: {
+            id: actor.id,
+            collegeId: actor.collegeId,
+            status: AccountStatus.ACTIVE,
+            archivedAt: null,
+          },
+          select: {
+            roles: {
+              where: {
+                validFrom: { lte: authorizationNow },
+                OR: [
+                  { validUntil: null },
+                  { validUntil: { gt: authorizationNow } },
+                ],
+                role: { isActive: true },
+              },
+              select: {
+                role: {
+                  select: {
+                    code: true,
+                    permissions: {
+                      select: { permission: { select: { code: true } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        });
+        if (!currentActor)
+          throw new ForbiddenException(
+            "Your administrative account is no longer active.",
+          );
+        const currentTarget = await tx.user.findFirst({
+          where: {
+            id: target.id,
+            collegeId: actor.collegeId,
+            archivedAt: null,
+          },
+          include: { roles: { include: { role: true } }, scopes: true },
+        });
+        if (!currentTarget) throw new NotFoundException("User not found.");
+        const currentActorRoleCodes = currentActor.roles.map(
+          (mapping) => mapping.role.code,
+        );
+        const currentActorPermissions = currentActor.roles.flatMap((mapping) =>
+          mapping.role.permissions.map(
+            (permission) => permission.permission.code,
+          ),
+        );
+        this.assertCurrentPermissions(currentActorPermissions, [
+          "roles.manage",
+          "scopes.manage",
+        ]);
+        const currentTargetActiveRoleCodes = currentTarget.roles
+          .filter(
+            (mapping) =>
+              mapping.role.isActive &&
+              mapping.validFrom <= authorizationNow &&
+              (!mapping.validUntil || mapping.validUntil > authorizationNow),
+          )
+          .map((mapping) => mapping.role.code);
+        this.assertMayEditAccount(
+          currentActorRoleCodes,
+          currentTargetActiveRoleCodes,
+          "You cannot change access for an account at or above your administrative level.",
+        );
+        const currentRoles = await tx.role.findMany({
+          where: {
+            code: { in: input.roleCodes },
+            isActive: true,
+            OR: [{ collegeId: actor.collegeId }, { collegeId: null }],
+          },
+          include: { permissions: { include: { permission: true } } },
+        });
+        if (currentRoles.length !== new Set(input.roleCodes).size)
+          throw new BadRequestException("One or more role codes are invalid.");
+        this.assertRoleDelegation(
+          {
+            ...actor,
+            roles: currentActorRoleCodes,
+            permissions: [...new Set(currentActorPermissions)],
+          },
+          currentRoles.map((role) => ({
+            code: role.code,
+            permissions: role.permissions.map((entry) => entry.permission.code),
+          })),
+        );
+        if (
+          currentTarget.status === AccountStatus.ACTIVE &&
+          currentTargetActiveRoleCodes.includes("SUPER_ADMIN") &&
+          !input.roleCodes.includes("SUPER_ADMIN")
+        ) {
+          const otherActiveSuperAdmins = await tx.user.count({
+            where: {
+              id: { not: currentTarget.id },
+              collegeId: actor.collegeId,
+              status: AccountStatus.ACTIVE,
+              archivedAt: null,
+              roles: {
+                some: {
+                  validFrom: { lte: authorizationNow },
+                  OR: [
+                    { validUntil: null },
+                    { validUntil: { gt: authorizationNow } },
+                  ],
+                  role: {
+                    code: "SUPER_ADMIN",
+                    isActive: true,
+                    OR: [{ collegeId: actor.collegeId }, { collegeId: null }],
+                  },
+                },
+              },
+            },
+          });
+          if (otherActiveSuperAdmins === 0)
+            throw new BadRequestException(
+              "The last active Super Admin cannot lose that role.",
+            );
+        }
+        const previousRoleCodes = currentTarget.roles.map(
+          (mapping) => mapping.role.code,
+        );
+        await tx.userRole.deleteMany({ where: { userId: currentTarget.id } });
+        await tx.userRole.createMany({
+          data: currentRoles.map((role) => ({
+            userId: currentTarget.id,
+            roleId: role.id,
+          })),
+        });
+        await tx.userScope.deleteMany({ where: { userId: currentTarget.id } });
+        await tx.userScope.createMany({
+          data: input.scopes.map((scope) => ({
+            userId: currentTarget.id,
+            scopeType: scope.type,
+            scopeId: scope.id,
             issueCategoryId: scope.issueCategoryId,
           })),
-          newScopes: input.scopes as unknown as Prisma.InputJsonValue,
-          reason: input.reason.trim(),
-        },
-      });
-      await this.audit.record(
-        {
-          actorId: actor.id,
-          action: "user.access_changed",
-          entityType: "User",
-          entityId: target.id,
-          beforeValue: {
-            roles: currentRoleCodes,
-            scopes: target.scopes.map((scope) => ({
+        });
+        await tx.session.updateMany({
+          where: { userId: currentTarget.id, revokedAt: null },
+          data: { revokedAt: new Date(), revokeReason: "ACCESS_CHANGED" },
+        });
+        const sessions = await tx.session.findMany({
+          where: { userId: currentTarget.id },
+          select: { id: true },
+        });
+        await tx.refreshToken.updateMany({
+          where: {
+            sessionId: { in: sessions.map((session) => session.id) },
+            revokedAt: null,
+          },
+          data: { revokedAt: new Date() },
+        });
+        await tx.user.update({
+          where: { id: currentTarget.id },
+          data: { version: { increment: 1 } },
+        });
+        await tx.roleAssignmentHistory.create({
+          data: {
+            userId: currentTarget.id,
+            changedById: actor.id,
+            previousRoles: previousRoleCodes,
+            newRoles: input.roleCodes,
+            previousScopes: currentTarget.scopes.map((scope) => ({
               type: scope.scopeType,
               id: scope.scopeId,
               issueCategoryId: scope.issueCategoryId,
             })),
+            newScopes: input.scopes as unknown as Prisma.InputJsonValue,
+            reason: input.reason.trim(),
           },
-          afterValue: { roles: input.roleCodes, scopes: input.scopes },
-          reason: input.reason,
-          requestId,
-        },
-        tx,
-      );
-      return {
-        id: target.publicId,
-        roles: input.roleCodes,
-        scopes: input.scopes,
-        sessionsRevoked: true,
-      };
-    });
+        });
+        await this.audit.record(
+          {
+            actorId: actor.id,
+            action: "user.access_changed",
+            entityType: "User",
+            entityId: currentTarget.id,
+            beforeValue: {
+              roles: previousRoleCodes,
+              scopes: currentTarget.scopes.map((scope) => ({
+                type: scope.scopeType,
+                id: scope.scopeId,
+                issueCategoryId: scope.issueCategoryId,
+              })),
+            },
+            afterValue: { roles: input.roleCodes, scopes: input.scopes },
+            reason: input.reason,
+            requestId,
+          },
+          tx,
+        );
+        return {
+          id: currentTarget.publicId,
+          roles: input.roleCodes,
+          scopes: input.scopes,
+          sessionsRevoked: true,
+        };
+      },
+      { isolationLevel: "Serializable" },
+    );
     await this.officialGroups.synchronizeCollege(actor.collegeId);
     return result;
   }
@@ -1790,6 +2555,7 @@ export class UsersService {
     input: AssignUserRoleDto,
     requestId: string,
   ) {
+    const now = new Date();
     const target = await this.prisma.user.findFirst({
       where: {
         OR: [{ publicId }, { id: publicId }],
@@ -1803,6 +2569,17 @@ export class UsersService {
       throw new BadRequestException(
         "Use a separate administrator account to change your own access.",
       );
+    this.assertMayEditAccount(
+      actor.roles,
+      target.roles
+        .filter(
+          (mapping) =>
+            mapping.role.isActive &&
+            mapping.validFrom <= now &&
+            (!mapping.validUntil || mapping.validUntil > now),
+        )
+        .map((mapping) => mapping.role.code),
+    );
     const code = input.roleCode.trim().toUpperCase();
     const role = await this.prisma.role.findFirst({
       where: {
@@ -1830,79 +2607,182 @@ export class UsersService {
       throw new BadRequestException(
         "Role end date must be after the start date.",
       );
-    const previousRoles = target.roles.map((entry) => entry.role.code);
-    const result = await this.prisma.$transaction(async (tx) => {
-      if (input.isPrimary)
-        await tx.userRole.updateMany({
-          where: { userId: target.id },
-          data: { isPrimary: false },
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        await this.lockRoleMutationUsers(tx, actor.id, target.id);
+        const authorizationNow = new Date();
+        const currentActor = await tx.user.findFirst({
+          where: {
+            id: actor.id,
+            collegeId: actor.collegeId,
+            status: AccountStatus.ACTIVE,
+            archivedAt: null,
+          },
+          select: {
+            roles: {
+              where: {
+                validFrom: { lte: authorizationNow },
+                OR: [
+                  { validUntil: null },
+                  { validUntil: { gt: authorizationNow } },
+                ],
+                role: { isActive: true },
+              },
+              select: {
+                role: {
+                  select: {
+                    code: true,
+                    permissions: {
+                      select: { permission: { select: { code: true } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
         });
-      await tx.userRole.upsert({
-        where: { userId_roleId: { userId: target.id, roleId: role.id } },
-        create: {
-          userId: target.id,
-          roleId: role.id,
-          validFrom,
-          validUntil,
-          isPrimary: input.isPrimary ?? previousRoles.length === 0,
-        },
-        update: {
-          validFrom,
-          validUntil,
-          ...(input.isPrimary !== undefined
-            ? { isPrimary: input.isPrimary }
-            : {}),
-        },
-      });
-      const newRoles = [...new Set([...previousRoles, role.code])];
-      const scopes = target.scopes.map((scope) => ({
-        type: scope.scopeType,
-        id: scope.scopeId,
-        issueCategoryId: scope.issueCategoryId,
-      }));
-      await tx.roleAssignmentHistory.create({
-        data: {
-          userId: target.id,
-          changedById: actor.id,
-          previousRoles,
-          newRoles,
-          previousScopes: scopes,
-          newScopes: scopes,
-          reason: input.reason.trim(),
-        },
-      });
-      await this.revokeAccessSessions(tx, target.id, "ROLE_ADDED");
-      await tx.user.update({
-        where: { id: target.id },
-        data: { version: { increment: 1 } },
-      });
-      await this.audit.record(
-        {
-          actorId: actor.id,
-          action: "user.role_added",
-          entityType: "User",
-          entityId: target.id,
-          beforeValue: { roles: previousRoles },
-          afterValue: {
-            roles: newRoles,
-            role: role.code,
+        if (!currentActor)
+          throw new ForbiddenException(
+            "Your administrative account is no longer active.",
+          );
+        const currentTarget = await tx.user.findFirst({
+          where: {
+            id: target.id,
+            collegeId: actor.collegeId,
+            archivedAt: null,
+          },
+          include: { roles: { include: { role: true } }, scopes: true },
+        });
+        if (!currentTarget) throw new NotFoundException("User not found.");
+        const currentActorRoles = currentActor.roles.map(
+          (mapping) => mapping.role.code,
+        );
+        const currentActorPermissions = currentActor.roles.flatMap((mapping) =>
+          mapping.role.permissions.map(
+            (permission) => permission.permission.code,
+          ),
+        );
+        this.assertCurrentPermissions(currentActorPermissions, [
+          "roles.manage",
+        ]);
+        this.assertMayEditAccount(
+          currentActorRoles,
+          currentTarget.roles
+            .filter(
+              (mapping) =>
+                mapping.role.isActive &&
+                mapping.validFrom <= authorizationNow &&
+                (!mapping.validUntil || mapping.validUntil > authorizationNow),
+            )
+            .map((mapping) => mapping.role.code),
+        );
+        const currentRole = await tx.role.findFirst({
+          where: {
+            id: role.id,
+            code,
+            isActive: true,
+            OR: [{ collegeId: actor.collegeId }, { collegeId: null }],
+          },
+          include: { permissions: { include: { permission: true } } },
+        });
+        if (!currentRole)
+          throw new BadRequestException("Role not found or inactive.");
+        this.assertRoleDelegation(
+          {
+            ...actor,
+            roles: currentActorRoles,
+            permissions: [...new Set(currentActorPermissions)],
+          },
+          [
+            {
+              code: currentRole.code,
+              permissions: currentRole.permissions.map(
+                (entry) => entry.permission.code,
+              ),
+            },
+          ],
+        );
+        const previousRoles = currentTarget.roles.map(
+          (entry) => entry.role.code,
+        );
+        if (input.isPrimary)
+          await tx.userRole.updateMany({
+            where: { userId: currentTarget.id },
+            data: { isPrimary: false },
+          });
+        await tx.userRole.upsert({
+          where: {
+            userId_roleId: {
+              userId: currentTarget.id,
+              roleId: currentRole.id,
+            },
+          },
+          create: {
+            userId: currentTarget.id,
+            roleId: currentRole.id,
             validFrom,
             validUntil,
-            isPrimary: input.isPrimary,
+            isPrimary: input.isPrimary ?? previousRoles.length === 0,
           },
-          reason: input.reason,
-          requestId,
-        },
-        tx,
-      );
-      return {
-        id: target.publicId,
-        role: role.code,
-        validFrom,
-        validUntil,
-        sessionsRevoked: true,
-      };
-    });
+          update: {
+            validFrom,
+            validUntil,
+            ...(input.isPrimary !== undefined
+              ? { isPrimary: input.isPrimary }
+              : {}),
+          },
+        });
+        const newRoles = [...new Set([...previousRoles, currentRole.code])];
+        const scopes = currentTarget.scopes.map((scope) => ({
+          type: scope.scopeType,
+          id: scope.scopeId,
+          issueCategoryId: scope.issueCategoryId,
+        }));
+        await tx.roleAssignmentHistory.create({
+          data: {
+            userId: currentTarget.id,
+            changedById: actor.id,
+            previousRoles,
+            newRoles,
+            previousScopes: scopes,
+            newScopes: scopes,
+            reason: input.reason.trim(),
+          },
+        });
+        await this.revokeAccessSessions(tx, currentTarget.id, "ROLE_ADDED");
+        await tx.user.update({
+          where: { id: currentTarget.id },
+          data: { version: { increment: 1 } },
+        });
+        await this.audit.record(
+          {
+            actorId: actor.id,
+            action: "user.role_added",
+            entityType: "User",
+            entityId: currentTarget.id,
+            beforeValue: { roles: previousRoles },
+            afterValue: {
+              roles: newRoles,
+              role: currentRole.code,
+              validFrom,
+              validUntil,
+              isPrimary: input.isPrimary,
+            },
+            reason: input.reason,
+            requestId,
+          },
+          tx,
+        );
+        return {
+          id: currentTarget.publicId,
+          role: currentRole.code,
+          validFrom,
+          validUntil,
+          sessionsRevoked: true,
+        };
+      },
+      { isolationLevel: "Serializable" },
+    );
     await this.officialGroups.synchronizeCollege(actor.collegeId);
     return result;
   }
@@ -1914,6 +2794,7 @@ export class UsersService {
     input: RemoveUserRoleDto,
     requestId: string,
   ) {
+    const now = new Date();
     const target = await this.prisma.user.findFirst({
       where: {
         OR: [{ publicId }, { id: publicId }],
@@ -1927,6 +2808,17 @@ export class UsersService {
       throw new BadRequestException(
         "Use a separate administrator account to change your own access.",
       );
+    this.assertMayEditAccount(
+      actor.roles,
+      target.roles
+        .filter(
+          (mapping) =>
+            mapping.role.isActive &&
+            mapping.validFrom <= now &&
+            (!mapping.validUntil || mapping.validUntil > now),
+        )
+        .map((mapping) => mapping.role.code),
+    );
     const assignment = target.roles.find(
       (entry) =>
         entry.roleId === roleIdentifier ||
@@ -1935,65 +2827,183 @@ export class UsersService {
     if (!assignment) throw new NotFoundException("Role assignment not found.");
     if (target.roles.length === 1)
       throw new BadRequestException("A user must retain at least one role.");
-    const previousRoles = target.roles.map((entry) => entry.role.code);
-    const newRoles = previousRoles.filter(
-      (code) => code !== assignment.role.code,
-    );
-    const scopes = target.scopes.map((scope) => ({
-      type: scope.scopeType,
-      id: scope.scopeId,
-      issueCategoryId: scope.issueCategoryId,
-    }));
-    const result = await this.prisma.$transaction(async (tx) => {
-      await tx.userRole.delete({ where: { id: assignment.id } });
-      if (assignment.isPrimary) {
-        const nextPrimary = await tx.userRole.findFirst({
-          where: { userId: target.id },
-          orderBy: { createdAt: "asc" },
-          select: { id: true },
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        await this.lockRoleMutationUsers(tx, actor.id, target.id);
+        const authorizationNow = new Date();
+        const currentActor = await tx.user.findFirst({
+          where: {
+            id: actor.id,
+            collegeId: actor.collegeId,
+            status: AccountStatus.ACTIVE,
+            archivedAt: null,
+          },
+          select: {
+            roles: {
+              where: {
+                validFrom: { lte: authorizationNow },
+                OR: [
+                  { validUntil: null },
+                  { validUntil: { gt: authorizationNow } },
+                ],
+                role: { isActive: true },
+              },
+              select: {
+                role: {
+                  select: {
+                    code: true,
+                    permissions: {
+                      select: { permission: { select: { code: true } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
         });
-        if (nextPrimary)
-          await tx.userRole.update({
-            where: { id: nextPrimary.id },
-            data: { isPrimary: true },
+        if (!currentActor)
+          throw new ForbiddenException(
+            "Your administrative account is no longer active.",
+          );
+        const currentTarget = await tx.user.findFirst({
+          where: {
+            id: target.id,
+            collegeId: actor.collegeId,
+            archivedAt: null,
+          },
+          include: { roles: { include: { role: true } }, scopes: true },
+        });
+        if (!currentTarget) throw new NotFoundException("User not found.");
+        const currentActorRoles = currentActor.roles.map(
+          (mapping) => mapping.role.code,
+        );
+        this.assertCurrentPermissions(
+          currentActor.roles.flatMap((mapping) =>
+            mapping.role.permissions.map(
+              (permission) => permission.permission.code,
+            ),
+          ),
+          ["roles.manage"],
+        );
+        this.assertMayEditAccount(
+          currentActorRoles,
+          currentTarget.roles
+            .filter(
+              (mapping) =>
+                mapping.role.isActive &&
+                mapping.validFrom <= authorizationNow &&
+                (!mapping.validUntil || mapping.validUntil > authorizationNow),
+            )
+            .map((mapping) => mapping.role.code),
+        );
+        const currentAssignment = currentTarget.roles.find(
+          (entry) =>
+            entry.roleId === roleIdentifier ||
+            entry.role.code === roleIdentifier.trim().toUpperCase(),
+        );
+        if (!currentAssignment)
+          throw new NotFoundException("Role assignment not found.");
+        if (currentTarget.roles.length === 1)
+          throw new BadRequestException(
+            "A user must retain at least one role.",
+          );
+        const removesActiveSuperAdmin =
+          currentTarget.status === AccountStatus.ACTIVE &&
+          currentAssignment.role.code === "SUPER_ADMIN" &&
+          currentAssignment.role.isActive &&
+          currentAssignment.validFrom <= authorizationNow &&
+          (!currentAssignment.validUntil ||
+            currentAssignment.validUntil > authorizationNow);
+        if (removesActiveSuperAdmin) {
+          const otherActiveSuperAdmins = await tx.user.count({
+            where: {
+              id: { not: currentTarget.id },
+              collegeId: actor.collegeId,
+              status: AccountStatus.ACTIVE,
+              archivedAt: null,
+              roles: {
+                some: {
+                  validFrom: { lte: authorizationNow },
+                  OR: [
+                    { validUntil: null },
+                    { validUntil: { gt: authorizationNow } },
+                  ],
+                  role: {
+                    code: "SUPER_ADMIN",
+                    isActive: true,
+                    OR: [{ collegeId: actor.collegeId }, { collegeId: null }],
+                  },
+                },
+              },
+            },
           });
-      }
-      await tx.roleAssignmentHistory.create({
-        data: {
-          userId: target.id,
-          changedById: actor.id,
-          previousRoles,
-          newRoles,
-          previousScopes: scopes,
-          newScopes: scopes,
-          reason: input.reason.trim(),
-        },
-      });
-      await this.revokeAccessSessions(tx, target.id, "ROLE_REMOVED");
-      await tx.user.update({
-        where: { id: target.id },
-        data: { version: { increment: 1 } },
-      });
-      await this.audit.record(
-        {
-          actorId: actor.id,
-          action: "user.role_removed",
-          entityType: "User",
-          entityId: target.id,
-          beforeValue: { roles: previousRoles },
-          afterValue: { roles: newRoles },
-          reason: input.reason,
-          requestId,
-        },
-        tx,
-      );
-      return {
-        id: target.publicId,
-        removedRole: assignment.role.code,
-        roles: newRoles,
-        sessionsRevoked: true,
-      };
-    });
+          if (otherActiveSuperAdmins === 0)
+            throw new BadRequestException(
+              "The last active Super Admin cannot lose that role.",
+            );
+        }
+        const previousRoles = currentTarget.roles.map(
+          (entry) => entry.role.code,
+        );
+        const newRoles = previousRoles.filter(
+          (code) => code !== currentAssignment.role.code,
+        );
+        const scopes = currentTarget.scopes.map((scope) => ({
+          type: scope.scopeType,
+          id: scope.scopeId,
+          issueCategoryId: scope.issueCategoryId,
+        }));
+        await tx.userRole.delete({ where: { id: currentAssignment.id } });
+        if (currentAssignment.isPrimary) {
+          const nextPrimary = await tx.userRole.findFirst({
+            where: { userId: currentTarget.id },
+            orderBy: { createdAt: "asc" },
+            select: { id: true },
+          });
+          if (nextPrimary)
+            await tx.userRole.update({
+              where: { id: nextPrimary.id },
+              data: { isPrimary: true },
+            });
+        }
+        await tx.roleAssignmentHistory.create({
+          data: {
+            userId: currentTarget.id,
+            changedById: actor.id,
+            previousRoles,
+            newRoles,
+            previousScopes: scopes,
+            newScopes: scopes,
+            reason: input.reason.trim(),
+          },
+        });
+        await this.revokeAccessSessions(tx, currentTarget.id, "ROLE_REMOVED");
+        await tx.user.update({
+          where: { id: currentTarget.id },
+          data: { version: { increment: 1 } },
+        });
+        await this.audit.record(
+          {
+            actorId: actor.id,
+            action: "user.role_removed",
+            entityType: "User",
+            entityId: currentTarget.id,
+            beforeValue: { roles: previousRoles },
+            afterValue: { roles: newRoles },
+            reason: input.reason,
+            requestId,
+          },
+          tx,
+        );
+        return {
+          id: currentTarget.publicId,
+          removedRole: currentAssignment.role.code,
+          roles: newRoles,
+          sessionsRevoked: true,
+        };
+      },
+      { isolationLevel: "Serializable" },
+    );
     await this.officialGroups.synchronizeCollege(actor.collegeId);
     return result;
   }
@@ -2505,6 +3515,9 @@ export class UsersService {
           semesterId: true,
           studyYear: true,
           capacity: true,
+          assignedRoom: {
+            select: { code: true, name: true },
+          },
           _count: {
             select: {
               memberships: {
@@ -2562,6 +3575,7 @@ export class UsersService {
         semesterId: section.semesterId,
         studyYear: section.studyYear,
         capacity: section.capacity,
+        assignedRoom: section.assignedRoom,
         currentStudentCount: section._count.memberships,
         availableSeats: Math.max(
           0,
@@ -2611,6 +3625,50 @@ export class UsersService {
       (highest, code) => Math.max(highest, ROLE_RANK[code] ?? 0),
       0,
     );
+  }
+
+  private async lockRoleMutationUsers(
+    tx: Prisma.TransactionClient,
+    actorId: string,
+    targetId: string,
+  ): Promise<void> {
+    const [firstId, secondId] = [actorId, targetId].sort();
+    await tx.$queryRawUnsafe<Array<{ id: string }>>(
+      `SELECT id FROM users WHERE id IN ($1::uuid, $2::uuid) ORDER BY id FOR UPDATE`,
+      firstId,
+      secondId,
+    );
+  }
+
+  private assertCurrentPermissions(
+    permissionCodes: string[],
+    requiredPermissions: string[],
+  ): void {
+    const currentPermissions = new Set(permissionCodes);
+    if (
+      requiredPermissions.some(
+        (permission) => !currentPermissions.has(permission),
+      )
+    ) {
+      throw new ForbiddenException(
+        "Your administrative permissions have changed. Sign in again.",
+      );
+    }
+  }
+
+  private assertMayEditAccount(
+    actorRoleCodes: string[],
+    targetRoleCodes: string[],
+    message = "You cannot edit an account at or above your administrative level.",
+  ): void {
+    const actorRank = this.highestRoleRank(actorRoleCodes);
+    const targetRank = this.highestRoleRank(targetRoleCodes);
+    if (
+      targetRank > actorRank ||
+      (targetRank === actorRank && !actorRoleCodes.includes("SUPER_ADMIN"))
+    ) {
+      throw new ForbiddenException(message);
+    }
   }
 
   private assertScopeCompatibility(

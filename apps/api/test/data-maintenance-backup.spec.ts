@@ -121,3 +121,83 @@ describe("DataMaintenanceService backup safety", () => {
     expect(tx.dataMaintenanceJob.update).not.toHaveBeenCalled();
   });
 });
+
+describe("DataMaintenanceService temporary import cleanup", () => {
+  it("deduplicates every import object key and removes storage before database jobs", async () => {
+    const deleteMaintenanceObjects = jest.fn().mockResolvedValue({
+      requested: 3,
+      deleted: 3,
+      failed: 0,
+    });
+    const deleteRecords = jest.fn().mockResolvedValue({ count: 2 });
+    const deleteJobs = jest.fn().mockResolvedValue({ count: 2 });
+    const deleteAttendance = jest.fn().mockResolvedValue({ count: 0 });
+    const tx = {
+      importJobRecord: { deleteMany: deleteRecords },
+      importJob: { deleteMany: deleteJobs },
+      attendanceImportBatch: { deleteMany: deleteAttendance },
+    };
+    const importJobFindMany = jest
+      .fn()
+      .mockResolvedValueOnce([{ id: "job-1" }, { id: "job-2" }])
+      .mockResolvedValueOnce([
+        {
+          id: "job-1",
+          sourceStorageKey: "imports/shared.xlsx",
+          resultStorageKey: "imports/job-1-result.json",
+          pendingResultStorageKey: "imports/shared.xlsx",
+        },
+        {
+          id: "job-2",
+          sourceStorageKey: "imports/shared.xlsx",
+          resultStorageKey: "imports/job-1-result.json",
+          pendingResultStorageKey: "imports/job-2-pending.json",
+        },
+      ]);
+    const prisma = {
+      importJob: { findMany: importJobFindMany },
+      user: { findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
+    };
+    const service = new DataMaintenanceService(
+      prisma as unknown as PrismaService,
+      {} as AuditService,
+      { deleteMaintenanceObjects } as unknown as StorageService,
+      {} as SectionPlacementService,
+    );
+
+    const result = await (
+      service as unknown as {
+        executeCategory: (
+          user: AuthPrincipal,
+          category: "DELETE_TEMPORARY_IMPORTS",
+          parameters: { beforeDate: string },
+        ) => Promise<Record<string, unknown>>;
+      }
+    ).executeCategory(actor, "DELETE_TEMPORARY_IMPORTS", {
+      beforeDate: "2026-08-01T00:00:00.000Z",
+    });
+
+    expect(deleteMaintenanceObjects).toHaveBeenCalledTimes(1);
+    expect(deleteMaintenanceObjects).toHaveBeenCalledWith([
+      "imports/shared.xlsx",
+      "imports/job-1-result.json",
+      "imports/job-2-pending.json",
+    ]);
+    expect(deleteMaintenanceObjects.mock.invocationCallOrder[0]!).toBeLessThan(
+      deleteJobs.mock.invocationCallOrder[0]!,
+    );
+    expect(deleteRecords).toHaveBeenCalledWith({
+      where: { importJobId: { in: ["job-1", "job-2"] } },
+    });
+    expect(deleteJobs).toHaveBeenCalledWith({
+      where: { id: { in: ["job-1", "job-2"] } },
+    });
+    expect(result).toEqual({
+      importJobs: 2,
+      importRows: 2,
+      failedAttendanceImports: 0,
+      storage: { requested: 3, deleted: 3, failed: 0 },
+    });
+  });
+});

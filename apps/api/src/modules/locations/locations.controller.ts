@@ -1,11 +1,14 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { ApiTags } from "@nestjs/swagger";
+import type { Request } from "express";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Permissions } from "../../common/decorators/permissions.decorator";
 import { CurrentRequestId } from "../../common/decorators/request-id.decorator";
 import type { AuthPrincipal } from "../../common/http/request-context";
-import { ArchiveLocationDto, BulkLocationDto, CreateAreaDto, CreateBlockDto, CreateCampusDto, CreateFloorDto, CreateRoomDto, DeleteLocationDto, UpdateBlockDto, UpdateCampusDto, UpdateFloorDto, UpdateRoomDto } from "./dto/location.dto";
+import { AdminLocationListQueryDto, ArchiveLocationDto, BulkLocationDto, CompleteLocationImageDto, CreateAreaDto, CreateBlockDto, CreateCampusDto, CreateFloorDto, CreateRoomDto, DeleteLocationDto, PresignLocationImageDto, UpdateBlockDto, UpdateCampusDto, UpdateFloorDto, UpdateRoomDto } from "./dto/location.dto";
 import { LocationsService, type LocationKind } from "./locations.service";
+import { publicStorageEndpoint } from "../storage/storage-endpoint";
 
 @ApiTags("locations")
 @Controller("locations")
@@ -62,10 +65,10 @@ export class CampusHierarchyController {
 @Permissions("locations.manage")
 @Controller("admin")
 export class AdminLocationsController {
-  constructor(private readonly locations: LocationsService) {}
+  constructor(private readonly locations: LocationsService, private readonly config: ConfigService) {}
 
-  @Get("campuses") campuses(@CurrentUser() user: AuthPrincipal, @Query("search") search?: string, @Query("status") status?: string) {
-    return this.locations.adminList(user, "campus", { search, status });
+  @Get("campuses") campuses(@CurrentUser() user: AuthPrincipal, @Query() query: AdminLocationListQueryDto) {
+    return this.locations.adminList(user, "campus", query);
   }
   @Post("campuses") createCampus(@CurrentUser() user: AuthPrincipal, @Body() input: CreateCampusDto, @CurrentRequestId() requestId: string) {
     return this.locations.createCampus(user, input, requestId);
@@ -74,8 +77,8 @@ export class AdminLocationsController {
     return this.locations.updateCampus(user, id, input, requestId);
   }
 
-  @Get("blocks") blocks(@CurrentUser() user: AuthPrincipal, @Query("campusId") campusId?: string, @Query("search") search?: string, @Query("status") status?: string) {
-    return this.locations.adminList(user, "block", { parentId: campusId, search, status });
+  @Get("blocks") blocks(@CurrentUser() user: AuthPrincipal, @Query() query: AdminLocationListQueryDto) {
+    return this.locations.adminList(user, "block", { ...query, parentId: query.campusId });
   }
   @Post("blocks") createBlock(@CurrentUser() user: AuthPrincipal, @Body() input: CreateBlockDto, @CurrentRequestId() requestId: string) {
     return this.locations.createBlock(user, input, requestId);
@@ -84,8 +87,8 @@ export class AdminLocationsController {
     return this.locations.updateBlock(user, id, input, requestId);
   }
 
-  @Get("floors") floors(@CurrentUser() user: AuthPrincipal, @Query("blockId") blockId?: string, @Query("search") search?: string, @Query("status") status?: string) {
-    return this.locations.adminList(user, "floor", { parentId: blockId, search, status });
+  @Get("floors") floors(@CurrentUser() user: AuthPrincipal, @Query() query: AdminLocationListQueryDto) {
+    return this.locations.adminList(user, "floor", { ...query, parentId: query.blockId });
   }
   @Post("floors") createFloor(@CurrentUser() user: AuthPrincipal, @Body() input: CreateFloorDto, @CurrentRequestId() requestId: string) {
     return this.locations.createFloor(user, input, requestId);
@@ -94,8 +97,8 @@ export class AdminLocationsController {
     return this.locations.updateFloor(user, id, input, requestId);
   }
 
-  @Get("rooms") rooms(@CurrentUser() user: AuthPrincipal, @Query("floorId") floorId?: string, @Query("search") search?: string, @Query("status") status?: string) {
-    return this.locations.adminList(user, "room", { parentId: floorId, search, status });
+  @Get("rooms") rooms(@CurrentUser() user: AuthPrincipal, @Query() query: AdminLocationListQueryDto) {
+    return this.locations.adminList(user, "room", { ...query, parentId: query.floorId });
   }
   @Post("rooms") createRoom(@CurrentUser() user: AuthPrincipal, @Body() input: CreateRoomDto, @CurrentRequestId() requestId: string) {
     return this.locations.createRoom(user, input, requestId);
@@ -119,6 +122,49 @@ export class AdminLocationsController {
   @Delete("campus-setup/:type/:id/permanent")
   campusSetupPermanentDelete(@CurrentUser() user: AuthPrincipal, @Param("type") type: string, @Param("id", ParseUUIDPipe) id: string, @Body() input: DeleteLocationDto, @CurrentRequestId() requestId: string) {
     return this.locations.removePermanently(user, this.kind(type), id, input.reason, input.confirmationPhrase, requestId);
+  }
+
+  @Post(":type/:id/image/presign")
+  presignImage(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("type") type: string,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() input: PresignLocationImageDto,
+    @Req() request: Request,
+  ) {
+    return this.locations.presignImage(user, this.kind(type), id, input, publicStorageEndpoint(request, this.config));
+  }
+
+  @Post(":type/:id/image/complete")
+  completeImage(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("type") type: string,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() input: CompleteLocationImageDto,
+    @CurrentRequestId() requestId: string,
+    @Req() request: Request,
+  ) {
+    return this.locations.completeImage(user, this.kind(type), id, input, requestId, publicStorageEndpoint(request, this.config));
+  }
+
+  @Get(":type/:id/image")
+  image(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("type") type: string,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ) {
+    return this.locations.image(user, this.kind(type), id, publicStorageEndpoint(request, this.config));
+  }
+
+  @Delete(":type/:id/image")
+  removeImage(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("type") type: string,
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentRequestId() requestId: string,
+  ) {
+    return this.locations.removeImage(user, this.kind(type), id, requestId);
   }
 
   @Get(":type/:id/dependencies")

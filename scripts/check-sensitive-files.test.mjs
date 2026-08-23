@@ -91,13 +91,48 @@ test("still rejects generated data inside the Next.js route directory", (t) => {
 });
 
 test("still scans an allowed route source file for embedded secrets", (t) => {
+  const syntheticKey = ["sk", "proj", "123456789012345678901234"].join("-");
   const repository = createRepository(t, {
-    "apps/web/src/app/(portal)/admin/exports/page.tsx":
-      "export const apiKey = 'sk-proj-123456789012345678901234';\n",
+    "apps/web/src/app/(portal)/admin/exports/page.tsx": `export const apiKey = '${syntheticKey}';\n`,
   });
 
   const result = scan(repository);
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /page\.tsx \(contains embedded secret/);
+});
+
+test("rejects embedded Gemini API key assignments", (t) => {
+  const assignment = [
+    "export const GEMINI_API",
+    "_KEY = '",
+    "not-a-real-but-secret-shaped-gemini-key",
+    "';\n",
+  ].join("");
+  const repository = createRepository(t, {
+    "config/provider.ts": assignment,
+  });
+
+  const result = scan(repository);
+
+  assert.equal(result.status, 1);
+  assert.match(
+    result.stderr,
+    /config\/provider\.ts \(contains embedded secret/,
+  );
+});
+
+test("scans test files and the allowed environment example for real key shapes", (t) => {
+  const openAiShape = ["sk", "proj", "abcdefghijklmnopqrstuvwx"].join("-");
+  const googleShape = ["AIza", "abcdefghijklmnopqrstuvwxyz123456"].join("");
+  const repository = createRepository(t, {
+    ".env.example": `OPENAI_API_KEY=${openAiShape}\n`,
+    "apps/api/test/provider.spec.ts": `const key = '${googleShape}';\n`,
+  });
+
+  const result = scan(repository);
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /\.env\.example \(contains embedded secret/);
+  assert.match(result.stderr, /provider\.spec\.ts \(contains embedded secret/);
 });

@@ -277,7 +277,7 @@ export const navigation: NavigationItem[] = [
     icon: Megaphone,
     any: ["announcements.publish_college"],
   },
-  { href: "/admin/users", label: "People", icon: Users, any: ["users.read"] },
+  { href: "/admin/people", label: "People", icon: Users, any: ["users.read"] },
   {
     href: "/admin/maintenance-staff",
     label: "Maintenance staff",

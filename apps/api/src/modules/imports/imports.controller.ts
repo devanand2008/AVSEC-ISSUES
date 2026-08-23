@@ -1,6 +1,19 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, StreamableFile, UploadedFile, UseInterceptors } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  Res,
+  StreamableFile,
+  UploadedFile,
+  UseInterceptors,
+} from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { ApiConsumes, ApiTags } from "@nestjs/swagger";
+import type { Response } from "express";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { CurrentRequestId } from "../../common/decorators/request-id.decorator";
 import type { AuthPrincipal } from "../../common/http/request-context";
@@ -12,13 +25,27 @@ export class ImportsController {
   constructor(private readonly imports: ImportsService) {}
 
   @Get("templates/:entityType")
-  async template(@CurrentUser() user: AuthPrincipal, @Param("entityType") entityType: string) {
+  async template(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("entityType") entityType: string,
+  ) {
     const template = await this.imports.template(user, entityType);
-    return new StreamableFile(template.content, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", disposition: `attachment; filename="${template.fileName}"` });
+    return new StreamableFile(template.content, {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      disposition: `attachment; filename="${template.fileName}"`,
+    });
   }
 
   @ApiConsumes("multipart/form-data")
-  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: Number(process.env.MAX_EXCEL_FILE_SIZE_MB || 10) * 1024 * 1024, files: 1 } }))
+  @UseInterceptors(
+    FileInterceptor("file", {
+      limits: {
+        fileSize:
+          Number(process.env.MAX_EXCEL_FILE_SIZE_MB || 10) * 1024 * 1024,
+        files: 1,
+      },
+    }),
+  )
   @Post("preview")
   preview(
     @CurrentUser() user: AuthPrincipal,
@@ -47,20 +74,75 @@ export class ImportsController {
   }
 
   @Get()
-  list(@CurrentUser() user: AuthPrincipal) { return this.imports.list(user); }
+  list(@CurrentUser() user: AuthPrincipal) {
+    return this.imports.list(user);
+  }
 
   @Get(":id")
-  get(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string) { return this.imports.get(user, id); }
+  get(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    return this.imports.get(user, id);
+  }
 
   @Get(":id/credentials")
-  async credentials(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) {
-    const exportFile = await this.imports.credentials(user, id, requestId);
-    return new StreamableFile(exportFile.content, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", disposition: `attachment; filename="${exportFile.fileName}"` });
+  async credentials(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentRequestId() requestId: string,
+    @Query("exportId") exportId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const exportFile = await this.imports.credentials(
+      user,
+      id,
+      requestId,
+      exportId,
+    );
+    response.setHeader("Cache-Control", "private, no-store, max-age=0");
+    response.setHeader("Pragma", "no-cache");
+    response.setHeader("Expires", "0");
+    return new StreamableFile(exportFile.content, {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      disposition: `attachment; filename="${exportFile.fileName}"`,
+    });
+  }
+
+  @Post(":id/credentials/acknowledge")
+  acknowledgeCredentials(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body("exportId") exportId: string,
+    @CurrentRequestId() requestId: string,
+  ) {
+    return this.imports.acknowledgeCredentials(user, id, requestId, exportId);
   }
 
   @Post(":id/confirm")
-  confirm(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) { return this.imports.confirm(user, id, requestId); }
+  confirm(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentRequestId() requestId: string,
+  ) {
+    return this.imports.confirm(user, id, requestId);
+  }
+
+  @Post(":id/cancel")
+  cancel(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentRequestId() requestId: string,
+  ) {
+    return this.imports.cancel(user, id, requestId);
+  }
 
   @Post(":id/rollback")
-  rollback(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string, @CurrentRequestId() requestId: string) { return this.imports.rollback(user, id, requestId); }
+  rollback(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentRequestId() requestId: string,
+  ) {
+    return this.imports.rollback(user, id, requestId);
+  }
 }

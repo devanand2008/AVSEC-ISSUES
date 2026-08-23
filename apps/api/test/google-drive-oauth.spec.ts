@@ -315,6 +315,10 @@ describe("GoogleDriveOAuthService", () => {
   it("binds encrypted tokens to their owner and detects tampering", () => {
     const { cipher } = setup();
     const encrypted = cipher.sealTokens(OWNER, tokens());
+    const payloadStart = encrypted.ciphertext.lastIndexOf(".") + 1;
+    const payloadCharacter = encrypted.ciphertext[payloadStart];
+    const tamperedPayloadCharacter = payloadCharacter === "x" ? "y" : "x";
+    const tamperedCiphertext = `${encrypted.ciphertext.slice(0, payloadStart)}${tamperedPayloadCharacter}${encrypted.ciphertext.slice(payloadStart + 1)}`;
 
     expect(() => cipher.openTokens(OTHER_OWNER, encrypted)).toThrow(
       StorageProviderError,
@@ -322,7 +326,7 @@ describe("GoogleDriveOAuthService", () => {
     expect(() =>
       cipher.openTokens(OWNER, {
         ...encrypted,
-        ciphertext: `${encrypted.ciphertext.slice(0, -1)}x`,
+        ciphertext: tamperedCiphertext,
       }),
     ).toThrow(StorageProviderError);
   });

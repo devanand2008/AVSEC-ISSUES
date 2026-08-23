@@ -235,6 +235,7 @@ async function requestBlob(path: string, retry = true): Promise<Blob> {
   const response = await fetchWithTimeout(
     requestUrl(path),
     {
+      cache: "no-store",
       credentials: "include",
     },
     BLOB_REQUEST_TIMEOUT_MS,

@@ -5,14 +5,14 @@ import {
   Archive, ArrowLeft, BookOpen, Building2,
   Calendar, Database, FileText,
   History, Key, Mail, MessageSquare, Phone, RotateCcw,
-  Shield, Trash2, User, Users,
+  Pencil, Shield, Trash2, User, Users,
 } from "lucide-react";
 import Link from "next/link";
 import { use, useState } from "react";
 import { ProfileAvatar } from "@/components/ui/profile-avatar";
 import { RoleBadge } from "@/components/ui/role-badge";
 import { StatusBadge } from "@/components/status-badge";
-import { ArchiveDialog } from "@/components/ui/confirmation-dialog";
+import { ArchiveDialog, ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { DependencyDialog, depIcon, type DependencyReport } from "@/components/ui/dependency-dialog";
 import { PermanentDeleteDialog } from "@/components/ui/permanent-delete-dialog";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
@@ -39,7 +39,8 @@ interface PersonDetail {
   firstLoginCompletedAt: string | null;
   lastLoginAt: string | null;
   archivedAt: string | null;
-  roles: Array<{ role: { code: string; name: string }; isPrimary?: boolean }>;
+  roles: Array<{ roleId: string; role: { code: string; name: string }; isPrimary?: boolean }>;
+  scopes: Array<{ scopeType: string; scopeId: string | null; issueCategoryId: string | null }>;
   studentProfile: {
     departmentId: string;
     programmeId: string;
@@ -62,9 +63,16 @@ interface PersonDetail {
       code: string;
       semesterId: string;
       studyYear: number | null;
+      assignedRoom: {
+        id: string;
+        code: string;
+        name: string;
+        roomNumber: string | null;
+      } | null;
     };
   } | null;
   staffProfile: {
+    departmentId: string | null;
     employeeId: string;
     designation: string | null;
     specialization: string | null;
@@ -98,6 +106,16 @@ interface BackupListResponse {
   }>;
 }
 
+interface AvailableRole {
+  code: string;
+  name: string;
+  description: string | null;
+}
+
+interface PeopleFilterOptions {
+  departments: Array<{ id: string; code: string; name: string }>;
+}
+
 export default function PersonDetailPage({ params }: { params: Promise<{ publicId: string }> }) {
   const { publicId } = use(params);
   const { user } = useAuth();
@@ -107,8 +125,25 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [depOpen, setDepOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [rolesOpen, setRolesOpen] = useState(false);
+  const [selectedRoleCodes, setSelectedRoleCodes] = useState<string[]>([]);
+  const [roleReason, setRoleReason] = useState("");
+  const [editForm, setEditForm] = useState({
+    fullName: "",
+    collegeIdentityId: "",
+    email: "",
+    mobile: "",
+    departmentId: "",
+  });
 
   const canSuspend = user?.permissions.includes("users.suspend") ?? false;
+  const canEdit = user?.permissions.includes("users.update") ?? false;
+  const canManageRoles = Boolean(
+    user?.permissions.includes("roles.manage") &&
+      user.permissions.includes("scopes.manage") &&
+      user.permissions.includes("roles.read"),
+  );
   const canManageAcademic =
     user?.permissions.includes("academic.manage") ?? false;
   const canDeletePermanently = user?.permissions.includes("users.delete_permanent") ?? false;
@@ -136,6 +171,19 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
     enabled: canDeletePermanently && canManageBackups,
   });
 
+  const availableRoles = useQuery({
+    queryKey: ["roles", "people-editor"],
+    queryFn: () => api.get<AvailableRole[]>("/roles"),
+    enabled: rolesOpen && canManageRoles,
+  });
+
+  const departmentOptions = useQuery({
+    queryKey: ["people", "filter-options", "staff-editor"],
+    queryFn: () =>
+      api.get<PeopleFilterOptions>("/admin/people/filter-options"),
+    enabled: editOpen && Boolean(person.data?.staffProfile),
+  });
+
   const archiveMutation = useMutation({
     mutationFn: (reason: string) => api.patch(`/users/${publicId}/status`, { status: "ARCHIVED", reason }),
     onSuccess: () => {
@@ -156,6 +204,52 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
       api.delete(`/admin/people/${publicId}/permanent`, data),
     onSuccess: () => {
       window.location.href = "/admin/people";
+    },
+  });
+
+  const editMutation = useMutation({
+    mutationFn: () => {
+      const target = person.data;
+      const currentDepartmentId = target?.staffProfile?.departmentId ?? "";
+      return api.patch(`/admin/people/${publicId}`, {
+        fullName: editForm.fullName.trim(),
+        collegeIdentityId: editForm.collegeIdentityId.trim(),
+        email: editForm.email.trim() || null,
+        mobile: editForm.mobile.trim() || null,
+        ...(target?.staffProfile &&
+        editForm.departmentId !== currentDepartmentId
+          ? { departmentId: editForm.departmentId || null }
+          : {}),
+      });
+    },
+    onSuccess: () => {
+      setEditOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["person", publicId] });
+      void queryClient.invalidateQueries({ queryKey: ["people"] });
+    },
+  });
+
+  const rolesMutation = useMutation({
+    mutationFn: () => {
+      const target = person.data;
+      if (!target) throw new Error("Person details are unavailable.");
+      return api.patch(`/users/${publicId}/access`, {
+        roleCodes: selectedRoleCodes,
+        scopes: target.scopes.map((scope) => ({
+          type: scope.scopeType,
+          ...(scope.scopeId ? { id: scope.scopeId } : {}),
+          ...(scope.issueCategoryId
+            ? { issueCategoryId: scope.issueCategoryId }
+            : {}),
+        })),
+        reason: roleReason.trim(),
+      });
+    },
+    onSuccess: () => {
+      setRolesOpen(false);
+      setRoleReason("");
+      void queryClient.invalidateQueries({ queryKey: ["person", publicId] });
+      void queryClient.invalidateQueries({ queryKey: ["people"] });
     },
   });
 
@@ -208,6 +302,12 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
         </Link>
       </div>
 
+      {restoreMutation.isError && (
+        <div className="error-box" role="alert" style={{ marginBottom: "var(--space-4)" }}>
+          {personMutationError(restoreMutation.error, "The person could not be restored.")}
+        </div>
+      )}
+
       {/* Header Profile Card */}
       <div className="avs-card" style={{ padding: "var(--space-6)", marginBottom: "var(--space-6)" }}>
         <div style={{ display: "flex", gap: "var(--space-4)", alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -227,13 +327,46 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
             </div>
           </div>
           <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+            {canEdit && !isArchived && (
+              <button
+                className="avs-btn avs-btn-secondary"
+                onClick={() => {
+                  editMutation.reset();
+                  setEditForm({
+                    fullName: p.fullName,
+                    collegeIdentityId: p.collegeIdentityId,
+                    email: p.email ?? "",
+                    mobile: p.mobile ?? "",
+                    departmentId: p.staffProfile?.departmentId ?? "",
+                  });
+                  setEditOpen(true);
+                }}
+                type="button"
+              >
+                <Pencil size={16} /> Edit
+              </button>
+            )}
+            {canManageRoles && !isArchived && (
+              <button
+                className="avs-btn avs-btn-secondary"
+                onClick={() => {
+                  rolesMutation.reset();
+                  setSelectedRoleCodes(p.roles.map((entry) => entry.role.code));
+                  setRoleReason("");
+                  setRolesOpen(true);
+                }}
+                type="button"
+              >
+                <Shield size={16} /> Manage roles
+              </button>
+            )}
             {canSuspend && !isArchived && (
-              <button className="avs-btn avs-btn-secondary" onClick={() => setArchiveOpen(true)} type="button">
+              <button className="avs-btn avs-btn-secondary" onClick={() => { archiveMutation.reset(); setArchiveOpen(true); }} type="button">
                 <Archive size={16} /> Archive
               </button>
             )}
             {canSuspend && isArchived && (
-              <button className="avs-btn avs-btn-secondary" onClick={() => restoreMutation.mutate()} type="button">
+              <button className="avs-btn avs-btn-secondary" onClick={() => { restoreMutation.reset(); restoreMutation.mutate(); }} type="button">
                 <RotateCcw size={16} /> Restore
               </button>
             )}
@@ -310,6 +443,13 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
                 <DetailTile label="Department" value={p.studentProfile!.department.name} icon={<Building2 size={16} />} />
                 <DetailTile label="Programme" value={p.studentProfile!.programme.name} icon={<BookOpen size={16} />} />
                 <DetailTile label="Section" value={p.studentProfile!.section.name} icon={<Users size={16} />} />
+                <DetailTile
+                  label="Classroom"
+                  value={p.studentProfile!.section.assignedRoom
+                    ? `${p.studentProfile!.section.assignedRoom!.code} - ${p.studentProfile!.section.assignedRoom!.name}`
+                    : "Not assigned"}
+                  icon={<Building2 size={16} />}
+                />
                 <DetailTile label="Gender" value={formatGender(p.studentProfile!.gender)} icon={<User size={16} />} />
                 <DetailTile label="Date of Birth" value={formatDate(p.studentProfile!.dateOfBirth)} icon={<Calendar size={16} />} />
               </>
@@ -366,20 +506,20 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
 
             <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
               {!isArchived && canSuspend && (
-                <button className="avs-btn avs-btn-warning" onClick={() => setArchiveOpen(true)} type="button">
+                <button className="avs-btn avs-btn-warning" onClick={() => { archiveMutation.reset(); setArchiveOpen(true); }} type="button">
                   <Archive size={16} /> Archive Account
                 </button>
               )}
               {isArchived && (
                 <>
-                  <button className="avs-btn avs-btn-secondary" onClick={() => restoreMutation.mutate()} type="button">
+                  <button className="avs-btn avs-btn-secondary" onClick={() => { restoreMutation.reset(); restoreMutation.mutate(); }} type="button">
                     <RotateCcw size={16} /> Restore Account
                   </button>
                   <button className="avs-btn avs-btn-secondary" onClick={() => setDepOpen(true)} type="button">
                     <Database size={16} /> View Dependency Analysis
                   </button>
                   {canDeletePermanently && canCleanStudentPermanently && (
-                    <button className="avs-btn avs-btn-danger" onClick={() => setDeleteOpen(true)} type="button">
+                    <button className="avs-btn avs-btn-danger" onClick={() => { deleteMutation.reset(); setDeleteOpen(true); }} type="button">
                       <Trash2 size={16} /> Permanently Delete Student Data
                     </button>
                   )}
@@ -391,18 +531,183 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
       )}
 
       {/* Dialogs */}
+      <ConfirmationDialog
+        open={editOpen}
+        onClose={() => {
+          setEditOpen(false);
+          editMutation.reset();
+        }}
+        onConfirm={() => editMutation.mutate()}
+        title="Edit person"
+        description={
+          p.staffProfile
+            ? "Update identity, contact, and staff department details."
+            : "Update identity and contact details. Academic placement is managed in the Academic tab."
+        }
+        confirmLabel="Save changes"
+        loading={editMutation.isPending}
+        confirmDisabled={
+          editForm.fullName.trim().length < 2 ||
+          editForm.collegeIdentityId.trim().length < 2 ||
+          Boolean(editForm.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(editForm.email.trim())) ||
+          Boolean(editForm.mobile.trim() && !/^\+?[0-9]{7,15}$/.test(editForm.mobile.trim()))
+        }
+      >
+        <div className="form-grid" style={{ marginTop: "var(--space-4)" }}>
+          <label className="field">
+            <span>User Name</span>
+            <input
+              className="input"
+              value={editForm.fullName}
+              onChange={(event) => setEditForm({ ...editForm, fullName: event.target.value })}
+              minLength={2}
+              maxLength={180}
+              required
+            />
+          </label>
+          <label className="field">
+            <span>User ID</span>
+            <input
+              className="input"
+              value={editForm.collegeIdentityId}
+              onChange={(event) => setEditForm({ ...editForm, collegeIdentityId: event.target.value })}
+              minLength={2}
+              maxLength={60}
+              required
+            />
+          </label>
+          <label className="field">
+            <span>Official Email</span>
+            <input
+              className="input"
+              type="email"
+              value={editForm.email}
+              onChange={(event) => setEditForm({ ...editForm, email: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span>Mobile Number</span>
+            <input
+              className="input"
+              inputMode="tel"
+              value={editForm.mobile}
+              onChange={(event) => setEditForm({ ...editForm, mobile: event.target.value })}
+            />
+          </label>
+          {p.staffProfile && (
+            <label className="field">
+              <span>Department</span>
+              <select
+                className="input"
+                value={editForm.departmentId}
+                disabled={departmentOptions.isLoading || departmentOptions.isError}
+                onChange={(event) =>
+                  setEditForm({ ...editForm, departmentId: event.target.value })
+                }
+              >
+                <option value="">General / No department</option>
+                {editForm.departmentId &&
+                  !departmentOptions.data?.departments.some(
+                    (department) => department.id === editForm.departmentId,
+                  ) && (
+                    <option value={editForm.departmentId}>
+                      {p.staffProfile.department
+                        ? `${p.staffProfile.department.code} - ${p.staffProfile.department.name}`
+                        : "Current department"}
+                    </option>
+                  )}
+                {departmentOptions.data?.departments.map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.code} - {department.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {p.staffProfile && departmentOptions.isLoading && (
+            <p className="muted" role="status">Loading departments...</p>
+          )}
+          {p.staffProfile && departmentOptions.isError && (
+            <div className="error-box" role="alert">
+              Departments could not be loaded. Close and reopen the editor to try again.
+            </div>
+          )}
+          {editMutation.isError && (
+            <div className="error-box" role="alert">
+              {(editMutation.error as Error).message}
+            </div>
+          )}
+        </div>
+      </ConfirmationDialog>
+
+      <ConfirmationDialog
+        open={rolesOpen}
+        onClose={() => setRolesOpen(false)}
+        onConfirm={() => rolesMutation.mutate()}
+        title="Manage roles"
+        description="Role changes are checked against your backend delegation permissions and revoke active sessions."
+        confirmLabel="Save roles"
+        loading={rolesMutation.isPending}
+        confirmDisabled={
+          selectedRoleCodes.length === 0 ||
+          roleReason.trim().length < 3 ||
+          availableRoles.isLoading ||
+          availableRoles.isError
+        }
+      >
+        <div style={{ display: "grid", gap: "var(--space-3)", marginTop: "var(--space-4)" }}>
+          {availableRoles.isLoading && <p className="muted">Loading roles...</p>}
+          {availableRoles.data?.map((role) => (
+            <label className="check-field" key={role.code}>
+              <input
+                type="checkbox"
+                checked={selectedRoleCodes.includes(role.code)}
+                onChange={(event) =>
+                  setSelectedRoleCodes((current) =>
+                    event.target.checked
+                      ? [...new Set([...current, role.code])]
+                      : current.filter((code) => code !== role.code),
+                  )
+                }
+              />
+              <span>{role.name}</span>
+            </label>
+          ))}
+          <label className="field">
+            <span>Reason for role change</span>
+            <textarea
+              className="input"
+              rows={3}
+              minLength={3}
+              maxLength={500}
+              required
+              value={roleReason}
+              onChange={(event) => setRoleReason(event.target.value)}
+            />
+          </label>
+          {(availableRoles.isError || rolesMutation.isError) && (
+            <div className="error-box" role="alert">
+              {rolesMutation.isError
+                ? (rolesMutation.error as Error).message
+                : "Roles could not be loaded."}
+            </div>
+          )}
+        </div>
+      </ConfirmationDialog>
+
       <ArchiveDialog
         open={archiveOpen}
-        onClose={() => setArchiveOpen(false)}
+        onClose={() => { setArchiveOpen(false); archiveMutation.reset(); }}
         onConfirm={(reason) => archiveMutation.mutate(reason)}
         userName={p.fullName}
         loading={archiveMutation.isPending}
+        error={archiveMutation.isError ? personMutationError(archiveMutation.error, "The person could not be archived.") : undefined}
       />
 
       <DependencyDialog
         open={depOpen}
         onClose={() => setDepOpen(false)}
-        onProceed={() => { setDepOpen(false); setDeleteOpen(true); }}
+        onProceed={() => { deleteMutation.reset(); setDepOpen(false); setDeleteOpen(true); }}
         report={depReport}
         loading={deps.isLoading}
         error={deps.isError ? (deps.error as Error)?.message : undefined}
@@ -410,7 +715,7 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
 
       <PermanentDeleteDialog
         open={deleteOpen}
-        onClose={() => setDeleteOpen(false)}
+        onClose={() => { setDeleteOpen(false); deleteMutation.reset(); }}
         onDelete={(data) => deleteMutation.mutate(data)}
         userName={p.fullName}
         collegeIdentityId={p.collegeIdentityId}
@@ -422,6 +727,7 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
           createdAt: verifiedBackup?.completedAt ?? verifiedBackup?.createdAt,
         }}
         loading={deleteMutation.isPending}
+        error={deleteMutation.isError ? personMutationError(deleteMutation.error, "The person could not be permanently deleted.") : undefined}
       />
     </div>
   );
@@ -452,4 +758,8 @@ function formatGender(value: string | null): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function personMutationError(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim() ? error.message : fallback;
 }

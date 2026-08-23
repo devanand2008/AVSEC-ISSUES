@@ -7,10 +7,23 @@ import { getMessaging } from "firebase-admin/messaging";
 import nodemailer, { type Transporter } from "nodemailer";
 import { PrismaService } from "../../database/prisma.service";
 import { DeviceRegistrationService } from "../notifications/device-registration.service";
+import {
+  StorageService,
+  type ManagedImageCleanupInput,
+} from "../storage/storage.service";
 
 type DeliveryChannel = "PUSH" | "WHATSAPP" | "EMAIL";
 interface DeliveryJob { notificationId: string; recipientUserId: string; channel: DeliveryChannel }
 interface RetryableFailure { id: string; jobId: string; retryCount: number; payloadRedacted: unknown }
+const MANAGED_IMAGE_DELETE_EVENT = "storage.managed_image.delete";
+const DISPATCHED_OUTBOX_EVENTS = [
+  "issue.created",
+  "issue.status_changed",
+  "issue.escalated",
+  "feedback.submitted",
+  "broadcast.sent",
+  MANAGED_IMAGE_DELETE_EVENT,
+];
 
 @Injectable()
 export class DeliveryService implements OnModuleInit, OnModuleDestroy {
@@ -22,7 +35,7 @@ export class DeliveryService implements OnModuleInit, OnModuleDestroy {
   private firebaseApp?: App;
   private emailTransport?: Transporter;
 
-  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService, private readonly devices: DeviceRegistrationService) {
+  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService, private readonly devices: DeviceRegistrationService, private readonly storage: StorageService) {
     const redisUrl = new URL(config.getOrThrow<string>("REDIS_URL"));
     this.connection = { host: redisUrl.hostname, port: Number(redisUrl.port || 6379), ...(redisUrl.username ? { username: redisUrl.username } : {}), ...(redisUrl.password ? { password: redisUrl.password } : {}), ...(redisUrl.protocol === "rediss:" ? { tls: {} } : {}) };
     this.queue = new Queue<DeliveryJob, void, string>("notification-delivery", { connection: this.connection });
@@ -55,23 +68,54 @@ export class DeliveryService implements OnModuleInit, OnModuleDestroy {
   }
 
   async dispatchOutbox(): Promise<void> {
-    const events = await this.prisma.outboxEvent.findMany({ where: { processedAt: null, availableAt: { lte: new Date() }, eventType: { in: ["issue.created", "issue.status_changed", "issue.escalated", "feedback.submitted", "broadcast.sent"] } }, take: 25, orderBy: { createdAt: "asc" } });
+    const events = await this.prisma.outboxEvent.findMany({ where: { processedAt: null, availableAt: { lte: new Date() }, eventType: { in: DISPATCHED_OUTBOX_EVENTS } }, take: 25, orderBy: { createdAt: "asc" } });
     for (const event of events) {
       try {
-        const payload = event.payload as { notificationId?: string };
-        if (payload.notificationId) {
-          const recipients = await this.prisma.notificationRecipient.findMany({ where: { notificationId: payload.notificationId }, select: { userId: true } });
-          const channels = await this.channelsForEvent(event.eventType, event.aggregateId);
-          for (const recipient of recipients) {
-            for (const channel of channels) {
-              await this.queue.add(channel.toLowerCase(), { notificationId: payload.notificationId, recipientUserId: recipient.userId, channel }, { jobId: `${payload.notificationId}-${recipient.userId}-${channel}`, attempts: 5, backoff: { type: "exponential", delay: 5000 }, removeOnComplete: 500, removeOnFail: 1000 });
+        if (event.eventType === MANAGED_IMAGE_DELETE_EVENT) {
+          await this.deleteManagedImage(event.aggregateId, event.payload);
+        } else {
+          const payload = event.payload as { notificationId?: string };
+          if (payload.notificationId) {
+            const recipients = await this.prisma.notificationRecipient.findMany({ where: { notificationId: payload.notificationId }, select: { userId: true } });
+            const channels = await this.channelsForEvent(event.eventType, event.aggregateId);
+            for (const recipient of recipients) {
+              for (const channel of channels) {
+                await this.queue.add(channel.toLowerCase(), { notificationId: payload.notificationId, recipientUserId: recipient.userId, channel }, { jobId: `${payload.notificationId}-${recipient.userId}-${channel}`, attempts: 5, backoff: { type: "exponential", delay: 5000 }, removeOnComplete: 500, removeOnFail: 1000 });
+              }
             }
           }
         }
-        await this.prisma.outboxEvent.update({ where: { id: event.id }, data: { processedAt: new Date(), attemptCount: { increment: 1 } } });
+        await this.prisma.outboxEvent.update({ where: { id: event.id }, data: { processedAt: new Date(), attemptCount: { increment: 1 }, lastError: null } });
       } catch (error) {
         await this.prisma.outboxEvent.update({ where: { id: event.id }, data: { attemptCount: { increment: 1 }, lastError: error instanceof Error ? error.message.slice(0, 2000) : "Unknown dispatch error", availableAt: new Date(Date.now() + 30_000) } });
       }
+    }
+  }
+
+  private async deleteManagedImage(
+    aggregateId: string,
+    value: unknown,
+  ): Promise<void> {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Managed image cleanup payload is invalid.");
+    }
+    const payload = value as Partial<ManagedImageCleanupInput>;
+    if (
+      typeof payload.collegeId !== "string" ||
+      typeof payload.entityId !== "string" ||
+      payload.entityId !== aggregateId ||
+      typeof payload.storageKey !== "string" ||
+      !["campuses", "blocks", "floors", "rooms"].includes(
+        payload.folder ?? "",
+      )
+    ) {
+      throw new Error("Managed image cleanup payload is invalid.");
+    }
+    const cleanup = await this.storage.deleteManagedImageObjectsIfUnreferenced(
+      payload as ManagedImageCleanupInput,
+    );
+    if (cleanup.failed > 0) {
+      throw new Error("Managed image object cleanup must be retried.");
     }
   }
 

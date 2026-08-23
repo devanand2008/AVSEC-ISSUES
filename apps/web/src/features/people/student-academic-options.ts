@@ -12,6 +12,7 @@ export interface StudentAcademicOption {
   capacity?: number;
   currentStudentCount?: number;
   availableSeats?: number;
+  assignedRoom?: { code: string; name: string } | null;
 }
 
 export interface StudentAcademicOptions {
@@ -190,7 +191,10 @@ export function sectionOptionLabel(section: StudentAcademicOption): string {
   const identity = section.code
     ? `${section.code} - ${section.name}`
     : section.name;
-  return `${identity} - ${currentStudentCount} / ${capacity}${
+  const classroom = section.assignedRoom
+    ? ` - Classroom ${section.assignedRoom.code} - ${section.assignedRoom.name}`
+    : "";
+  return `${identity}${classroom} - ${currentStudentCount} / ${capacity}${
     isSectionFull(section) ? " - Full" : ""
   }`;
 }

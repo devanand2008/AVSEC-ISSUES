@@ -120,14 +120,19 @@ function checkSensitiveFiles() {
     /^apps\/web\/src\/app\/\(portal\)\/admin\/exports\/.+\.(?:[cm]?[jt]sx?|css|scss|sass)$/i,
   ];
 
-  const secretPatterns = [
-    /(mongodb(?:\+srv)?:\/\/(?!\$\{)(?![^:\s]+:(?:build|validation|test|password|strong-password|example|placeholder|ci-[^@\s]+)@)[^:\s]+:[^@\s]+@)/i,
-    /(postgres(?:ql)?:\/\/(?!\$\{)(?![^:\s]+:(?:build|validation|test|password|strong-password|example|placeholder|ci-[^@\s]+)@)[^:\s]+:[^@\s]+@)/i,
+  const universalCredentialPatterns = [
     /(ghp_[a-zA-Z0-9]{36})/i,
     /(github_pat_[a-zA-Z0-9_]{22,})/i,
     /\bsk-(?:proj-)?[a-zA-Z0-9_-]{20,}\b/,
+    /\bAIza[a-zA-Z0-9_-]{30,}\b/,
+    /\bAQ\.[a-zA-Z0-9_-]{20,}\b/,
     /(rnd_[a-zA-Z0-9]{24,})/i,
-    /(JWT_(?:ACCESS|REFRESH)_SECRET|CSRF_SECRET|SMTP_PASSWORD|S3_SECRET_KEY|WHATSAPP_ACCESS_TOKEN|WHATSAPP_APP_SECRET|OPENAI_API_KEY|GOOGLE_OAUTH_CLIENT_SECRET|GOOGLE_DRIVE_ENCRYPTION_KEY|BACKUP_ENCRYPTION_KEY|RENDER_API_KEY|GITHUB_TOKEN|FIREBASE_PRIVATE_KEY|DEVICE_TOKEN_ENCRYPTION_KEY|PASSWORD_PEPPER|FEEDBACK_SUBMISSION_SECRET)[ \t]*[:=](?!-)[ \t]*["']?(?!\$\{?|REPLACE|replace|change-this|ci-|example|placeholder|access-secret|refresh-secret|csrf-secret|smtp-password|production-storage-secret|z\.|optional|environment\.|process\.|config\.|Boolean\(|String\(|Number\()[^"'\s#]{16,}/i,
+  ];
+  const secretPatterns = [
+    /(mongodb(?:\+srv)?:\/\/(?!\$\{)(?![^:\s]+:(?:build|validation|test|password|strong-password|example|placeholder|ci-[^@\s]+)@)[^:\s]+:[^@\s]+@)/i,
+    /(postgres(?:ql)?:\/\/(?!\$\{)(?![^:\s]+:(?:build|validation|test|password|strong-password|example|placeholder|ci-[^@\s]+)@)[^:\s]+:[^@\s]+@)/i,
+    ...universalCredentialPatterns,
+    /(JWT_(?:ACCESS|REFRESH)_SECRET|CSRF_SECRET|SMTP_PASSWORD|S3_SECRET_KEY|WHATSAPP_ACCESS_TOKEN|WHATSAPP_APP_SECRET|GEMINI_API_KEY|OPENAI_API_KEY|GOOGLE_OAUTH_CLIENT_SECRET|GOOGLE_DRIVE_ENCRYPTION_KEY|BACKUP_ENCRYPTION_KEY|RENDER_API_KEY|GITHUB_TOKEN|FIREBASE_PRIVATE_KEY|DEVICE_TOKEN_ENCRYPTION_KEY|PASSWORD_PEPPER|FEEDBACK_SUBMISSION_SECRET)[ \t]*[:=](?!-)[ \t]*["']?(?!\$\{?|REPLACE|replace|change-this|ci-|example|placeholder|access-secret|refresh-secret|csrf-secret|smtp-password|production-storage-secret|z\.|optional|environment\.|process\.|config\.|Boolean\(|String\(|Number\()[^"'\s#]{16,}/i,
     /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/,
   ];
 
@@ -136,7 +141,6 @@ function checkSensitiveFiles() {
     const isAllowed = allowedExceptions.some((regex) =>
       regex.test(normalizedPath),
     );
-    if (isAllowed) continue;
 
     const isAllowedForbiddenPathException = allowedForbiddenPathExceptions.some(
       (regex) => regex.test(normalizedPath),
@@ -145,6 +149,7 @@ function checkSensitiveFiles() {
     if (
       trackedFiles.has(normalizedPath) &&
       forbiddenPathPatterns.some((regex) => regex.test(normalizedPath)) &&
+      !isAllowed &&
       !isAllowedForbiddenPathException
     ) {
       violations.add(normalizedPath);
@@ -152,14 +157,13 @@ function checkSensitiveFiles() {
     }
 
     const fullPath = path.join(rootDir, normalizedPath);
-    if (
-      fs.existsSync(fullPath) &&
-      fs.statSync(fullPath).isFile() &&
-      !/\.(spec|test)\.[cm]?[tj]sx?$/i.test(normalizedPath)
-    ) {
+    if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
       try {
         const content = fs.readFileSync(fullPath, "utf8");
-        for (const pattern of secretPatterns) {
+        const patterns = /\.(spec|test)\.[cm]?[tj]sx?$/i.test(normalizedPath)
+          ? universalCredentialPatterns
+          : secretPatterns;
+        for (const pattern of patterns) {
           if (pattern.test(content)) {
             violations.add(
               `${normalizedPath} (contains embedded secret or private key material)`,

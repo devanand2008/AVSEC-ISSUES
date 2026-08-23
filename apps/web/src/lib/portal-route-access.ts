@@ -42,6 +42,14 @@ const portalRouteRules: readonly PortalRouteRule[] = [
     any: ["attendance.export", "issues.export"],
   },
   {
+    prefix: "/admin/locations/qr-sheet",
+    any: ["locations.qr"],
+  },
+  {
+    prefix: "/admin/locations",
+    any: ["locations.manage"],
+  },
+  {
     prefix: "/settings/storage",
     any: ["settings.read", "integrations.manage", "backups.manage"],
   },

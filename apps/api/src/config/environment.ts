@@ -228,6 +228,31 @@ export const environmentSchema = z
       z.url().optional(),
     ),
     AVS_BOT_ENABLED: booleanString(),
+    AVS_BOT_PRIMARY_PROVIDER: z.enum(["gemini", "openai"]).default("openai"),
+    AVS_BOT_FALLBACK_PROVIDER: z
+      .enum(["gemini", "openai", "none"])
+      .default("none"),
+    GEMINI_API_KEY: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.string().min(20).optional(),
+    ),
+    GEMINI_MODEL: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z
+        .string()
+        .trim()
+        .regex(/^[a-zA-Z0-9._-]+$/)
+        .max(100)
+        .optional(),
+    ),
+    GEMINI_REQUEST_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(5_000)
+      .max(120_000)
+      .default(45_000),
+    GEMINI_INPUT_COST_PER_MILLION_USD: optionalPositiveNumber,
+    GEMINI_OUTPUT_COST_PER_MILLION_USD: optionalPositiveNumber,
     OPENAI_API_KEY: z.preprocess(
       (value) => (value === "" ? undefined : value),
       z.string().min(20).optional(),
@@ -332,7 +357,36 @@ export const environmentSchema = z
     }
 
     if (environment.AVS_BOT_ENABLED) {
-      for (const field of ["OPENAI_API_KEY", "OPENAI_MODEL"] as const) {
+      const providers = [
+        environment.AVS_BOT_PRIMARY_PROVIDER,
+        ...(environment.AVS_BOT_FALLBACK_PROVIDER === "none"
+          ? []
+          : [environment.AVS_BOT_FALLBACK_PROVIDER]),
+      ];
+      if (
+        environment.AVS_BOT_FALLBACK_PROVIDER !== "none" &&
+        environment.AVS_BOT_FALLBACK_PROVIDER ===
+          environment.AVS_BOT_PRIMARY_PROVIDER
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["AVS_BOT_FALLBACK_PROVIDER"],
+          message: "must differ from AVS_BOT_PRIMARY_PROVIDER",
+        });
+      }
+      const required = new Set<
+        "GEMINI_API_KEY" | "GEMINI_MODEL" | "OPENAI_API_KEY" | "OPENAI_MODEL"
+      >();
+      for (const provider of providers) {
+        if (provider === "gemini") {
+          required.add("GEMINI_API_KEY");
+          required.add("GEMINI_MODEL");
+        } else {
+          required.add("OPENAI_API_KEY");
+          required.add("OPENAI_MODEL");
+        }
+      }
+      for (const field of required) {
         if (!environment[field]) {
           context.addIssue({
             code: "custom",
@@ -375,12 +429,33 @@ export const environmentSchema = z
 
     if (
       environment.AI_KNOWLEDGE_PROVIDER === "openai_file_search" &&
-      !environment.OPENAI_VECTOR_STORE_ID
+      (!environment.OPENAI_VECTOR_STORE_ID ||
+        !environment.OPENAI_API_KEY ||
+        !environment.OPENAI_MODEL)
+    ) {
+      for (const field of [
+        "OPENAI_VECTOR_STORE_ID",
+        "OPENAI_API_KEY",
+        "OPENAI_MODEL",
+      ] as const) {
+        if (!environment[field]) {
+          context.addIssue({
+            code: "custom",
+            path: [field],
+            message:
+              "is required when AI_KNOWLEDGE_PROVIDER=openai_file_search",
+          });
+        }
+      }
+    }
+    if (
+      environment.AI_KNOWLEDGE_PROVIDER === "openai_file_search" &&
+      environment.AVS_BOT_PRIMARY_PROVIDER !== "openai"
     ) {
       context.addIssue({
         code: "custom",
-        path: ["OPENAI_VECTOR_STORE_ID"],
-        message: "is required when AI_KNOWLEDGE_PROVIDER=openai_file_search",
+        path: ["AVS_BOT_PRIMARY_PROVIDER"],
+        message: "must be openai when AI_KNOWLEDGE_PROVIDER=openai_file_search",
       });
     }
 
@@ -405,6 +480,13 @@ export const environmentSchema = z
         code: "custom",
         path: ["SEED_DEVELOPMENT_DATA"],
         message: "must be false in production",
+      });
+    }
+    if (!environment.PASSWORD_PEPPER || environment.PASSWORD_PEPPER.length < 32) {
+      context.addIssue({
+        code: "custom",
+        path: ["PASSWORD_PEPPER"],
+        message: "must contain at least 32 characters in production",
       });
     }
     if (environment.TRUST_PROXY === false) {
@@ -433,10 +515,12 @@ export const environmentSchema = z
       ["JWT_REFRESH_SECRET", environment.JWT_REFRESH_SECRET],
       ["CSRF_SECRET", environment.CSRF_SECRET],
       ["FEEDBACK_SUBMISSION_SECRET", environment.FEEDBACK_SUBMISSION_SECRET],
+      ["PASSWORD_PEPPER", environment.PASSWORD_PEPPER],
       ["S3_ACCESS_KEY", environment.S3_ACCESS_KEY],
       ["S3_SECRET_KEY", environment.S3_SECRET_KEY],
       ["DEVICE_TOKEN_ENCRYPTION_KEY", environment.DEVICE_TOKEN_ENCRYPTION_KEY],
       ["SMTP_PASSWORD", environment.SMTP_PASSWORD],
+      ["GEMINI_API_KEY", environment.GEMINI_API_KEY],
       ["OPENAI_API_KEY", environment.OPENAI_API_KEY],
       ["GOOGLE_OAUTH_CLIENT_SECRET", environment.GOOGLE_OAUTH_CLIENT_SECRET],
       ["GOOGLE_DRIVE_ENCRYPTION_KEY", environment.GOOGLE_DRIVE_ENCRYPTION_KEY],

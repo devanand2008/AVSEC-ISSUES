@@ -27,6 +27,8 @@ export type AiProviderStreamEvent =
       responseId: string | null;
       inputTokens: number;
       outputTokens: number;
+      provider?: "gemini" | "openai";
+      model?: string;
     };
 
 export type AiSseEvent =

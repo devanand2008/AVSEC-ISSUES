@@ -11,6 +11,7 @@ const base = {
   JWT_ACCESS_SECRET: "access-secret-0123456789-abcdef-2026",
   JWT_REFRESH_SECRET: "refresh-secret-fedcba9876543210-2026",
   CSRF_SECRET: "csrf-secret-abcdef0123456789-2026",
+  PASSWORD_PEPPER: "password-pepper-abcdef0123456789-2026",
   COOKIE_SECURE: "true",
   SWAGGER_ENABLED: "false",
   SEED_DEVELOPMENT_DATA: "false",
@@ -55,6 +56,18 @@ describe("environment policy", () => {
         S3_ACCESS_KEY: "minioadmin",
       }),
     ).toThrow(/Invalid environment configuration/);
+  });
+
+  it("requires a strong non-example password pepper in production", () => {
+    expect(() =>
+      validateEnvironment({ ...base, PASSWORD_PEPPER: "too-short" }),
+    ).toThrow(/PASSWORD_PEPPER/);
+    expect(() =>
+      validateEnvironment({
+        ...base,
+        PASSWORD_PEPPER: "change-this-password-pepper-for-production",
+      }),
+    ).toThrow(/PASSWORD_PEPPER/);
   });
 
   it("requires provider fields only when their providers are enabled", () => {
@@ -126,6 +139,63 @@ describe("environment policy", () => {
     });
     expect(environment.AVS_BOT_ENABLED).toBe(true);
     expect(environment.OPENAI_MODEL).toBe("project-available-model");
+  });
+
+  it("accepts Gemini primary with an OpenAI fallback only when both are complete", () => {
+    const environment = validateEnvironment({
+      ...base,
+      AVS_BOT_ENABLED: "true",
+      AVS_BOT_PRIMARY_PROVIDER: "gemini",
+      AVS_BOT_FALLBACK_PROVIDER: "openai",
+      GEMINI_API_KEY: "test-gemini-key-with-more-than-20-characters",
+      GEMINI_MODEL: "gemini-test-model",
+      OPENAI_API_KEY: "test-openai-key-with-more-than-20-characters",
+      OPENAI_MODEL: "openai-test-model",
+    });
+    expect(environment.AVS_BOT_PRIMARY_PROVIDER).toBe("gemini");
+    expect(environment.AVS_BOT_FALLBACK_PROVIDER).toBe("openai");
+    expect(environment.GEMINI_MODEL).toBe("gemini-test-model");
+
+    expect(() =>
+      validateEnvironment({
+        ...base,
+        AVS_BOT_ENABLED: "true",
+        AVS_BOT_PRIMARY_PROVIDER: "gemini",
+        AVS_BOT_FALLBACK_PROVIDER: "openai",
+        GEMINI_API_KEY: "test-gemini-key-with-more-than-20-characters",
+        GEMINI_MODEL: "gemini-test-model",
+      }),
+    ).toThrow(/OPENAI_API_KEY/);
+  });
+
+  it("rejects using the same AVS Bot provider as primary and fallback", () => {
+    expect(() =>
+      validateEnvironment({
+        ...base,
+        AVS_BOT_ENABLED: "true",
+        AVS_BOT_PRIMARY_PROVIDER: "gemini",
+        AVS_BOT_FALLBACK_PROVIDER: "gemini",
+        GEMINI_API_KEY: "test-gemini-key-with-more-than-20-characters",
+        GEMINI_MODEL: "gemini-test-model",
+      }),
+    ).toThrow(/AVS_BOT_FALLBACK_PROVIDER/);
+  });
+
+  it("requires OpenAI as primary for OpenAI file search", () => {
+    expect(() =>
+      validateEnvironment({
+        ...base,
+        AVS_BOT_ENABLED: "true",
+        AVS_BOT_PRIMARY_PROVIDER: "gemini",
+        AVS_BOT_FALLBACK_PROVIDER: "openai",
+        GEMINI_API_KEY: "test-gemini-key-with-more-than-20-characters",
+        GEMINI_MODEL: "gemini-test-model",
+        OPENAI_API_KEY: "test-openai-key-with-more-than-20-characters",
+        OPENAI_MODEL: "openai-test-model",
+        OPENAI_VECTOR_STORE_ID: "vs_test",
+        AI_KNOWLEDGE_PROVIDER: "openai_file_search",
+      }),
+    ).toThrow(/AVS_BOT_PRIMARY_PROVIDER/);
   });
 
   it("accepts complete SMTP configuration", () => {

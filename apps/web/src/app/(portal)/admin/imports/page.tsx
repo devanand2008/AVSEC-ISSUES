@@ -10,16 +10,31 @@ import {
   Upload,
   XCircle,
 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { ErrorState, LoadingState } from "@/components/query-state";
 import { StatusBadge } from "@/components/status-badge";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
 
 const importTypes = [
-  { value: "USERS", label: "Combined users (all roles)", permission: "users.import" },
+  {
+    value: "PEOPLE",
+    label: "People - basic student accounts",
+    permission: "users.import",
+  },
+  {
+    value: "USERS",
+    label: "Combined users (all roles)",
+    permission: "users.import",
+  },
   { value: "STUDENTS", label: "Students", permission: "users.import" },
-  { value: "STAFF", label: "Staff - Faculty, HOD, CC, Maintenance, Admin", permission: "users.import" },
+  {
+    value: "STAFF",
+    label: "Staff - Faculty, HOD, CC, Maintenance, Admin",
+    permission: "users.import",
+  },
   { value: "DEPARTMENTS", label: "Departments", permission: "academic.manage" },
   { value: "PROGRAMMES", label: "Programmes", permission: "academic.manage" },
   {
@@ -138,6 +153,7 @@ const systemFields = [
   "campus_code",
   "block_code",
   "floor_code",
+  "class_room_number",
   "room_code",
   "room_type",
   "category_name",
@@ -164,6 +180,8 @@ interface RowError {
   rowNumber: number;
   field?: string;
   message: string;
+  userId?: string;
+  userName?: string;
 }
 interface Preview {
   job: ImportJob;
@@ -209,6 +227,7 @@ interface Preview {
 }
 interface JobDetail extends ImportJob {
   credentialsAvailable?: boolean;
+  credentialExportClaimId?: string | null;
   result?: {
     completedAt: string;
     successful: Array<{
@@ -228,7 +247,7 @@ export default function ImportsPage() {
     user?.permissions.includes(item.permission),
   );
   const [entityType, setEntityType] = useState(allowed[0]?.value ?? "");
-  const [importMode, setImportMode] = useState("VALIDATE_ONLY");
+  const [importMode, setImportMode] = useState("CREATE_ONLY");
   const [selectedRoleCode, setSelectedRoleCode] = useState("STUDENT");
   const [resetExistingPasswords, setResetExistingPasswords] = useState(false);
   const [detectedStudyYear, setDetectedStudyYear] = useState("");
@@ -247,6 +266,12 @@ export default function ImportsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [dragActive, setDragActive] = useState(false);
+  const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
+  const [rollbackTargetId, setRollbackTargetId] = useState<string | null>(null);
+  const [credentialClaim, setCredentialClaim] = useState<{
+    jobId: string;
+    exportId: string;
+  } | null>(null);
 
   const jobs = useQuery({
     queryKey: ["imports"],
@@ -276,26 +301,26 @@ export default function ImportsPage() {
       body.append("entityType", entityType);
       body.append(
         "importMode",
-        ["USERS", "STUDENTS", "STAFF"].includes(entityType)
+        ["PEOPLE", "USERS", "STUDENTS", "STAFF"].includes(entityType)
           ? importMode
           : "CREATE_ONLY",
       );
       if (sheetName) body.append("sheetName", sheetName);
       if (Object.keys(columnMapping).length)
         body.append("columnMapping", JSON.stringify(columnMapping));
-      if (["USERS", "STUDENTS", "STAFF"].includes(entityType))
+      if (["PEOPLE", "USERS", "STUDENTS", "STAFF"].includes(entityType))
         body.append("selectedRoleCode", selectedRoleCode);
-      if (resetExistingPasswords)
+      if (
+        resetExistingPasswords &&
+        ["USERS", "STUDENTS", "STAFF"].includes(entityType)
+      )
         body.append("resetExistingPasswords", "true");
-      if (entityType === "STUDENTS") {
+      if (["PEOPLE", "STUDENTS"].includes(entityType)) {
         if (detectedStudyYear)
           body.append("detectedStudyYear", detectedStudyYear);
         body.append("duplicateResolution", duplicateResolution);
         if (Object.keys(departmentMappings).length)
-          body.append(
-            "departmentMappings",
-            JSON.stringify(departmentMappings),
-          );
+          body.append("departmentMappings", JSON.stringify(departmentMappings));
       }
       body.append("file", file);
       return api.postForm<Preview>("/imports/preview", body);
@@ -319,8 +344,23 @@ export default function ImportsPage() {
       api.post<{ id: string; status: string }>(`/imports/${id}/confirm`),
     onSuccess: (_, id) => {
       setPreview(null);
+      setFile(null);
       setSelectedId(id);
       setMessage("Import queued. Progress will update automatically.");
+      void client.invalidateQueries({ queryKey: ["imports"] });
+    },
+  });
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ id: string; status: string }>(`/imports/${id}/cancel`),
+    onSuccess: () => {
+      setCancelTargetId(null);
+      setPreview(null);
+      setSelectedId(null);
+      setFile(null);
+      setMessage(
+        "Import cancelled. The uploaded source file was removed securely.",
+      );
       void client.invalidateQueries({ queryKey: ["imports"] });
     },
   });
@@ -328,6 +368,7 @@ export default function ImportsPage() {
     mutationFn: (id: string) =>
       api.post<{ recordsRemoved: number }>(`/imports/${id}/rollback`),
     onSuccess: (data) => {
+      setRollbackTargetId(null);
       setMessage(
         `Rollback complete. ${data.recordsRemoved} imported records were removed.`,
       );
@@ -336,23 +377,63 @@ export default function ImportsPage() {
     },
   });
   const credentialsMutation = useMutation({
-    mutationFn: (id: string) =>
-      api.download(
-        `/imports/${id}/credentials`,
+    mutationFn: async (id: string) => {
+      const exportId =
+        (credentialClaim?.jobId === id
+          ? credentialClaim.exportId
+          : detail.data?.id === id
+            ? detail.data.credentialExportClaimId
+            : null) ?? crypto.randomUUID();
+      await api.download(
+        `/imports/${id}/credentials?exportId=${encodeURIComponent(exportId)}`,
         `import-${id.slice(0, 8)}-credentials.xlsx`,
-      ),
-    onSuccess: () => {
+      );
+      return { id, exportId };
+    },
+    onSuccess: ({ id, exportId }) => {
+      setCredentialClaim({ jobId: id, exportId });
       setMessage(
-        "Credential file downloaded. It cannot be downloaded again from this import.",
+        "Credential file prepared. Confirm that you saved it before erasing the encrypted server copy.",
       );
       void client.invalidateQueries({ queryKey: ["imports", selectedId] });
     },
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ["imports", selectedId] });
+    },
+  });
+  const acknowledgeCredentialsMutation = useMutation({
+    mutationFn: ({ id, exportId }: { id: string; exportId: string }) =>
+      api.post(`/imports/${id}/credentials/acknowledge`, { exportId }),
+    onSuccess: (_, claim) => {
+      setCredentialClaim((current) =>
+        current?.jobId === claim.id && current.exportId === claim.exportId
+          ? null
+          : current,
+      );
+      setMessage(
+        "Credential delivery acknowledged. The encrypted server copy was erased.",
+      );
+      void client.invalidateQueries({ queryKey: ["imports", claim.id] });
+    },
+    onSettled: (_, __, claim) => {
+      void client.invalidateQueries({ queryKey: ["imports", claim.id] });
+    },
+  });
+  const templateMutation = useMutation({
+    mutationFn: () =>
+      api.download(
+        `/imports/templates/${entityType}`,
+        `${entityType.toLowerCase()}-template.xlsx`,
+      ),
   });
   const actionError =
+    templateMutation.error ??
     previewMutation.error ??
     confirmMutation.error ??
+    cancelMutation.error ??
     rollbackMutation.error ??
-    credentialsMutation.error;
+    credentialsMutation.error ??
+    acknowledgeCredentialsMutation.error;
   const visiblePreviewHeaders =
     preview?.headers.filter(
       (header) =>
@@ -400,7 +481,7 @@ export default function ImportsPage() {
         </div>
       )}
       {actionError && (
-        <div className="error-box" style={{ marginBottom: 16 }}>
+        <div className="error-box" role="alert" style={{ marginBottom: 16 }}>
           {actionError instanceof ApiError
             ? actionError.message
             : actionError.message}
@@ -412,8 +493,9 @@ export default function ImportsPage() {
           <div>
             <h2>1. Prepare and validate</h2>
             <p>
-              Use a current template, or upload a CSV/XLSX file with
-              recognizable column names.
+              {entityType === "PEOPLE"
+                ? "Download the People template and keep its seven column names unchanged."
+                : "Use a current template, or upload a CSV/XLSX file with recognizable column names."}
             </p>
           </div>
         </div>
@@ -426,17 +508,23 @@ export default function ImportsPage() {
               onChange={(event) => {
                 const next = event.target.value;
                 setEntityType(next);
-                if (!["USERS", "STUDENTS", "STAFF"].includes(next))
+                if (next === "PEOPLE") {
                   setImportMode("CREATE_ONLY");
-                if (next === "STUDENTS") setSelectedRoleCode("STUDENT");
+                } else if (
+                  ["USERS", "STUDENTS", "STAFF"].includes(next) &&
+                  !["USERS", "STUDENTS", "STAFF"].includes(entityType)
+                ) {
+                  setImportMode("VALIDATE_ONLY");
+                } else if (!["USERS", "STUDENTS", "STAFF"].includes(next)) {
+                  setImportMode("CREATE_ONLY");
+                }
+                if (["PEOPLE", "STUDENTS"].includes(next))
+                  setSelectedRoleCode("STUDENT");
                 if (next === "STAFF" && selectedRoleCode === "STUDENT")
                   setSelectedRoleCode("FACULTY");
-                setPreview(null);
-                setSheetName("");
-                setColumnMapping({});
-                setDetectedStudyYear("");
-                setDuplicateResolution("KEEP_FIRST");
-                setDepartmentMappings({});
+                setResetExistingPasswords(false);
+                templateMutation.reset();
+                chooseFile(null);
               }}
             >
               {allowed.map((item) => (
@@ -470,17 +558,25 @@ export default function ImportsPage() {
             <select
               className="input"
               value={importMode}
-              disabled={!["USERS", "STUDENTS", "STAFF"].includes(entityType)}
+              disabled={
+                !["PEOPLE", "USERS", "STUDENTS", "STAFF"].includes(entityType)
+              }
               onChange={(event) => {
                 setImportMode(event.target.value);
                 setPreview(null);
               }}
             >
-              {importModes.map((item) => (
-                <option value={item.value} key={item.value}>
-                  {item.label}
-                </option>
-              ))}
+              {importModes
+                .filter(
+                  (item) =>
+                    entityType !== "PEOPLE" ||
+                    ["VALIDATE_ONLY", "CREATE_ONLY"].includes(item.value),
+                )
+                .map((item) => (
+                  <option value={item.value} key={item.value}>
+                    {item.label}
+                  </option>
+                ))}
             </select>
           </label>
           {entityType === "STUDENTS" && (
@@ -559,9 +655,10 @@ export default function ImportsPage() {
               <input
                 type="file"
                 accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-                onChange={(event) =>
-                  chooseFile(event.target.files?.[0] ?? null)
-                }
+                onChange={(event) => {
+                  chooseFile(event.target.files?.[0] ?? null);
+                  event.currentTarget.value = "";
+                }}
               />
             </div>
           </label>
@@ -576,15 +673,11 @@ export default function ImportsPage() {
           <button
             className="btn"
             type="button"
-            onClick={() =>
-              void api.download(
-                `/imports/templates/${entityType}`,
-                `${entityType.toLowerCase()}-template.xlsx`,
-              )
-            }
+            disabled={templateMutation.isPending}
+            onClick={() => templateMutation.mutate()}
           >
             <Download size={17} />
-            Download template
+            {templateMutation.isPending ? "Preparing template..." : "Download template"}
           </button>
           <button
             className="btn btn-primary"
@@ -600,13 +693,30 @@ export default function ImportsPage() {
         </div>
       </section>
 
+      {entityType === "PEOPLE" && (
+        <div className="card" style={{ padding: 16, marginTop: 14 }}>
+          <strong>Basic People template</strong>
+          <p className="muted" style={{ margin: "6px 0 0" }}>
+            Uses exactly User Name, User ID, User Password, Department, Year,
+            Class Room Number, and Mobile Number. Accounts are created as
+            students and must replace the temporary password on first login.
+            Department, Year, and Class Room Number must resolve together to
+            one active academic section assigned to that classroom; the import
+            will not guess or create a missing placement.
+          </p>
+        </div>
+      )}
+
       {preview && (
         <section className="card" style={{ padding: 20, marginTop: 18 }}>
           <div className="section-head">
             <div>
               <h2>2. Review preview</h2>
               <p>
-                Valid rows: {preview.job.validRows} · Invalid rows: {preview.job.errorRows} · Duplicate rows: {preview.duplicateRowCount}. Only valid rows will be imported.
+                Total rows: {preview.job.totalRows} · Valid rows:{" "}
+                {preview.job.validRows} · Invalid rows: {preview.job.errorRows}{" "}
+                · Duplicate rows: {preview.duplicateRowCount}. Only valid rows
+                will be imported.
               </p>
             </div>
             <StatusBadge value={preview.job.status} />
@@ -655,18 +765,14 @@ export default function ImportsPage() {
                       onChange={(event) => {
                         const next = { ...departmentMappings };
                         if (event.target.value)
-                          next[sheet.sourceDepartmentCode] =
-                            event.target.value;
+                          next[sheet.sourceDepartmentCode] = event.target.value;
                         else delete next[sheet.sourceDepartmentCode];
                         setDepartmentMappings(next);
                       }}
                     >
                       <option value="">Department mapping required</option>
                       {preview.departmentOptions.map((department) => (
-                        <option
-                          key={department.id}
-                          value={department.code}
-                        >
+                        <option key={department.id} value={department.code}>
                           {department.code} - {department.name}
                         </option>
                       ))}
@@ -702,13 +808,19 @@ export default function ImportsPage() {
                 <div>
                   <h3>Confirm department mappings</h3>
                   <p className="muted" style={{ margin: "4px 0 0" }}>
-                    These source values were not matched automatically. Select an exact active department; similar names are never guessed.
+                    These source values were not matched automatically. Select
+                    an exact active department; similar names are never guessed.
                   </p>
                 </div>
                 <button
                   className="btn btn-secondary"
                   type="button"
-                  disabled={previewMutation.isPending || preview.unresolvedDepartmentMappings.some((item) => !departmentMappings[item.sourceCode])}
+                  disabled={
+                    previewMutation.isPending ||
+                    preview.unresolvedDepartmentMappings.some(
+                      (item) => !departmentMappings[item.sourceCode],
+                    )
+                  }
                   onClick={() => previewMutation.mutate()}
                 >
                   <RefreshCw size={16} />
@@ -718,11 +830,19 @@ export default function ImportsPage() {
               <div className="column-map-grid">
                 {preview.unresolvedDepartmentMappings.map((item) => (
                   <label className="field" key={item.sourceCode}>
-                    <span>{item.sourceCode} · {item.rowCount} {item.rowCount === 1 ? "row" : "rows"}</span>
+                    <span>
+                      {item.sourceCode} · {item.rowCount}{" "}
+                      {item.rowCount === 1 ? "row" : "rows"}
+                    </span>
                     <select
                       className="input"
                       value={departmentMappings[item.sourceCode] ?? ""}
-                      onChange={(event) => setDepartmentMappings({ ...departmentMappings, [item.sourceCode]: event.target.value })}
+                      onChange={(event) =>
+                        setDepartmentMappings({
+                          ...departmentMappings,
+                          [item.sourceCode]: event.target.value,
+                        })
+                      }
                     >
                       <option value="">Select department</option>
                       {preview.departmentOptions.map((department) => (
@@ -738,46 +858,30 @@ export default function ImportsPage() {
           )}
           {preview.sheetNames.length > 0 &&
             preview.sheetInspections.length === 0 && (
-            <div className="import-sheet-strip">
-              <span>Workbook sheet</span>
-              <select
-                className="input"
-                style={{ width: "auto", minWidth: 180 }}
-                value={
-                  sheetName ||
-                  preview.selectedSheetName ||
-                  preview.sheetNames[0]
-                }
-                onChange={(event) => setSheetName(event.target.value)}
-              >
-                {preview.sheetNames.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              {preview.sheetNames.length > 1 && (
-                <small>
-                  {preview.sheetNames.length} sheets found. The first sheet with
-                  data was validated.
-                </small>
-              )}
-              <button
-                className="btn btn-secondary"
-                type="button"
-                disabled={previewMutation.isPending}
-                onClick={() => previewMutation.mutate()}
-              >
-                <RefreshCw size={16} />
-                Revalidate sheet
-              </button>
-            </div>
-          )}
-          {preview.rawHeaders.length > 0 &&
-            preview.sheetInspections.length === 0 && (
-            <div className="column-map-panel">
-              <div className="section-title" style={{ margin: "0 0 12px" }}>
-                <h3>Column mapping</h3>
+              <div className="import-sheet-strip">
+                <span>Workbook sheet</span>
+                <select
+                  className="input"
+                  style={{ width: "auto", minWidth: 180 }}
+                  value={
+                    sheetName ||
+                    preview.selectedSheetName ||
+                    preview.sheetNames[0]
+                  }
+                  onChange={(event) => setSheetName(event.target.value)}
+                >
+                  {preview.sheetNames.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+                {preview.sheetNames.length > 1 && (
+                  <small>
+                    {preview.sheetNames.length} sheets found. The first sheet
+                    with data was validated.
+                  </small>
+                )}
                 <button
                   className="btn btn-secondary"
                   type="button"
@@ -785,37 +889,54 @@ export default function ImportsPage() {
                   onClick={() => previewMutation.mutate()}
                 >
                   <RefreshCw size={16} />
-                  Apply mapping
+                  Revalidate sheet
                 </button>
               </div>
-              <div className="column-map-grid">
-                {preview.rawHeaders.map((rawHeader) => (
-                  <label className="field" key={rawHeader}>
-                    <span>{rawHeader}</span>
-                    <select
-                      className="input"
-                      value={columnMapping[rawHeader] ?? ""}
-                      onChange={(event) =>
-                        setColumnMapping({
-                          ...columnMapping,
-                          [rawHeader]: event.target.value,
-                        })
-                      }
-                    >
-                      <option value="">Auto detect</option>
-                      {systemFields.map((field) => (
-                        <option key={field} value={field}>
-                          {field === "__IGNORE__"
-                            ? "Do not import"
-                            : field.replaceAll("_", " ")}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ))}
+            )}
+          {entityType !== "PEOPLE" &&
+            preview.rawHeaders.length > 0 &&
+            preview.sheetInspections.length === 0 && (
+              <div className="column-map-panel">
+                <div className="section-title" style={{ margin: "0 0 12px" }}>
+                  <h3>Column mapping</h3>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    disabled={previewMutation.isPending}
+                    onClick={() => previewMutation.mutate()}
+                  >
+                    <RefreshCw size={16} />
+                    Apply mapping
+                  </button>
+                </div>
+                <div className="column-map-grid">
+                  {preview.rawHeaders.map((rawHeader) => (
+                    <label className="field" key={rawHeader}>
+                      <span>{rawHeader}</span>
+                      <select
+                        className="input"
+                        value={columnMapping[rawHeader] ?? ""}
+                        onChange={(event) =>
+                          setColumnMapping({
+                            ...columnMapping,
+                            [rawHeader]: event.target.value,
+                          })
+                        }
+                      >
+                        <option value="">Auto detect</option>
+                        {systemFields.map((field) => (
+                          <option key={field} value={field}>
+                            {field === "__IGNORE__"
+                              ? "Do not import"
+                              : field.replaceAll("_", " ")}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
           <div style={{ overflowX: "auto" }}>
             <table className="data-table">
               <thead>
@@ -887,8 +1008,20 @@ export default function ImportsPage() {
             </div>
           )}
           <div className="button-row" style={{ marginTop: 18 }}>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              disabled={cancelMutation.isPending || confirmMutation.isPending}
+              onClick={() => setCancelTargetId(preview.job.id)}
+            >
+              <XCircle size={17} />
+              {cancelMutation.isPending ? "Cancelling..." : "Cancel import"}
+            </button>
             {preview.job.importMode === "VALIDATE_ONLY" ? (
-              <span className="muted">Validate-only mode finished. Choose a create/update mode and revalidate before importing.</span>
+              <span className="muted">
+                Validate-only mode finished. Choose a create/update mode and
+                revalidate before importing.
+              </span>
             ) : (
               <button
                 className="btn btn-primary"
@@ -903,7 +1036,7 @@ export default function ImportsPage() {
                 <CheckCircle2 size={17} />
                 {confirmMutation.isPending
                   ? "Queuing..."
-                  : `Confirm ${preview.job.validRows} valid rows`}
+                  : `Import ${preview.job.validRows} valid rows`}
               </button>
             )}
           </div>
@@ -948,14 +1081,17 @@ export default function ImportsPage() {
                       {" - "}
                       {new Date(job.createdAt).toLocaleString()}
                     </small>
-                    {["QUEUED", "PROCESSING"].includes(job.status) && job.totalRows > 0 && (
-                      <div className="import-progress-bar">
-                        <div
-                          className="import-progress-fill"
-                          style={{ width: `${Math.min(100, Math.round((job.validRows / job.totalRows) * 100))}%` }}
-                        />
-                      </div>
-                    )}
+                    {["QUEUED", "PROCESSING"].includes(job.status) &&
+                      job.totalRows > 0 && (
+                        <div className="import-progress-bar">
+                          <div
+                            className="import-progress-fill"
+                            style={{
+                              width: `${Math.min(100, Math.round((job.validRows / job.totalRows) * 100))}%`,
+                            }}
+                          />
+                        </div>
+                      )}
                   </span>
                   <StatusBadge value={job.status} />
                 </button>
@@ -983,7 +1119,9 @@ export default function ImportsPage() {
             <>
               <StatusBadge value={detail.data.status} />
               <p style={{ marginTop: 12 }}>
-                {detail.data.validRows} successful - {detail.data.errorRows}{" "}
+                {detail.data.result?.successful.length ?? detail.data.validRows}{" "}
+                successful -{" "}
+                {detail.data.result?.errors.length ?? detail.data.errorRows}{" "}
                 error rows
               </p>
               {detail.data.result && (
@@ -992,28 +1130,58 @@ export default function ImportsPage() {
                     Completed{" "}
                     {new Date(detail.data.result.completedAt).toLocaleString()}
                   </p>
-                  {detail.data.credentialsAvailable && (
-                    <>
-                      <div className="import-credential-notice">
-                        <strong>One-time credential download</strong><br />
-                        <small>This file contains temporary passwords. Download it once, store it securely, and delete after distributing to users. This button becomes unavailable after the first download.</small>
-                      </div>
-                      <button
-                        className="btn btn-primary"
-                        style={{ marginTop: 8 }}
-                        type="button"
-                        disabled={credentialsMutation.isPending}
-                        onClick={() =>
-                          credentialsMutation.mutate(detail.data!.id)
-                        }
-                      >
-                        <Download size={16} />
-                        {credentialsMutation.isPending
-                          ? "Preparing..."
-                          : "Download credentials (one-time)"}
-                      </button>
-                    </>
-                  )}
+                  {detail.data.entityType !== "PEOPLE" &&
+                    detail.data.credentialsAvailable && (
+                      <>
+                        <div className="import-credential-notice">
+                          <strong>One-time credential download</strong>
+                          <br />
+                          <small>
+                            This file contains temporary passwords. You may
+                            retry the same claimed download until you confirm
+                            that it was saved. After confirmation, the encrypted
+                            server copy is erased.
+                          </small>
+                        </div>
+                        <button
+                          className="btn btn-primary"
+                          style={{ marginTop: 8 }}
+                          type="button"
+                          disabled={
+                            credentialsMutation.isPending ||
+                            acknowledgeCredentialsMutation.isPending
+                          }
+                          onClick={() =>
+                            credentialsMutation.mutate(detail.data!.id)
+                          }
+                        >
+                          <Download size={16} />
+                          {credentialsMutation.isPending
+                            ? "Preparing..."
+                            : "Download credentials (one-time)"}
+                        </button>
+                        {credentialClaim?.jobId === detail.data.id && (
+                          <button
+                            className="btn btn-secondary"
+                            style={{ marginTop: 8, marginLeft: 8 }}
+                            type="button"
+                            disabled={acknowledgeCredentialsMutation.isPending}
+                            onClick={() =>
+                              acknowledgeCredentialsMutation.mutate(
+                                {
+                                  id: credentialClaim.jobId,
+                                  exportId: credentialClaim.exportId,
+                                },
+                              )
+                            }
+                          >
+                            {acknowledgeCredentialsMutation.isPending
+                              ? "Erasing encrypted copy..."
+                              : "I saved the file — erase server copy"}
+                          </button>
+                        )}
+                      </>
+                    )}
                   {detail.data.result.errors.length ? (
                     <>
                       <button
@@ -1058,27 +1226,64 @@ export default function ImportsPage() {
               )}
               {detail.data.status === "COMPLETED" &&
                 detail.data.validRows > 0 && (
-                  <button
-                    className="btn"
-                    style={{ marginTop: 16 }}
-                    disabled={rollbackMutation.isPending}
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          "Rollback every record created by this import? This only succeeds while no later data references those records.",
-                        )
-                      )
-                        rollbackMutation.mutate(detail.data.id);
-                    }}
-                  >
-                    <RotateCcw size={17} />
-                    Safe rollback
-                  </button>
+                  <div className="button-row" style={{ marginTop: 16 }}>
+                    {detail.data.entityType === "PEOPLE" && (
+                      <Link className="btn btn-primary" href="/admin/people">
+                        View imported users
+                      </Link>
+                    )}
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      onClick={() => {
+                        chooseFile(null);
+                        setSelectedId(null);
+                      }}
+                    >
+                      Import another file
+                    </button>
+                    <button
+                      className="btn"
+                      disabled={rollbackMutation.isPending}
+                      onClick={() => setRollbackTargetId(detail.data.id)}
+                    >
+                      <RotateCcw size={17} />
+                      Safe rollback
+                    </button>
+                  </div>
                 )}
             </>
           )}
         </aside>
       </div>
+      <ConfirmationDialog
+        open={Boolean(cancelTargetId)}
+        onClose={() => {
+          if (!cancelMutation.isPending) setCancelTargetId(null);
+        }}
+        onConfirm={() => {
+          if (cancelTargetId) cancelMutation.mutate(cancelTargetId);
+        }}
+        title="Cancel this import?"
+        description="The validated import will not be queued, and its temporary uploaded source file will be removed securely."
+        confirmLabel="Cancel import"
+        variant="warning"
+        loading={cancelMutation.isPending}
+      />
+      <ConfirmationDialog
+        open={Boolean(rollbackTargetId)}
+        onClose={() => {
+          if (!rollbackMutation.isPending) setRollbackTargetId(null);
+        }}
+        onConfirm={() => {
+          if (rollbackTargetId) rollbackMutation.mutate(rollbackTargetId);
+        }}
+        title="Roll back imported records?"
+        description="Every record created by this import will be removed only when no later data references it."
+        confirmLabel="Run safe rollback"
+        variant="danger"
+        loading={rollbackMutation.isPending}
+      />
     </>
   );
 }
@@ -1088,11 +1293,12 @@ function downloadErrorReport(
   filename = "import-error-report.csv",
 ) {
   const rows = [
-    ["row_number", "field", "message"],
+    ["Row Number", "User ID", "User Name", "Error"],
     ...errors.map((error) => [
       String(error.rowNumber),
-      error.field ?? "",
-      error.message,
+      error.userId ?? "",
+      error.userName ?? "",
+      error.field ? `${error.field}: ${error.message}` : error.message,
     ]),
   ];
   const csv = rows.map((row) => row.map(csvCell).join(",")).join("\r\n");

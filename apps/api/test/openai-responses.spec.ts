@@ -90,5 +90,31 @@ describe("OpenAI Responses API backend adapter", () => {
       /administrator must configure/i,
     );
   });
-});
 
+  it("rejects an explicitly incomplete Responses API event", async () => {
+    create.mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield { type: "response.output_text.delta", delta: "Partial" };
+        yield { type: "response.incomplete", response: { id: "incomplete" } };
+      },
+    });
+    const service = new OpenAiService({
+      get: (key: string, fallback?: unknown) =>
+        ({
+          AVS_BOT_ENABLED: true,
+          OPENAI_API_KEY: "test-only-server-key-value-12345",
+          OPENAI_MODEL: "available-model",
+        })[key] ?? fallback,
+    } as ConfigService);
+
+    const consume = async () => {
+      for await (const _event of service.stream(
+        { instructions: "Safe instruction", prompt: "Hello" },
+        new AbortController().signal,
+      )) {
+        // Consume until the provider reports an incomplete response.
+      }
+    };
+    await expect(consume()).rejects.toThrow(/ended before completion/i);
+  });
+});

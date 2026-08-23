@@ -151,6 +151,29 @@ describe("canAccessPortalPath", () => {
     ).toBe(true);
   });
 
+  it("gates Campus Setup and its QR sheet by their exact permissions", () => {
+    expect(
+      canAccessPortalPath("/admin/locations", ["locations.manage"], []),
+    ).toBe(true);
+    expect(
+      canAccessPortalPath("/admin/locations", ["locations.qr"], []),
+    ).toBe(false);
+    expect(
+      canAccessPortalPath(
+        "/admin/locations/qr-sheet",
+        ["locations.qr"],
+        [],
+      ),
+    ).toBe(true);
+    expect(
+      canAccessPortalPath(
+        "/admin/locations/qr-sheet",
+        ["locations.manage"],
+        [],
+      ),
+    ).toBe(false);
+  });
+
   it("allows account creators to open Add Person without broad People read access", () => {
     expect(
       canAccessPortalPath("/admin/people/new", ["users.create"], []),

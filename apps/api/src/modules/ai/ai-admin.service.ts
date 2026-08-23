@@ -1,21 +1,18 @@
-import {
-  BadRequestException,
-  Injectable,
-} from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import type { UpdateAiBotSettingDto } from "./dto/ai.dto";
+import { AiProviderService } from "./ai-provider.service";
 import { AiUsageService } from "./ai-usage.service";
-import { OpenAiService } from "./openai.service";
 
 @Injectable()
 export class AiAdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly openai: OpenAiService,
+    private readonly provider: AiProviderService,
     private readonly usage: AiUsageService,
     private readonly audit: AuditService,
   ) {}
@@ -45,17 +42,12 @@ export class AiAdminService {
       stored,
       effective: {
         enabled:
-          stored?.enabled ??
-          this.config.get<boolean>("AVS_BOT_ENABLED", false),
-        model:
-          stored?.model ?? this.config.get<string>("OPENAI_MODEL") ?? null,
+          stored?.enabled ?? this.config.get<boolean>("AVS_BOT_ENABLED", false),
+        model: stored?.model ?? this.provider.configuration().model,
         maxOutputTokens:
           stored?.maxOutputTokens ??
           this.config.get<number>("OPENAI_MAX_OUTPUT_TOKENS", 1_200),
-        dailyUserLimit: this.config.get<number>(
-          "OPENAI_DAILY_USER_LIMIT",
-          50,
-        ),
+        dailyUserLimit: this.config.get<number>("OPENAI_DAILY_USER_LIMIT", 50),
         monthlyBudget:
           stored?.monthlyBudget?.toString() ??
           this.config.get<number>("OPENAI_MONTHLY_BUDGET_USD") ??
@@ -65,9 +57,11 @@ export class AiAdminService {
           this.config.get<string>("AI_KNOWLEDGE_PROVIDER", "internal"),
         pricingConfigured: this.usage.pricingConfigured(),
       },
-      provider: this.openai.configuration(),
+      provider: this.provider.configuration(),
       secrets: {
-        apiKeyPresent: Boolean(this.config.get<string>("OPENAI_API_KEY")),
+        apiKeyPresent: this.provider.configuration().configured,
+        geminiApiKeyPresent: Boolean(this.config.get<string>("GEMINI_API_KEY")),
+        openAiApiKeyPresent: Boolean(this.config.get<string>("OPENAI_API_KEY")),
         apiKeyExposed: false,
       },
     };
@@ -78,17 +72,20 @@ export class AiAdminService {
     input: UpdateAiBotSettingDto,
     requestId: string,
   ) {
-    if (input.enabled && !this.openai.configuration().configured) {
+    if (input.enabled && !this.provider.configuration().configured) {
       throw new BadRequestException(
-        "Configure a new server-side OpenAI key and an available model before enabling AVS Bot.",
+        "Configure the server-side AVS Bot providers and available models before enabling AVS Bot.",
       );
     }
+    const provider = this.provider.configuration();
     if (
       input.knowledgeProvider === "openai_file_search" &&
-      !this.openai.configuration().vectorStoreConfigured
+      (provider.provider !== "openai" ||
+        provider.knowledgeProvider !== "openai_file_search" ||
+        !provider.vectorStoreConfigured)
     ) {
       throw new BadRequestException(
-        "Configure OPENAI_VECTOR_STORE_ID before selecting OpenAI file search.",
+        "Configure OpenAI as the primary provider with OPENAI_VECTOR_STORE_ID and AI_KNOWLEDGE_PROVIDER=openai_file_search before selecting OpenAI file search.",
       );
     }
     const before = await this.prisma.aiBotSetting.findUnique({
@@ -132,7 +129,7 @@ export class AiAdminService {
   }
 
   async testConnection(user: AuthPrincipal, requestId: string) {
-    const result = await this.openai.testConnection();
+    const result = await this.provider.testConnection();
     await this.prisma.aiBotSetting.updateMany({
       where: { collegeId: user.collegeId },
       data: result.ok
@@ -180,7 +177,7 @@ export class AiAdminService {
       knowledge: documents,
       feedback,
       safety,
-      provider: this.openai.configuration(),
+      provider: this.provider.configuration(),
     };
   }
 
@@ -202,16 +199,13 @@ export class AiAdminService {
 
   private safeSetting(value: unknown): unknown {
     if (!value || typeof value !== "object") return value;
-    const {
-      id,
-      collegeId,
-      updatedById,
-      ...safe
-    } = value as Record<string, unknown>;
+    const { id, collegeId, updatedById, ...safe } = value as Record<
+      string,
+      unknown
+    >;
     void id;
     void collegeId;
     void updatedById;
     return safe;
   }
 }
-

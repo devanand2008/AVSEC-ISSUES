@@ -7,7 +7,12 @@ import {
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { parse } from "csv-parse/sync";
-import { createHash, randomUUID } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from "node:crypto";
 import { extname } from "node:path";
 import type { Readable } from "node:stream";
 import {
@@ -19,10 +24,13 @@ import {
 } from "exceljs";
 import * as XLSX from "xlsx";
 import { z } from "zod";
+import { RoomType } from "../../generated/prisma/enums";
 import {
   IMPORT_ENTITY_TYPES,
   IMPORT_MODES,
   IMPORT_TEMPLATES,
+  PEOPLE_IMPORT_HEADERS,
+  importRowNumber,
   type ImportEntityType,
   type ImportResultReport,
   type ImportRow,
@@ -33,6 +41,22 @@ import {
 const MAX_IMPORT_BYTES =
   Number(process.env.MAX_EXCEL_FILE_SIZE_MB || 10) * 1024 * 1024;
 const MAX_IMPORT_ROWS = Number(process.env.MAX_EXCEL_ROWS || 5_000);
+const PEOPLE_SOURCE_ENVELOPE_MAGIC = Buffer.from(
+  "AVS-PEOPLE-IMPORT-SOURCE:v1\0",
+  "utf8",
+);
+const PEOPLE_SOURCE_IV_BYTES = 12;
+const PEOPLE_SOURCE_TAG_BYTES = 16;
+const PEOPLE_SOURCE_KEY_CONTEXT = "avs-people-import-source-encryption-v1\0";
+const PEOPLE_FIELD_LABELS: Record<string, string> = {
+  full_name: "User Name",
+  college_identity_id: "User ID",
+  temporary_password: "User Password",
+  department_code: "Department",
+  year: "Year",
+  class_room_number: "Class Room Number",
+  mobile: "Mobile Number",
+};
 const ALLOWED_MIME_TYPES = new Set([
   "text/csv",
   "application/csv",
@@ -82,6 +106,7 @@ const ACCOUNT_STATUSES = new Set([
   "RESIGNED",
   "ARCHIVED",
 ]);
+const ROOM_TYPES = new Set<string>(Object.values(RoomType));
 const FORMULA_PREFIX = /^[=+@]/;
 const IGNORED_COLUMN = "__IGNORED_IMPORT_COLUMN__";
 const AVS_PASSWORD_PRECISION_ERROR =
@@ -90,7 +115,11 @@ const HEADER_ALIASES: Record<string, string> = {
   admission_no: "admission_number",
   admission_year: "admission_year",
   class: "section_code",
+  class_room_no: "class_room_number",
+  class_room_number: "class_room_number",
   class_section: "section_code",
+  classroom_no: "class_room_number",
+  classroom_number: "class_room_number",
   contact_no: "mobile",
   contact_number: "mobile",
   date_of_joining: "joined_on",
@@ -157,6 +186,7 @@ const HEADER_ALIASES: Record<string, string> = {
   user_email: "email",
   user_id: "college_identity_id",
   user_name: "full_name",
+  user_password: "temporary_password",
   whatsapp: "whatsapp_number",
   whatsapp_mobile: "whatsapp_number",
   whatsapp_no: "whatsapp_number",
@@ -244,6 +274,8 @@ const importResultReportSchema = z
         rowNumber: z.number().int().min(2),
         field: z.string().optional(),
         message: z.string(),
+        userId: z.string().max(60).optional(),
+        userName: z.string().max(180).optional(),
       }),
     ),
     credentials: z.array(credentialExportRowSchema).optional(),
@@ -257,7 +289,7 @@ export class ImportsFileService {
   private readonly bucket: string;
   private readonly officialEmailDomains: Set<string>;
 
-  constructor(config: ConfigService) {
+  constructor(private readonly config: ConfigService) {
     this.bucket = config.getOrThrow<string>("S3_BUCKET");
     this.officialEmailDomains = new Set(
       (config.get<string>("OFFICIAL_EMAIL_DOMAINS", "") || "")
@@ -268,7 +300,9 @@ export class ImportsFileService {
     this.client = new S3Client({
       endpoint: config.getOrThrow<string>("S3_ENDPOINT"),
       region: config.get<string>("S3_REGION", "us-east-1"),
-      forcePathStyle: this.booleanConfig(config.get<string | boolean>("S3_FORCE_PATH_STYLE", true)),
+      forcePathStyle: this.booleanConfig(
+        config.get<string | boolean>("S3_FORCE_PATH_STYLE", true),
+      ),
       credentials: {
         accessKeyId: config.getOrThrow<string>("S3_ACCESS_KEY"),
         secretAccessKey: config.getOrThrow<string>("S3_SECRET_KEY"),
@@ -329,8 +363,10 @@ export class ImportsFileService {
         matrix = parse(file.buffer, {
           bom: true,
           relax_column_count: true,
-          skip_empty_lines: true,
-          trim: true,
+          skip_empty_lines: false,
+          // Preserve PEOPLE identity/password bytes so surrounding whitespace can
+          // be rejected explicitly instead of silently changing login data.
+          trim: false,
         }) as unknown[][];
       else if (extension === ".xls") {
         const parsed = this.parseLegacyWorkbook(file.buffer, options.sheetName);
@@ -393,7 +429,7 @@ export class ImportsFileService {
       .map((header, index) => ({ header, index }))
       .filter((column) => column.header !== IGNORED_COLUMN);
     const headers = activeColumns.map((column) => column.header);
-    if (new Set(headers).size !== headers.length)
+    if (entityType !== "PEOPLE" && new Set(headers).size !== headers.length)
       throw new BadRequestException("Import headers must be unique.");
     const template = IMPORT_TEMPLATES[entityType];
     const missing = template.required.filter(
@@ -403,33 +439,45 @@ export class ImportsFileService {
     );
     const allowed = new Set([...template.required, ...template.optional]);
     const unexpected = headers.filter((header) => !allowed.has(header));
-    const headerMessages = [
-      ...(missing.length
-        ? [`Missing required headers: ${missing.join(", ")}.`]
-        : []),
-      ...(unexpected.length
-        ? [
-            `Unexpected headers: ${unexpected.join(", ")}. Map or skip these columns before confirming.`,
-          ]
-        : []),
-    ];
+    const headerMessages =
+      entityType === "PEOPLE"
+        ? this.peopleHeaderMessages(rawHeaders)
+        : [
+            ...(missing.length
+              ? [
+                  `Missing required headers: ${missing
+                    .map((field) => this.fieldLabel(entityType, field))
+                    .join(", ")}.`,
+                ]
+              : []),
+            ...(unexpected.length
+              ? [
+                  `Unexpected headers: ${unexpected.join(", ")}. Map or skip these columns before confirming.`,
+                ]
+              : []),
+          ];
 
     const rows = matrix
       .slice(1)
-      .filter((source) =>
+      .map((source, index) => ({ source, sourceRowNumber: index + 2 }))
+      .filter(({ source }) =>
         activeColumns.some((column) => this.cell(source[column.index])),
       )
-      .map((source) =>
-        this.prepareRow(
+      .map(({ source, sourceRowNumber }) => {
+        const row = this.prepareRow(
           entityType,
           Object.fromEntries(
             activeColumns.map((column) => [
               column.header,
-              this.cell(source[column.index]),
+              this.importCell(entityType, column.header, source[column.index]),
             ]),
           ) as ImportRow,
-        ),
-      );
+        );
+        if (entityType === "PEOPLE") {
+          row.source_row_number = String(sourceRowNumber);
+        }
+        return row;
+      });
     rows.forEach((row) =>
       this.applyDepartmentMapping(row, options.departmentMappings),
     );
@@ -437,16 +485,16 @@ export class ImportsFileService {
       throw new BadRequestException(
         "The import file does not contain any data rows.",
       );
-    const errors = [
+    const errors = this.enrichPeopleErrors(entityType, rows, [
       ...workbookErrors,
-      ...this.headerErrors(rows.length, headerMessages),
+      ...this.headerErrors(entityType, rows, headerMessages),
       ...this.validateRows(
         entityType,
         rows,
         options.duplicateResolution ?? "KEEP_FIRST",
         options.officialEmailDomains,
       ),
-    ];
+    ]);
     return {
       rawHeaders,
       headers,
@@ -457,7 +505,7 @@ export class ImportsFileService {
       sheetInspections,
       detectedStudyYear,
       passwordWarnings,
-      duplicateGroups: this.duplicateEmailGroups(rows),
+      duplicateGroups: this.duplicateEmailGroups(entityType, rows),
       duplicateRowCount: this.duplicateRowNumbers(
         entityType,
         rows,
@@ -478,22 +526,38 @@ export class ImportsFileService {
     collegeId: string,
     entityType: ImportEntityType,
     file: Express.Multer.File,
+    key: string,
   ): Promise<{ key: string; sha256: string }> {
     const extension = extname(file.originalname).toLowerCase();
-    const key = `colleges/${collegeId}/imports/source/${randomUUID()}${extension}`;
+    this.requireSourceKey(collegeId, key);
+    if (extname(key).toLowerCase() !== extension) {
+      throw new BadRequestException(
+        "The import source key does not match the uploaded file type.",
+      );
+    }
     const sha256 = createHash("sha256").update(file.buffer).digest("hex");
+    const storedBody =
+      entityType === "PEOPLE"
+        ? this.encryptPeopleSource(file.buffer, key)
+        : file.buffer;
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
-        Body: file.buffer,
+        Body: storedBody,
         ContentType:
           extension === ".csv"
             ? "text/csv"
             : extension === ".xls"
               ? "application/vnd.ms-excel"
               : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        Metadata: { entity: entityType, sha256 },
+        Metadata: {
+          entity: entityType,
+          sha256,
+          ...(entityType === "PEOPLE"
+            ? { sourceEncryption: "aes-256-gcm-v1" }
+            : {}),
+        },
       }),
     );
     return { key, sha256 };
@@ -503,28 +567,173 @@ export class ImportsFileService {
     const response = await this.client.send(
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),
     );
-    return this.toBuffer(response.Body as Readable | undefined);
+    const stored = await this.toBuffer(response.Body as Readable | undefined);
+    return this.isEncryptedPeopleSource(stored)
+      ? this.decryptPeopleSource(stored, key)
+      : stored;
   }
 
-  async deleteSource(key: string): Promise<void> {
-    if (!key.includes("/imports/source/")) return;
-    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+  private peopleSourceKey(): Buffer {
+    const pepper = this.config.get<string>("PASSWORD_PEPPER", "");
+    if (pepper.length < 32) {
+      throw new Error(
+        "PASSWORD_PEPPER must contain at least 32 characters for People import source encryption.",
+      );
+    }
+    return createHash("sha256")
+      .update(PEOPLE_SOURCE_KEY_CONTEXT)
+      .update(pepper, "utf8")
+      .digest();
+  }
+
+  private peopleSourceAad(storageKey: string): Buffer {
+    return Buffer.concat([
+      PEOPLE_SOURCE_ENVELOPE_MAGIC,
+      Buffer.from(storageKey, "utf8"),
+    ]);
+  }
+
+  private encryptPeopleSource(content: Buffer, storageKey: string): Buffer {
+    const iv = randomBytes(PEOPLE_SOURCE_IV_BYTES);
+    const cipher = createCipheriv("aes-256-gcm", this.peopleSourceKey(), iv);
+    cipher.setAAD(this.peopleSourceAad(storageKey));
+    const ciphertext = Buffer.concat([cipher.update(content), cipher.final()]);
+    return Buffer.concat([
+      PEOPLE_SOURCE_ENVELOPE_MAGIC,
+      iv,
+      cipher.getAuthTag(),
+      ciphertext,
+    ]);
+  }
+
+  private isEncryptedPeopleSource(content: Buffer): boolean {
+    return (
+      content.length >= PEOPLE_SOURCE_ENVELOPE_MAGIC.length &&
+      content
+        .subarray(0, PEOPLE_SOURCE_ENVELOPE_MAGIC.length)
+        .equals(PEOPLE_SOURCE_ENVELOPE_MAGIC)
+    );
+  }
+
+  private decryptPeopleSource(content: Buffer, storageKey: string): Buffer {
+    const payloadOffset =
+      PEOPLE_SOURCE_ENVELOPE_MAGIC.length +
+      PEOPLE_SOURCE_IV_BYTES +
+      PEOPLE_SOURCE_TAG_BYTES;
+    if (content.length <= payloadOffset) {
+      throw new BadRequestException(
+        "Stored People import source has an invalid encrypted envelope.",
+      );
+    }
+    const ivStart = PEOPLE_SOURCE_ENVELOPE_MAGIC.length;
+    const tagStart = ivStart + PEOPLE_SOURCE_IV_BYTES;
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      this.peopleSourceKey(),
+      content.subarray(ivStart, tagStart),
+    );
+    decipher.setAAD(this.peopleSourceAad(storageKey));
+    decipher.setAuthTag(content.subarray(tagStart, payloadOffset));
+    try {
+      return Buffer.concat([
+        decipher.update(content.subarray(payloadOffset)),
+        decipher.final(),
+      ]);
+    } catch {
+      throw new BadRequestException(
+        "Stored People import source failed authenticated decryption.",
+      );
+    }
+  }
+
+  async deleteSource(collegeId: string, key: string): Promise<void> {
+    this.requireSourceKey(collegeId, key);
+    await this.client.send(
+      new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+    );
+  }
+
+  sourceStorageKey(
+    collegeId: string,
+    importJobId: string,
+    originalName: string,
+  ): string {
+    const extension = extname(originalName).toLowerCase();
+    return `colleges/${collegeId}/imports/source/${importJobId}${extension}`;
+  }
+
+  private requireSourceKey(collegeId: string, key: string): void {
+    const prefix = `colleges/${collegeId}/imports/source/`;
+    const fileName = key.startsWith(prefix) ? key.slice(prefix.length) : "";
+    if (
+      !fileName ||
+      fileName.includes("/") ||
+      !/^[A-Za-z0-9._-]+\.(csv|xls|xlsx)$/i.test(fileName)
+    ) {
+      throw new BadRequestException(
+        "The import source is outside the authorized college storage path.",
+      );
+    }
   }
 
   async saveReport(
     collegeId: string,
     report: ImportResultReport,
+    storageKey = `colleges/${collegeId}/imports/results/${report.jobId}.json`,
   ): Promise<string> {
-    const key = `colleges/${collegeId}/imports/results/${report.jobId}.json`;
+    this.requireResultKey(collegeId, report.jobId, storageKey);
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
-        Key: key,
+        Key: storageKey,
         Body: JSON.stringify(report, null, 2),
         ContentType: "application/json",
       }),
     );
-    return key;
+    return storageKey;
+  }
+
+  resultStorageKey(
+    collegeId: string,
+    importJobId: string,
+    processingAttemptToken: string,
+  ): string {
+    const attemptHash = createHash("sha256")
+      .update(processingAttemptToken)
+      .digest("hex");
+    return `colleges/${collegeId}/imports/results/${importJobId}-${attemptHash}.json`;
+  }
+
+  async deleteReport(
+    collegeId: string,
+    importJobId: string,
+    storageKey: string,
+  ): Promise<void> {
+    this.requireResultKey(collegeId, importJobId, storageKey);
+    await this.client.send(
+      new DeleteObjectCommand({ Bucket: this.bucket, Key: storageKey }),
+    );
+  }
+
+  private requireResultKey(
+    collegeId: string,
+    importJobId: string,
+    storageKey: string,
+  ): void {
+    const prefix = `colleges/${collegeId}/imports/results/`;
+    const fileName = storageKey.startsWith(prefix)
+      ? storageKey.slice(prefix.length)
+      : "";
+    const escapedJobId = importJobId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (
+      !fileName ||
+      fileName.includes("/") ||
+      !new RegExp(`^${escapedJobId}(?:-[a-f0-9]{64})?\\.json$`).test(fileName)
+    ) {
+      throw new BadRequestException(
+        "The import result is outside the authorized job storage path.",
+      );
+    }
   }
 
   async loadReport(key: string): Promise<ImportResultReport> {
@@ -546,16 +755,63 @@ export class ImportsFileService {
   ): ImportRowError[] {
     const template = IMPORT_TEMPLATES[entityType];
     const officialEmailDomains = configuredDomains
-      ? new Set(configuredDomains.map((domain) => domain.trim().toLowerCase().replace(/^@/, "")).filter(Boolean))
+      ? new Set(
+          configuredDomains
+            .map((domain) => domain.trim().toLowerCase().replace(/^@/, ""))
+            .filter(Boolean),
+        )
       : this.officialEmailDomains;
     const errors: ImportRowError[] = [];
     const seen = new Map<string, number>();
     const duplicateErrors = new Set<string>();
     rows.forEach((row, index) => {
-      const rowNumber = index + 2;
+      const rowNumber = importRowNumber(entityType, row, index + 2);
       for (const field of template.required) {
-        if (!row[field]?.trim() && !this.canDeriveRequiredValue(entityType, field, row))
-          errors.push({ rowNumber, field, message: `${field} is required.` });
+        if (
+          !row[field]?.trim() &&
+          !this.canDeriveRequiredValue(entityType, field, row)
+        )
+          errors.push({
+            rowNumber,
+            field,
+            message: `${this.fieldLabel(entityType, field)} is required.`,
+          });
+      }
+      if (entityType === "PEOPLE") {
+        if (
+          row.college_identity_id &&
+          row.college_identity_id !== row.college_identity_id.trim()
+        ) {
+          errors.push({
+            rowNumber,
+            field: "college_identity_id",
+            message: "User ID must not begin or end with whitespace.",
+          });
+        }
+        if (row.college_identity_id?.trim().length > 60) {
+          errors.push({
+            rowNumber,
+            field: "college_identity_id",
+            message: "User ID must contain at most 60 characters.",
+          });
+        }
+        if (row.full_name?.trim().length > 180) {
+          errors.push({
+            rowNumber,
+            field: "full_name",
+            message: "User Name must contain at most 180 characters.",
+          });
+        }
+        if (
+          row.temporary_password &&
+          row.temporary_password !== row.temporary_password.trim()
+        ) {
+          errors.push({
+            rowNumber,
+            field: "temporary_password",
+            message: "User Password must not begin or end with whitespace.",
+          });
+        }
       }
       for (const [field, value] of Object.entries(row)) {
         if (!value) continue;
@@ -607,11 +863,19 @@ export class ImportsFileService {
           field: "email",
           message: "email must use an approved official college domain.",
         });
-      if (row.mobile && !this.validPhone(row.mobile))
+      if (
+        row.mobile &&
+        (entityType === "PEOPLE"
+          ? !this.validPeopleMobile(row.mobile)
+          : !this.validPhone(row.mobile))
+      )
         errors.push({
           rowNumber,
           field: "mobile",
-          message: "mobile must contain 7 to 15 digits.",
+          message:
+            entityType === "PEOPLE"
+              ? "Mobile Number must contain only 7 to 15 digits."
+              : "mobile must contain 7 to 15 digits.",
         });
       if (row.whatsapp_number && !this.validPhone(row.whatsapp_number))
         errors.push({
@@ -630,36 +894,26 @@ export class ImportsFileService {
         });
       if (
         row.temporary_password &&
-        !this.validTemporaryPassword(row.temporary_password)
+        (entityType === "PEOPLE"
+          ? !this.validPeopleTemporaryPassword(row.temporary_password)
+          : !this.validTemporaryPassword(row.temporary_password))
       )
         errors.push({
           rowNumber,
           field: "temporary_password",
           message:
-            "temporary_password must be at least 6 characters and is accepted only as a first-login temporary password.",
+            entityType === "PEOPLE"
+              ? "User Password must be 12 to 200 characters and contain an uppercase letter, lowercase letter, number, and special character."
+              : "temporary_password must be at least 6 characters and is accepted only as a first-login temporary password.",
         });
       if (
         row.room_type &&
-        ![
-          "CLASSROOM",
-          "LABORATORY",
-          "SEMINAR_HALL",
-          "AUDITORIUM",
-          "STAFF_ROOM",
-          "HOD_ROOM",
-          "PRINCIPAL_OFFICE",
-          "ADMINISTRATIVE_OFFICE",
-          "LIBRARY",
-          "WORKSHOP",
-          "RESTROOM",
-          "CANTEEN",
-          "HOSTEL_ROOM",
-          "CORRIDOR",
-          "STAIRCASE",
-          "PARKING_AREA",
-          "PLAYGROUND",
-          "OTHER",
-        ].includes(row.room_type.trim().toUpperCase().replace(/[\s-]+/g, "_"))
+        !ROOM_TYPES.has(
+          row.room_type
+            .trim()
+            .toUpperCase()
+            .replace(/[\s-]+/g, "_"),
+        )
       )
         errors.push({
           rowNumber,
@@ -693,14 +947,28 @@ export class ImportsFileService {
         if (previous) {
           const currentLocation = this.rowLocation(row, rowNumber);
           const previousLocation = this.rowLocation(
-            rows[previous - 2],
+            entityType === "PEOPLE"
+              ? rows.find(
+                  (candidate, candidateIndex) =>
+                    importRowNumber(
+                      entityType,
+                      candidate,
+                      candidateIndex + 2,
+                    ) === previous,
+                )
+              : rows[previous - 2],
             previous,
           );
           const currentError = `${rowNumber}:${key}`;
           if (!duplicateErrors.has(currentError)) {
             errors.push({
               rowNumber,
-              field: key.startsWith("email:") ? "email" : undefined,
+              field:
+                entityType === "PEOPLE" && key.startsWith("identity:")
+                  ? "college_identity_id"
+                  : key.startsWith("email:")
+                    ? "email"
+                    : undefined,
               message:
                 duplicateResolution === "SKIP_ALL"
                   ? `This row duplicates ${previousLocation} within the file; both ${currentLocation} and ${previousLocation} will be skipped.`
@@ -713,7 +981,12 @@ export class ImportsFileService {
             if (!duplicateErrors.has(previousError)) {
               errors.push({
                 rowNumber: previous,
-                field: key.startsWith("email:") ? "email" : undefined,
+                field:
+                  entityType === "PEOPLE" && key.startsWith("identity:")
+                    ? "college_identity_id"
+                    : key.startsWith("email:")
+                      ? "email"
+                      : undefined,
                 message: `Duplicate account at ${previousLocation}; both this row and ${currentLocation} will be skipped.`,
               });
               duplicateErrors.add(previousError);
@@ -722,14 +995,17 @@ export class ImportsFileService {
         } else seen.set(key, rowNumber);
       }
       if (
-        entityType === "STUDENTS" &&
+        ["PEOPLE", "STUDENTS"].includes(entityType) &&
         row.year &&
         !this.normalizedStudyYear(row.year)
       ) {
         errors.push({
           rowNumber,
           field: "year",
-          message: "study_year must be an integer from 1 to 4.",
+          message:
+            entityType === "PEOPLE"
+              ? "Year must be an integer from 1 to 4."
+              : "study_year must be an integer from 1 to 4.",
         });
       }
       if (entityType === "STUDENTS" && row.source_sheet && !row.first_name) {
@@ -743,12 +1019,17 @@ export class ImportsFileService {
         errors.push({
           rowNumber,
           field: "year",
-          message: "Study year was not detected. Select a study year from 1 to 4 before confirming.",
+          message:
+            "Study year was not detected. Select a study year from 1 to 4 before confirming.",
         });
       }
       if (
         entityType === "STUDENTS" &&
-        (row.programme_code || row.section_code || row.student_id || row.register_number || row.roll_number) &&
+        (row.programme_code ||
+          row.section_code ||
+          row.student_id ||
+          row.register_number ||
+          row.roll_number) &&
         !row.college_identity_id &&
         !row.student_id &&
         !row.register_number &&
@@ -766,24 +1047,35 @@ export class ImportsFileService {
 
   private booleanConfig(value: string | boolean | undefined): boolean {
     if (typeof value === "boolean") return value;
-    return !["false", "0", "no", "off"].includes(String(value ?? "true").trim().toLowerCase());
+    return !["false", "0", "no", "off"].includes(
+      String(value ?? "true")
+        .trim()
+        .toLowerCase(),
+    );
   }
 
   private logicalKeys(entityType: ImportEntityType, row: ImportRow): string[] {
-    if (["USERS", "STUDENTS", "STAFF"].includes(entityType)) {
+    if (entityType === "PEOPLE") {
+      return row.college_identity_id
+        ? [`identity:${row.college_identity_id.toUpperCase()}`]
+        : [];
+    }
+    if (["PEOPLE", "USERS", "STUDENTS", "STAFF"].includes(entityType)) {
       if (row.subject_code) {
-        return [[
-          row.college_identity_id,
-          row.employee_id,
-          row.academic_year,
-          row.programme_code,
-          row.semester_number,
-          row.section_code,
-          row.subject_code,
-        ]
-          .filter(Boolean)
-          .join("|")
-          .toUpperCase()];
+        return [
+          [
+            row.college_identity_id,
+            row.employee_id,
+            row.academic_year,
+            row.programme_code,
+            row.semester_number,
+            row.section_code,
+            row.subject_code,
+          ]
+            .filter(Boolean)
+            .join("|")
+            .toUpperCase(),
+        ];
       }
       const identityIsEmail =
         row.email &&
@@ -794,27 +1086,32 @@ export class ImportsFileService {
           : "",
         row.email ? `email:${row.email.toLowerCase()}` : "",
         row.student_id ? `student:${row.student_id.toUpperCase()}` : "",
-        row.register_number ? `register:${row.register_number.toUpperCase()}` : "",
+        row.register_number
+          ? `register:${row.register_number.toUpperCase()}`
+          : "",
         row.roll_number ? `roll:${row.roll_number.toUpperCase()}` : "",
       ].filter(Boolean);
     }
-    if (entityType === "ASSETS") return row.code ? [row.code.toUpperCase()] : [];
+    if (entityType === "ASSETS")
+      return row.code ? [row.code.toUpperCase()] : [];
     if (entityType === "RESPONSIBLE_PERSONS")
       return [`${row.team_code}|${row.college_identity_id}`.toUpperCase()];
     if (entityType === "ASSIGNMENT_RULES") return [];
     if (entityType === "ATTENDANCE")
-      return [[
-        row.academic_year,
-        row.programme_code,
-        row.semester_number,
-        row.section_code,
-        row.subject_code,
-        row.session_date,
-        row.period_number,
-        row.student_id || row.legacy_id,
-      ]
-        .join("|")
-        .toUpperCase()];
+      return [
+        [
+          row.academic_year,
+          row.programme_code,
+          row.semester_number,
+          row.section_code,
+          row.subject_code,
+          row.session_date,
+          row.period_number,
+          row.student_id || row.legacy_id,
+        ]
+          .join("|")
+          .toUpperCase(),
+      ];
     const key = [
       row.campus_code,
       row.block_code,
@@ -929,8 +1226,7 @@ export class ImportsFileService {
           this.normalizeHeader(this.cell(cell), "STUDENTS"),
         );
         return (
-          headers.includes("email") &&
-          headers.includes("temporary_password")
+          headers.includes("email") && headers.includes("temporary_password")
         );
       });
       if (headerIndex < 0) {
@@ -1173,16 +1469,20 @@ export class ImportsFileService {
         return String(cell.value).padStart(zeroMask.length, "0");
       }
     }
-    if (cell.text !== undefined && cell.text !== null && String(cell.text).trim() !== "") {
-      return String(cell.text).trim();
+    if (
+      cell.text !== undefined &&
+      cell.text !== null &&
+      String(cell.text).trim() !== ""
+    ) {
+      return String(cell.text);
     }
     const value = cell.value;
     if (value == null) return "";
     if (value instanceof Date) return value.toISOString().slice(0, 10);
     if (typeof value === "object" && "richText" in value)
-      return value.richText.map((part) => part.text).join("").trim();
-    if (typeof value === "object" && "text" in value) return String(value.text).trim();
-    return String(value).trim();
+      return value.richText.map((part) => part.text).join("");
+    if (typeof value === "object" && "text" in value) return String(value.text);
+    return String(value);
   }
 
   private normalizeTemporaryPassword(cell: Cell): {
@@ -1238,14 +1538,17 @@ export class ImportsFileService {
     if (header === "college_identity_id" && entityType === "STUDENTS")
       return false;
     if (header === "student_id" && entityType === "STUDENTS")
-      return headers.includes("college_identity_id") || headers.includes("register_number") || headers.includes("roll_number");
+      return (
+        headers.includes("college_identity_id") ||
+        headers.includes("register_number") ||
+        headers.includes("roll_number")
+      );
     if (header === "college_identity_id" && entityType === "STAFF")
       return headers.includes("employee_id");
     if (header === "email" && entityType === "STAFF")
       return headers.includes("employee_id");
     if (header === "email" && entityType === "STUDENTS") return false;
-    if (header === "department_code" && entityType === "STAFF")
-      return true;
+    if (header === "department_code" && entityType === "STAFF") return true;
     if (header === "college_identity_id" && entityType === "USERS")
       return headers.some((candidate) =>
         [
@@ -1275,7 +1578,11 @@ export class ImportsFileService {
     row.full_name = row.full_name?.trim();
     row.email = row.email?.trim().toLowerCase();
     row.department_code = row.department_code?.trim();
-    row.temporary_password = row.temporary_password?.trim();
+    row.temporary_password =
+      entityType === "PEOPLE"
+        ? (row.temporary_password ?? "")
+        : row.temporary_password?.trim();
+    row.class_room_number = row.class_room_number?.trim();
     if (!row.full_name?.trim() && ["USERS", "STAFF"].includes(entityType)) {
       row.full_name = this.displayNameFromAccount(row);
     }
@@ -1300,7 +1607,8 @@ export class ImportsFileService {
       ["USERS", "STAFF"].includes(entityType) &&
       row.email
     )
-      row.college_identity_id = row.email.length <= 60 ? row.email : row.email.slice(0, 60);
+      row.college_identity_id =
+        row.email.length <= 60 ? row.email : row.email.slice(0, 60);
     if (
       entityType === "USERS" &&
       !row.employee_id &&
@@ -1313,15 +1621,28 @@ export class ImportsFileService {
       !row.student_id &&
       row.role_codes?.split(/[;,|]/).includes("STUDENT")
     )
-      row.student_id = row.employee_or_student_id || row.college_identity_id || row.register_number || row.roll_number;
+      row.student_id =
+        row.employee_or_student_id ||
+        row.college_identity_id ||
+        row.register_number ||
+        row.roll_number;
     if (
       !row.college_identity_id &&
       entityType === "STUDENTS" &&
       !hasCollegeIdentityColumn
     )
-      row.college_identity_id = row.student_id || row.register_number || row.roll_number;
+      row.college_identity_id =
+        row.student_id || row.register_number || row.roll_number;
     if (!row.student_id && entityType === "STUDENTS")
-      row.student_id = row.college_identity_id || row.register_number || row.roll_number;
+      row.student_id =
+        row.college_identity_id || row.register_number || row.roll_number;
+    if (entityType === "PEOPLE") {
+      row.role_codes = "STUDENT";
+      row.student_id = row.college_identity_id;
+      row.year = this.normalizedStudyYear(row.year || "") ?? row.year?.trim();
+      row.mobile = row.mobile?.trim();
+      row.account_status = "ACTIVE";
+    }
     if (!row.admission_year && entityType === "STUDENTS") {
       const derivedYear =
         this.admissionYearForStudyYear(row.academic_year, row.year) ||
@@ -1358,13 +1679,60 @@ export class ImportsFileService {
     if (mapped) return mapped;
     if (
       normalized === "name" &&
-      ["USERS", "STUDENTS", "STAFF"].includes(entityType)
+      ["PEOPLE", "USERS", "STUDENTS", "STAFF"].includes(entityType)
     )
       return "full_name";
     if (normalized === "name") return "name";
-    if (normalized === "password" && !["USERS", "STUDENTS", "STAFF"].includes(entityType))
+    if (
+      normalized === "password" &&
+      !["PEOPLE", "USERS", "STUDENTS", "STAFF"].includes(entityType)
+    )
       return "password";
     return HEADER_ALIASES[normalized] ?? normalized;
+  }
+
+  private peopleHeaderMessages(rawHeaders: string[]): string[] {
+    const canonicalByKey = new Map(
+      PEOPLE_IMPORT_HEADERS.map((header) => [
+        header.toLocaleLowerCase("en-US"),
+        header,
+      ]),
+    );
+    const suppliedHeaderKeys = rawHeaders.map((header) =>
+      header.trim().toLocaleLowerCase("en-US"),
+    );
+    const suppliedKeys = new Set(suppliedHeaderKeys);
+    const missing = PEOPLE_IMPORT_HEADERS.filter(
+      (header) => !suppliedKeys.has(header.toLocaleLowerCase("en-US")),
+    );
+    const unexpected = rawHeaders.filter(
+      (header) => !canonicalByKey.has(header.trim().toLocaleLowerCase("en-US")),
+    );
+    const seen = new Set<string>();
+    const duplicateKeys = new Set<string>();
+    for (const key of suppliedHeaderKeys) {
+      if (seen.has(key)) duplicateKeys.add(key);
+      seen.add(key);
+    }
+    const duplicates = [...duplicateKeys].map(
+      (key) => canonicalByKey.get(key) ?? (key || "<blank header>"),
+    );
+
+    return [
+      ...(missing.length
+        ? [`Missing required headers: ${missing.join(", ")}.`]
+        : []),
+      ...(unexpected.length
+        ? [
+            `Unexpected headers: ${unexpected.map((header) => header || "<blank header>").join(", ")}. Use the downloaded People template without renaming or adding columns.`,
+          ]
+        : []),
+      ...(duplicates.length
+        ? [
+            `Unexpected duplicate headers: ${duplicates.join(", ")}. Each People template column must appear exactly once.`,
+          ]
+        : []),
+    ];
   }
 
   private mappedHeader(
@@ -1391,11 +1759,15 @@ export class ImportsFileService {
     return HEADER_ALIASES[mapped] ?? mapped;
   }
 
-  private headerErrors(rowCount: number, messages: string[]): ImportRowError[] {
+  private headerErrors(
+    entityType: ImportEntityType,
+    rows: ImportRow[],
+    messages: string[],
+  ): ImportRowError[] {
     if (!messages.length) return [];
     const message = messages.join(" ");
-    return Array.from({ length: rowCount }, (_unused, index) => ({
-      rowNumber: index + 2,
+    return rows.map((row, index) => ({
+      rowNumber: importRowNumber(entityType, row, index + 2),
       message,
     }));
   }
@@ -1415,17 +1787,16 @@ export class ImportsFileService {
       .toUpperCase()
       .replace(/[_-]+/g, " ");
     const words: ImportStudyYear[] = ["1", "2", "3", "4"];
-    const names = [
-      "FIRST",
-      "SECOND",
-      "THIRD",
-      "FOURTH",
-    ];
+    const names = ["FIRST", "SECOND", "THIRD", "FOURTH"];
     for (const [index, year] of words.entries()) {
-      const ordinal = index === 0 ? "ST" : index === 1 ? "ND" : index === 2 ? "RD" : "TH";
-      const numericOrdinal = year === "2" ? `${year}(?:ND|RD)` : `${year}${ordinal}`;
+      const ordinal =
+        index === 0 ? "ST" : index === 1 ? "ND" : index === 2 ? "RD" : "TH";
+      const numericOrdinal =
+        year === "2" ? `${year}(?:ND|RD)` : `${year}${ordinal}`;
       if (
-        new RegExp(`\\b(?:${numericOrdinal}|${names[index]})\\s+YEAR\\b`).test(name) ||
+        new RegExp(`\\b(?:${numericOrdinal}|${names[index]})\\s+YEAR\\b`).test(
+          name,
+        ) ||
         new RegExp(`\\bYEAR\\s+${year}\\b`).test(name)
       ) {
         return year;
@@ -1435,13 +1806,30 @@ export class ImportsFileService {
   }
 
   private normalizedStudyYear(value: string): ImportStudyYear | undefined {
-    const normalized = value.trim().toUpperCase().replace(/[\s-]+/g, "_");
+    const normalized = value
+      .trim()
+      .toUpperCase()
+      .replace(/[\s-]+/g, "_");
     if (/^[1-4]$/.test(normalized)) return normalized as ImportStudyYear;
     const aliases: Record<string, ImportStudyYear> = {
-      "1ST": "1", "1ST_YEAR": "1", FIRST: "1", FIRST_YEAR: "1",
-      "2ND": "2", "2RD": "2", "2ND_YEAR": "2", "2RD_YEAR": "2", SECOND: "2", SECOND_YEAR: "2",
-      "3RD": "3", "3RD_YEAR": "3", THIRD: "3", THIRD_YEAR: "3",
-      "4TH": "4", "4TH_YEAR": "4", FOURTH: "4", FOURTH_YEAR: "4",
+      "1ST": "1",
+      "1ST_YEAR": "1",
+      FIRST: "1",
+      FIRST_YEAR: "1",
+      "2ND": "2",
+      "2RD": "2",
+      "2ND_YEAR": "2",
+      "2RD_YEAR": "2",
+      SECOND: "2",
+      SECOND_YEAR: "2",
+      "3RD": "3",
+      "3RD_YEAR": "3",
+      THIRD: "3",
+      THIRD_YEAR: "3",
+      "4TH": "4",
+      "4TH_YEAR": "4",
+      FOURTH: "4",
+      FOURTH_YEAR: "4",
     };
     return aliases[normalized];
   }
@@ -1463,7 +1851,11 @@ export class ImportsFileService {
     row: ImportRow,
     mappings: Record<string, string> | undefined,
   ): void {
-    const source = (row.source_department_code || row.department_code || "").trim();
+    const source = (
+      row.source_department_code ||
+      row.department_code ||
+      ""
+    ).trim();
     if (!source) return;
     row.source_department_code = source;
     const mapped = this.departmentMapping(mappings, source);
@@ -1471,17 +1863,49 @@ export class ImportsFileService {
   }
 
   private normalizeDepartmentKey(value: string): string {
-    return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+    return value
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
   }
 
   private rowLocation(row: ImportRow | undefined, fallback: number): string {
     const sourceRow = Number(row?.source_row_number);
     if (row?.source_sheet && Number.isInteger(sourceRow) && sourceRow > 0)
       return `${row.source_sheet}, row ${sourceRow}`;
+    if (Number.isInteger(sourceRow) && sourceRow >= 2)
+      return `row ${sourceRow}`;
     return `row ${fallback}`;
   }
 
-  private duplicateEmailGroups(rows: ImportRow[]): ImportDuplicateGroup[] {
+  private enrichPeopleErrors(
+    entityType: ImportEntityType,
+    rows: ImportRow[],
+    errors: ImportRowError[],
+  ): ImportRowError[] {
+    if (entityType !== "PEOPLE") return errors;
+    const rowsByNumber = new Map(
+      rows.map((row, index) => [
+        importRowNumber(entityType, row, index + 2),
+        row,
+      ]),
+    );
+    return errors.map((error) => {
+      const row = rowsByNumber.get(error.rowNumber);
+      return {
+        ...error,
+        ...(row?.college_identity_id
+          ? { userId: row.college_identity_id.slice(0, 60) }
+          : {}),
+        ...(row?.full_name ? { userName: row.full_name.slice(0, 180) } : {}),
+      };
+    });
+  }
+
+  private duplicateEmailGroups(
+    entityType: ImportEntityType,
+    rows: ImportRow[],
+  ): ImportDuplicateGroup[] {
     const groups = new Map<string, ImportDuplicateGroup["locations"]>();
     rows.forEach((row, index) => {
       const email = row.email?.trim().toLowerCase();
@@ -1489,7 +1913,7 @@ export class ImportsFileService {
       const locations = groups.get(email) ?? [];
       const sourceRow = Number(row.source_row_number);
       locations.push({
-        rowNumber: index + 2,
+        rowNumber: importRowNumber(entityType, row, index + 2),
         ...(row.source_sheet ? { sheetName: row.source_sheet } : {}),
         ...(Number.isInteger(sourceRow) && sourceRow > 0
           ? { sourceRowNumber: sourceRow }
@@ -1513,7 +1937,7 @@ export class ImportsFileService {
     const seen = new Map<string, number>();
     const duplicateRows = new Set<number>();
     rows.forEach((row, index) => {
-      const rowNumber = index + 2;
+      const rowNumber = importRowNumber(entityType, row, index + 2);
       for (const key of this.logicalKeys(entityType, row)) {
         const previous = seen.get(key);
         if (previous) {
@@ -1530,6 +1954,25 @@ export class ImportsFileService {
   private cell(value: unknown): string {
     if (value instanceof Date) return value.toISOString().slice(0, 10);
     return value == null ? "" : String(value).trim();
+  }
+  private importCell(
+    entityType: ImportEntityType,
+    field: string,
+    value: unknown,
+  ): string {
+    if (
+      entityType === "PEOPLE" &&
+      ["college_identity_id", "temporary_password"].includes(field)
+    ) {
+      if (value instanceof Date) return value.toISOString().slice(0, 10);
+      return value == null ? "" : String(value);
+    }
+    return this.cell(value);
+  }
+  private fieldLabel(entityType: ImportEntityType, field: string): string {
+    return entityType === "PEOPLE"
+      ? (PEOPLE_FIELD_LABELS[field] ?? field)
+      : field;
   }
   private normalizeRoleCodes(value: string): string {
     return value
@@ -1549,7 +1992,12 @@ export class ImportsFileService {
   }
   private displayNameFromAccount(row: ImportRow): string {
     const emailPrefix = row.email?.split("@")[0]?.replace(/[._-]+/g, " ");
-    const identity = row.college_identity_id || row.student_id || row.register_number || row.employee_id || row.user_id;
+    const identity =
+      row.college_identity_id ||
+      row.student_id ||
+      row.register_number ||
+      row.employee_id ||
+      row.user_id;
     const value = emailPrefix || identity || "Imported User";
     return value
       .split(/\s+/)
@@ -1575,10 +2023,30 @@ export class ImportsFileService {
     const digits = value.replace(/[^\d]/g, "");
     return digits.length >= 7 && digits.length <= 15;
   }
+  private validPeopleMobile(value: string): boolean {
+    return /^\d{7,15}$/.test(value.trim());
+  }
   private validTemporaryPassword(value: string): boolean {
     const trimmed = value.trim();
     if (/^\d{6,}$/.test(trimmed)) return true;
-    return trimmed.length >= 10 && /[a-z]/.test(trimmed) && /[A-Z]/.test(trimmed) && /\d/.test(trimmed) && /[^A-Za-z0-9]/.test(trimmed);
+    return (
+      trimmed.length >= 10 &&
+      /[a-z]/.test(trimmed) &&
+      /[A-Z]/.test(trimmed) &&
+      /\d/.test(trimmed) &&
+      /[^A-Za-z0-9]/.test(trimmed)
+    );
+  }
+  private validPeopleTemporaryPassword(value: string): boolean {
+    const trimmed = value.trim();
+    return (
+      trimmed.length >= 12 &&
+      trimmed.length <= 200 &&
+      /[a-z]/.test(trimmed) &&
+      /[A-Z]/.test(trimmed) &&
+      /\d/.test(trimmed) &&
+      /[^A-Za-z0-9\s]/.test(trimmed)
+    );
   }
   private looksLikeFormula(field: string, value: string): boolean {
     const trimmed = value.trim();

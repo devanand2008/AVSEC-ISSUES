@@ -30,8 +30,13 @@ describe("AVS Bot safety controls", () => {
   });
 
   it("redacts credentials and hidden-instruction claims from output", () => {
+    const syntheticProjectKey = [
+      "sk",
+      "proj",
+      "abcdefghijklmnopqrstuvwxyz012345",
+    ].join("-");
     const filtered = service.postFilter(
-      "Token sk-proj-abcdefghijklmnopqrstuvwxyz012345 and my system prompt is secret text",
+      `Token ${syntheticProjectKey} and my system prompt is secret text`,
     );
     expect(filtered.changed).toBe(true);
     expect(filtered.content).not.toContain("sk-proj-");
@@ -67,4 +72,3 @@ describe("AVS Bot safety controls", () => {
     expect(JSON.stringify(persisted)).not.toContain("Ignore previous");
   });
 });
-

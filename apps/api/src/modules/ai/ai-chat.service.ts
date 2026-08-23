@@ -24,7 +24,7 @@ import type {
   UpdateAiUserSettingDto,
 } from "./dto/ai.dto";
 import type { AiSafeSource, AiSseEvent } from "./ai.types";
-import { OpenAiService } from "./openai.service";
+import { AiProviderService } from "./ai-provider.service";
 
 @Injectable()
 export class AiChatService {
@@ -32,7 +32,7 @@ export class AiChatService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly openai: OpenAiService,
+    private readonly provider: AiProviderService,
     private readonly context: AiContextService,
     private readonly knowledge: AiKnowledgeService,
     private readonly safety: AiSafetyService,
@@ -57,7 +57,7 @@ export class AiChatService {
       ok: true,
       service: "AVS Bot",
       database: "connected",
-      configuration: this.openai.configuration(),
+      configuration: this.provider.configuration(),
       collegeSetting: settings,
       pricingConfigured: this.usage.pricingConfigured(),
       conversationCount,
@@ -225,9 +225,13 @@ export class AiChatService {
     }
     if (
       user.roles.some((role) =>
-        ["HOD", "PRINCIPAL", "VICE_PRINCIPAL", "SUPER_ADMIN", "MAIN_ADMIN"].includes(
-          role,
-        ),
+        [
+          "HOD",
+          "PRINCIPAL",
+          "VICE_PRINCIPAL",
+          "SUPER_ADMIN",
+          "MAIN_ADMIN",
+        ].includes(role),
       )
     ) {
       return [
@@ -302,7 +306,7 @@ export class AiChatService {
     input: StreamAiChatDto,
     options: { requestId?: string; signal?: AbortSignal } = {},
   ): AsyncGenerator<AiSseEvent> {
-    this.openai.assertAvailable();
+    this.provider.assertAvailable();
     const collegeSetting = await this.prisma.aiBotSetting.findUnique({
       where: { collegeId: user.collegeId },
       select: {
@@ -315,6 +319,20 @@ export class AiChatService {
     if (collegeSetting && !collegeSetting.enabled) {
       throw new ServiceUnavailableException(
         "AVS Bot is disabled for this college.",
+      );
+    }
+    const providerConfiguration = this.provider.configuration();
+    const knowledgeProvider =
+      collegeSetting?.knowledgeProvider ??
+      providerConfiguration.knowledgeProvider;
+    if (
+      knowledgeProvider === "openai_file_search" &&
+      (providerConfiguration.provider !== "openai" ||
+        providerConfiguration.knowledgeProvider !== "openai_file_search" ||
+        !providerConfiguration.vectorStoreConfigured)
+    ) {
+      throw new ServiceUnavailableException(
+        "OpenAI file search is not available for the configured AVS Bot provider.",
       );
     }
     const userSetting = await this.settings(user);
@@ -494,10 +512,10 @@ export class AiChatService {
       return;
     }
 
-    const model = this.openai.model(collegeSetting?.model);
-    const abortController = new AbortController();
-    const disconnect = () => abortController.abort();
-    options.signal?.addEventListener("abort", disconnect, { once: true });
+    let model = this.provider.model(collegeSetting?.model);
+    const { abortController, disconnect } = this.linkedAbortController(
+      options.signal,
+    );
     this.active.set(created.assistantMessage.id, abortController);
     let usageId: string | null = null;
     let accumulated = "";
@@ -540,7 +558,7 @@ export class AiChatService {
         language: userSetting.language,
         responseLength: userSetting.responseLength,
       });
-      for await (const event of this.openai.stream(
+      for await (const event of this.provider.stream(
         {
           instructions,
           prompt,
@@ -549,8 +567,7 @@ export class AiChatService {
             userSetting.responseLength,
             collegeSetting?.maxOutputTokens,
           ),
-          useFileSearch:
-            collegeSetting?.knowledgeProvider === "openai_file_search",
+          useFileSearch: knowledgeProvider === "openai_file_search",
           fileSearchCollegeId: user.collegeId,
         },
         abortController.signal,
@@ -568,6 +585,7 @@ export class AiChatService {
           providerResponseId = event.responseId;
           inputTokens = event.inputTokens;
           outputTokens = event.outputTokens;
+          model = event.model ?? model;
         }
       }
       if (!accumulated.trim()) {
@@ -612,6 +630,7 @@ export class AiChatService {
           inputTokens,
           outputTokens,
           latencyMs: Date.now() - startedAt,
+          model,
         });
       }
       await this.prisma.aiBotSetting.updateMany({
@@ -632,7 +651,9 @@ export class AiChatService {
           event: "sources",
           data: {
             messageId: created.assistantMessage.id,
-            sources: sourceRows.map(({ knowledgeDocumentId: _id, ...safe }) => safe),
+            sources: sourceRows.map(
+              ({ knowledgeDocumentId: _id, ...safe }) => safe,
+            ),
           },
         };
       }
@@ -647,7 +668,7 @@ export class AiChatService {
         },
       };
     } catch (error) {
-      const category = this.openai.errorCategory(error);
+      const category = this.provider.errorCategory(error);
       const cancelled = category === "cancelled";
       const safeMessage = cancelled
         ? "Response cancelled."
@@ -805,8 +826,17 @@ export class AiChatService {
   ): number {
     const maximum = configured ?? 1_200;
     if (preference === "SHORT") return Math.min(maximum, 600);
-    if (preference === "DETAILED") return Math.min(Math.max(maximum, 1_800), 3_000);
+    if (preference === "DETAILED")
+      return Math.min(Math.max(maximum, 1_800), 3_000);
     return maximum;
+  }
+
+  private linkedAbortController(signal?: AbortSignal) {
+    const abortController = new AbortController();
+    const disconnect = () => abortController.abort();
+    if (signal?.aborted) abortController.abort();
+    else signal?.addEventListener("abort", disconnect, { once: true });
+    return { abortController, disconnect };
   }
 
   private title(message: string): string {
@@ -819,8 +849,7 @@ export class AiChatService {
       timeout: "AVS Bot timed out. Please try again.",
       connection:
         "AVS Bot cannot reach the AI provider right now. Please try again later.",
-      rate_limit:
-        "AVS Bot is temporarily busy. Wait a moment and try again.",
+      rate_limit: "AVS Bot is temporarily busy. Wait a moment and try again.",
       authentication:
         "AVS Bot server credentials need administrator attention.",
       permission:

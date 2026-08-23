@@ -1,7 +1,8 @@
 "use client";
 
 import { AlertCircle, Database, FileText, MessageSquare, Users, BookOpen, Bell, Shield, X } from "lucide-react";
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
+import { useDialogFocus } from "./use-dialog-focus";
 
 type DependencyAction = "cascade" | "anonymise" | "preserve" | "delete";
 
@@ -37,15 +38,17 @@ interface DependencyDialogProps {
 }
 
 export function DependencyDialog({ open, onClose, onProceed, report, loading, error }: DependencyDialogProps) {
+  const titleId = useId();
+  const dialogRef = useDialogFocus<HTMLDivElement>(open, onClose);
   if (!open) return null;
 
   return (
     <div className="avs-dialog-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="avs-dialog avs-dialog-lg" role="dialog" aria-modal="true" aria-labelledby="dep-title">
+      <div ref={dialogRef} className="avs-dialog avs-dialog-lg" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <div className="avs-dialog-header">
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
             <Database size={20} style={{ color: "var(--avs-warning)" }} />
-            <h2 id="dep-title">Dependency Analysis</h2>
+            <h2 id={titleId}>Dependency Analysis</h2>
           </div>
           <button className="avs-btn avs-btn-ghost avs-btn-icon" onClick={onClose} aria-label="Close" type="button">
             <X size={16} />

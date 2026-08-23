@@ -205,7 +205,7 @@ describe("reported production fixes", () => {
         block: { findFirst: jest.fn().mockResolvedValue({ id: "block-1" }) },
         floor: { findMany },
       };
-      const service = new LocationsService(prisma as never, {} as never, {} as never);
+      const service = new LocationsService(prisma as never, {} as never, {} as never, {} as never);
       await expect(service.floors(principal(), "block-1")).resolves.toEqual([{ id: "floor-1", name: "First Floor" }]);
       expect(prisma.block.findFirst).toHaveBeenCalledWith(expect.objectContaining({
         where: expect.objectContaining({ id: "block-1", isActive: true, archivedAt: null, campus: expect.objectContaining({ collegeId: principal().collegeId }) }),
@@ -216,7 +216,7 @@ describe("reported production fixes", () => {
     it("loads only active areas from the caller's college hierarchy", async () => {
       const findMany = jest.fn().mockResolvedValue([{ id: "area-1", name: "Corridor" }]);
       const floorFindFirst = jest.fn().mockResolvedValue({ id: "floor-1" });
-      const service = new LocationsService({ floor: { findFirst: floorFindFirst }, area: { findMany } } as never, {} as never, {} as never);
+      const service = new LocationsService({ floor: { findFirst: floorFindFirst }, area: { findMany } } as never, {} as never, {} as never, {} as never);
       await expect(service.areas(principal(), "floor-1")).resolves.toEqual([{ id: "area-1", name: "Corridor" }]);
       expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
         where: expect.objectContaining({
@@ -232,7 +232,7 @@ describe("reported production fixes", () => {
     });
 
     it("requires exactly one location when querying registered assets", async () => {
-      const service = new LocationsService({ asset: { findMany: jest.fn() } } as never, {} as never, {} as never);
+      const service = new LocationsService({ asset: { findMany: jest.fn() } } as never, {} as never, {} as never, {} as never);
       await expect(service.assets(principal(), {})).rejects.toBeInstanceOf(BadRequestException);
       await expect(service.assets(principal(), { roomId: "room-1", areaId: "area-1" })).rejects.toBeInstanceOf(BadRequestException);
     });

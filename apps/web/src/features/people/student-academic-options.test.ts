@@ -70,6 +70,7 @@ const options: StudentAcademicOptions = {
       capacity: 70,
       currentStudentCount: 69,
       availableSeats: 1,
+      assignedRoom: { code: "CSE-201", name: "Second Year CSE" },
     },
     {
       id: "cse-b",
@@ -171,6 +172,9 @@ describe("student academic option helpers", () => {
     });
     expect(isSectionFull(fullSection)).toBe(true);
     expect(sectionOptionLabel(fullSection)).toMatch(/70 \/ 70 - Full$/);
+    expect(sectionOptionLabel(options.sections[0]!)).toContain(
+      "Classroom CSE-201 - Second Year CSE",
+    );
     expect(sectionCapacity(options.sections[2]!)).toEqual({
       capacity: 70,
       currentStudentCount: 0,

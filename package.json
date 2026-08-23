@@ -25,6 +25,7 @@
       "retry-request": "8.0.4",
       "teeny-request": "10.1.4"
     },
+    "deepmerge-ts": "8.0.1",
     "archiver-utils": {
       "glob": "13.0.6"
     },

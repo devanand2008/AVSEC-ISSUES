@@ -2,6 +2,7 @@ import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../src/database/prisma.service";
 import { DeliveryService } from "../src/modules/delivery/delivery.service";
 import { DeviceRegistrationService } from "../src/modules/notifications/device-registration.service";
+import { StorageService } from "../src/modules/storage/storage.service";
 
 const mockQueueAdd = jest.fn();
 const mockSendMail = jest.fn();
@@ -37,10 +38,19 @@ function serviceWith(options: { settings?: Record<string, unknown>; config?: Rec
     create: jest.fn().mockResolvedValue({ id: "tracking-new" }),
     update: jest.fn().mockResolvedValue({ id: options.existingTrackingId ?? "tracking-new" }),
   };
+  const outboxEvent = {
+    findMany: jest.fn().mockResolvedValue([]),
+    update: jest.fn().mockResolvedValue({}),
+  };
   const prisma = {
     feedbackSubmission: { findUnique: jest.fn().mockResolvedValue({ collegeId: "college-1" }) },
     appSetting: { findUnique: jest.fn().mockResolvedValue({ value: options.settings ?? {} }) },
     feedbackNotification,
+    notificationRecipient: { findMany: jest.fn().mockResolvedValue([]) },
+    outboxEvent,
+  };
+  const storage = {
+    deleteManagedImageObjectsIfUnreferenced: jest.fn(),
   };
   const values: Record<string, unknown> = {
     REDIS_URL: "redis://localhost:6379",
@@ -62,8 +72,9 @@ function serviceWith(options: { settings?: Record<string, unknown>; config?: Rec
     prisma as unknown as PrismaService,
     config as unknown as ConfigService,
     {} as DeviceRegistrationService,
+    storage as unknown as StorageService,
   );
-  return { delivery, internals: delivery as unknown as DeliveryInternals, prisma, feedbackNotification };
+  return { delivery, internals: delivery as unknown as DeliveryInternals, prisma, feedbackNotification, outboxEvent, storage };
 }
 
 describe("feedback delivery channel policy", () => {
@@ -129,6 +140,63 @@ describe("feedback delivery channel policy", () => {
     expect(updated.feedbackNotification.update).toHaveBeenCalledWith({
       where: { id: "tracking-1" },
       data: expect.objectContaining({ status: "FAILED", errorMessage: "SMTP unavailable" }),
+    });
+  });
+});
+
+describe("managed image cleanup outbox", () => {
+  it("keeps a failed deletion pending and completes it on a later retry", async () => {
+    const entityId = "00000000-0000-4000-8000-000000000010";
+    const collegeId = "00000000-0000-4000-8000-000000000003";
+    const storageKey = `colleges/${collegeId}/campus-images/campuses/${entityId}/00000000-0000-4000-8000-000000000020.jpg`;
+    const event = {
+      id: "00000000-0000-4000-8000-000000000030",
+      aggregateId: entityId,
+      eventType: "storage.managed_image.delete",
+      payload: {
+        collegeId,
+        folder: "campuses",
+        entityId,
+        storageKey,
+        reason: "REPLACED",
+      },
+    };
+    const { delivery, outboxEvent, storage } = serviceWith();
+    outboxEvent.findMany.mockResolvedValue([event]);
+    storage.deleteManagedImageObjectsIfUnreferenced
+      .mockResolvedValueOnce({
+        deleted: 1,
+        failed: 1,
+        skippedReferenced: false,
+      })
+      .mockResolvedValueOnce({
+        deleted: 2,
+        failed: 0,
+        skippedReferenced: false,
+      });
+
+    await delivery.dispatchOutbox();
+
+    expect(outboxEvent.update).toHaveBeenLastCalledWith({
+      where: { id: event.id },
+      data: expect.objectContaining({
+        attemptCount: { increment: 1 },
+        lastError: "Managed image object cleanup must be retried.",
+        availableAt: expect.any(Date),
+      }),
+    });
+    expect(outboxEvent.update.mock.calls[0]?.[0].data.processedAt).toBeUndefined();
+
+    await delivery.dispatchOutbox();
+
+    expect(storage.deleteManagedImageObjectsIfUnreferenced).toHaveBeenCalledTimes(2);
+    expect(outboxEvent.update).toHaveBeenLastCalledWith({
+      where: { id: event.id },
+      data: {
+        processedAt: expect.any(Date),
+        attemptCount: { increment: 1 },
+        lastError: null,
+      },
     });
   });
 });

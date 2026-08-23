@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle,
@@ -10,6 +10,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { useDialogFocus } from "./use-dialog-focus";
 
 type Step = "review" | "backup" | "reason" | "confirm";
 
@@ -27,6 +28,7 @@ interface PermanentDeleteDialogProps {
   backupStatus?: { available: boolean; reference?: string; createdAt?: string };
   dependencyCount: number;
   loading?: boolean;
+  error?: string;
 }
 
 export function PermanentDeleteDialog({
@@ -39,17 +41,12 @@ export function PermanentDeleteDialog({
   backupStatus,
   dependencyCount,
   loading = false,
+  error,
 }: PermanentDeleteDialogProps) {
   const [step, setStep] = useState<Step>("review");
   const [reason, setReason] = useState("");
   const [confirmPhrase, setConfirmPhrase] = useState("");
-
-  if (!open) return null;
-
-  const expectedPhrase = `DELETE STUDENT ${collegeIdentityId}`;
-  const isConfirmValid = confirmPhrase === expectedPhrase;
-  const isArchived = accountStatus === "ARCHIVED";
-  const hasBackup = backupStatus?.available ?? false;
+  const titleId = useId();
 
   const handleClose = () => {
     setStep("review");
@@ -57,6 +54,14 @@ export function PermanentDeleteDialog({
     setConfirmPhrase("");
     onClose();
   };
+  const dialogRef = useDialogFocus<HTMLDivElement>(open, handleClose, loading);
+
+  if (!open) return null;
+
+  const expectedPhrase = `DELETE STUDENT ${collegeIdentityId}`;
+  const isConfirmValid = confirmPhrase === expectedPhrase;
+  const isArchived = accountStatus === "ARCHIVED";
+  const hasBackup = backupStatus?.available ?? false;
 
   const steps: { key: Step; label: string }[] = [
     { key: "review", label: "Review" },
@@ -75,10 +80,12 @@ export function PermanentDeleteDialog({
       }}
     >
       <div
+        ref={dialogRef}
         className="avs-dialog avs-dialog-lg"
         role="alertdialog"
         aria-modal="true"
-        aria-labelledby="pd-title"
+        aria-labelledby={titleId}
+        tabIndex={-1}
       >
         <div
           className="avs-dialog-header"
@@ -106,7 +113,7 @@ export function PermanentDeleteDialog({
             </div>
             <div>
               <h2
-                id="pd-title"
+                id={titleId}
                 style={{ fontSize: "var(--text-lg)", margin: 0 }}
               >
                 Permanently Delete Student
@@ -157,6 +164,11 @@ export function PermanentDeleteDialog({
         </div>
 
         <div className="avs-dialog-body">
+          {error && (
+            <div className="error-box" role="alert" style={{ marginBottom: "var(--space-4)" }}>
+              {error}
+            </div>
+          )}
           {/* ── Step 1: Review ── */}
           {step === "review" && (
             <div

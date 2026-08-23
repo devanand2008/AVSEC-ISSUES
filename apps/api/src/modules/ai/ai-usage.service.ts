@@ -1,8 +1,4 @@
-import {
-  HttpException,
-  HttpStatus,
-  Injectable,
-} from "@nestjs/common";
+import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { PrismaService } from "../../database/prisma.service";
@@ -102,6 +98,7 @@ export class AiUsageService {
       outputTokens: number;
       latencyMs: number;
       failed?: boolean;
+      model?: string;
     },
   ): Promise<void> {
     await this.prisma.aiUsageRecord.update({
@@ -112,17 +109,38 @@ export class AiUsageService {
         estimatedCost: this.estimateCost(
           input.inputTokens,
           input.outputTokens,
+          input.model,
         ),
         latencyMs: Math.max(0, input.latencyMs),
         failures: input.failed ? 1 : 0,
+        ...(input.model ? { model: input.model } : {}),
       },
     });
   }
 
   pricingConfigured(): boolean {
-    return Boolean(
-      this.config.get<number>("OPENAI_INPUT_COST_PER_MILLION_USD") &&
-        this.config.get<number>("OPENAI_OUTPUT_COST_PER_MILLION_USD"),
+    const primary = this.config.get<"gemini" | "openai">(
+      "AVS_BOT_PRIMARY_PROVIDER",
+      "openai",
+    );
+    const fallback = this.config.get<"gemini" | "openai" | "none">(
+      "AVS_BOT_FALLBACK_PROVIDER",
+      "none",
+    );
+    return [primary, ...(fallback === "none" ? [] : [fallback])].every(
+      (provider) =>
+        Boolean(
+          this.config.get<number>(
+            provider === "gemini"
+              ? "GEMINI_INPUT_COST_PER_MILLION_USD"
+              : "OPENAI_INPUT_COST_PER_MILLION_USD",
+          ) &&
+            this.config.get<number>(
+              provider === "gemini"
+                ? "GEMINI_OUTPUT_COST_PER_MILLION_USD"
+                : "OPENAI_OUTPUT_COST_PER_MILLION_USD",
+            ),
+        ),
     );
   }
 
@@ -146,9 +164,7 @@ export class AiUsageService {
       where: {
         collegeId,
         usageDate: { gte: from, lte: to },
-        ...(query.departmentId
-          ? { departmentId: query.departmentId }
-          : {}),
+        ...(query.departmentId ? { departmentId: query.departmentId } : {}),
       },
       select: {
         usageDate: true,
@@ -252,12 +268,17 @@ export class AiUsageService {
     return this.config.get<number>("OPENAI_DAILY_USER_LIMIT", 50);
   }
 
-  private estimateCost(inputTokens: number, outputTokens: number): number {
+  private estimateCost(
+    inputTokens: number,
+    outputTokens: number,
+    model?: string,
+  ): number {
+    const prefix = model?.startsWith("gemini-") ? "GEMINI" : "OPENAI";
     const inputRate = this.config.get<number>(
-      "OPENAI_INPUT_COST_PER_MILLION_USD",
+      `${prefix}_INPUT_COST_PER_MILLION_USD`,
     );
     const outputRate = this.config.get<number>(
-      "OPENAI_OUTPUT_COST_PER_MILLION_USD",
+      `${prefix}_OUTPUT_COST_PER_MILLION_USD`,
     );
     if (!inputRate || !outputRate) return 0;
     return Number(
