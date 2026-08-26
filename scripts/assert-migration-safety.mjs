@@ -7,11 +7,11 @@ if (process.env.MIGRATION_BACKUP_REQUIRED === "false") {
   process.exit(0);
 }
 
-const maximumBackupWaitSeconds = 120;
+const maximumBackupWaitSeconds = 600;
 const backupWaitSeconds = boundedNonNegativeInteger(
   process.env.MIGRATION_BACKUP_WAIT_SECONDS,
   "MIGRATION_BACKUP_WAIT_SECONDS",
-  process.env.RENDER === "true" ? 60 : 0,
+  process.env.RENDER === "true" ? 600 : 0,
   maximumBackupWaitSeconds,
 );
 const backupPollMilliseconds = 15_000;

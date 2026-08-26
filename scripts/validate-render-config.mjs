@@ -65,10 +65,10 @@ const migrationWait = content.match(
 if (
   !migrationWait ||
   Number(migrationWait[1]) < 0 ||
-  Number(migrationWait[1]) > 120
+  Number(migrationWait[1]) > 600
 ) {
   throw new Error(
-    "MIGRATION_BACKUP_WAIT_SECONDS must be an integer between 0 and 120.",
+    "MIGRATION_BACKUP_WAIT_SECONDS must be an integer between 0 and 600.",
   );
 }
 if (/postgres(?:ql)?:\/\/[^:\s]+:[^@\s]+@/iu.test(content)) {

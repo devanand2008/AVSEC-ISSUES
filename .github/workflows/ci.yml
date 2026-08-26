@@ -43,7 +43,7 @@ jobs:
       COOKIE_SECURE: "true"
       COOKIE_SAME_SITE: lax
       CSRF_SECRET: ci-csrf-secret-2026-abcdef0123456789
-      PASSWORD_PEPPER: ci-password-pepper-2026
+      PASSWORD_PEPPER: ci-password-pepper-2026-abcdef0123456789
       S3_ENDPOINT: http://minio:9000
       S3_REGION: us-east-1
       S3_BUCKET: college-private
