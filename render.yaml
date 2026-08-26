@@ -14,7 +14,9 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /health
-    autoDeployTrigger: commit
+    # Migration-related pushes run a protected backup check. Do not start a
+    # deploy until that backup and the normal CI workflow have both succeeded.
+    autoDeployTrigger: checksPass
     envVars:
       # ── Application identity ──────────────────────────────────────────────────
       - key: NODE_ENV
@@ -68,6 +70,10 @@ services:
         value: "5"
       - key: MIGRATION_BACKUP_REQUIRED
         value: "true"
+      # CI completes the protected backup before Render starts. This short poll
+      # only covers database visibility or check-to-deploy propagation delay.
+      - key: MIGRATION_BACKUP_WAIT_SECONDS
+        value: "60"
 
       # ── JWT and auth secrets (generated and retained by Render) ───────────────
       - key: JWT_ACCESS_SECRET

@@ -186,6 +186,7 @@ In GitHub → Settings → Secrets and variables → Actions, set:
 | Secret | Value |
 |---|---|
 | `BACKUP_DATABASE_URL` | Same as `DATABASE_URL` above |
+| `BACKUP_DATABASE_CA_PEM` | Database provider CA certificate in PEM format |
 | `BACKUP_ENCRYPTION_KEY` | Same key generated in Step 2 |
 | `GOOGLE_OAUTH_CLIENT_ID` | Same as Render |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Same as Render |

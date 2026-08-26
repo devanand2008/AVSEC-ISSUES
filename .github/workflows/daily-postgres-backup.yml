@@ -3,6 +3,20 @@ name: Daily PostgreSQL SQL backup
 on:
   schedule:
     - cron: "30 20 * * *"
+  # Create a protected backup for every deploy-affecting release push. Render
+  # waits for this workflow and the normal CI workflow before it starts.
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - ".github/workflows/daily-postgres-backup.yml"
+      - "scripts/**"
+      - "Dockerfile"
+      - "package.json"
+      - "package-lock.json"
+      - "render.yaml"
   workflow_dispatch:
     inputs:
       purpose:
@@ -19,7 +33,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: avs-daily-postgres-backup
+  # Routine backups must not queue or replace the migration check that Render
+  # is waiting for. Repeated migration pushes still collapse to the newest run.
+  group: avs-postgres-backup-${{ github.event_name == 'push' && 'migration' || 'routine' }}
   cancel-in-progress: false
 
 jobs:
@@ -36,8 +52,8 @@ jobs:
       GOOGLE_DRIVE_BACKUP_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_BACKUP_FOLDER_ID }}
       GOOGLE_DRIVE_OWNER_EMAIL: devanand.s2008@gmail.com
       BACKUP_ENCRYPTION_KEY_VERSION: "1"
-      BACKUP_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.purpose == 'pre-migration' && 'PRE_MIGRATION' || github.event_name == 'workflow_dispatch' && inputs.purpose == 'pre-deletion' && 'PRE_DELETION' || 'DAILY' }}
-      BACKUP_STATUS: ${{ github.event_name == 'workflow_dispatch' && inputs.purpose != 'daily' && 'RESTORE_TESTED' || 'COMPLETED' }}
+      BACKUP_TYPE: ${{ github.event_name == 'push' && 'PRE_MIGRATION' || github.event_name == 'workflow_dispatch' && inputs.purpose == 'pre-migration' && 'PRE_MIGRATION' || github.event_name == 'workflow_dispatch' && inputs.purpose == 'pre-deletion' && 'PRE_DELETION' || 'DAILY' }}
+      BACKUP_STATUS: ${{ github.event_name == 'push' && 'RESTORE_TESTED' || github.event_name == 'workflow_dispatch' && inputs.purpose != 'daily' && 'RESTORE_TESTED' || 'COMPLETED' }}
       POSTGRES_CLIENT_MAJOR: "17"
 
     steps:

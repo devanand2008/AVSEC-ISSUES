@@ -1,4 +1,5 @@
 import { readdir } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
 
 if (process.env.MIGRATION_BACKUP_REQUIRED === "false") {
@@ -6,8 +7,19 @@ if (process.env.MIGRATION_BACKUP_REQUIRED === "false") {
   process.exit(0);
 }
 
-const connectionString =
-  process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL;
+const maximumBackupWaitSeconds = 120;
+const backupWaitSeconds = boundedNonNegativeInteger(
+  process.env.MIGRATION_BACKUP_WAIT_SECONDS,
+  "MIGRATION_BACKUP_WAIT_SECONDS",
+  process.env.RENDER === "true" ? 60 : 0,
+  maximumBackupWaitSeconds,
+);
+const backupPollMilliseconds = 15_000;
+
+// Prisma's deploy command reads DATABASE_URL from prisma.config.ts. The safety
+// gate must inspect that exact database instead of approving a different
+// optional direct connection.
+const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL is required.");
 
 const localMigrations = (
@@ -38,6 +50,7 @@ try {
     process.stdout.write("No pending database migrations.\n");
     process.exit(0);
   }
+  process.stdout.write(`Pending database migrations: ${pending.join(", ")}\n`);
   const backupTable = await client.query(
     "SELECT to_regclass('public.database_backups')::text AS name",
   );
@@ -46,8 +59,8 @@ try {
       "Pending migrations exist, but backup metadata is unavailable. Create and verify a pre-migration SQL backup before deployment.",
     );
   }
-  const recent = await client.query(
-    `SELECT id FROM database_backups
+  const findRecentVerifiedBackup = () =>
+    client.query(`SELECT id FROM database_backups
      WHERE backup_type = 'PRE_MIGRATION'
        AND status = 'RESTORE_TESTED'
        AND completed_at >= now() - interval '24 hours'
@@ -71,17 +84,45 @@ try {
          SELECT migration_name
          FROM "_prisma_migrations"
          WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL
-         ORDER BY finished_at DESC
+         ORDER BY finished_at DESC, migration_name DESC
          LIMIT 1
        )
-     ORDER BY completed_at DESC LIMIT 1`,
-  );
+     ORDER BY completed_at DESC LIMIT 1`);
+  let recent = await findRecentVerifiedBackup();
+  if (recent.rowCount !== 1 && backupWaitSeconds > 0) {
+    const deadline = Date.now() + backupWaitSeconds * 1_000;
+    process.stdout.write(
+      `Waiting up to ${backupWaitSeconds} seconds for the automatic pre-migration backup to be verified.\n`,
+    );
+    while (recent.rowCount !== 1) {
+      const remainingMilliseconds = deadline - Date.now();
+      if (remainingMilliseconds <= 0) break;
+      await delay(
+        Math.min(backupPollMilliseconds, remainingMilliseconds),
+        undefined,
+        { ref: true },
+      );
+      recent = await findRecentVerifiedBackup();
+    }
+  }
   if (recent.rowCount !== 1) {
     throw new Error(
-      "Pending migrations require a verified pre-migration backup from the last 24 hours. Run the manual backup workflow with purpose=pre-migration, then retry deployment.",
+      "Pending migrations require a verified pre-migration backup from the last 24 hours. The automatic backup did not register in time; run the manual backup workflow with purpose=pre-migration, then retry deployment.",
     );
   }
   process.stdout.write("Recent verified pre-migration backup confirmed.\n");
 } finally {
   await client.end().catch(() => undefined);
+}
+
+function boundedNonNegativeInteger(value, name, fallback, maximum) {
+  if (value === undefined || value === "") return fallback;
+  if (!/^\d+$/u.test(value)) {
+    throw new Error(`${name} must be an integer between 0 and ${maximum}.`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed > maximum) {
+    throw new Error(`${name} must be an integer between 0 and ${maximum}.`);
+  }
+  return parsed;
 }

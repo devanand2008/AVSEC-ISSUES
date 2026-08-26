@@ -75,7 +75,7 @@ SELECT 1 / CASE WHEN EXISTS (
       SELECT migration_name
       FROM "_prisma_migrations"
       WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL
-      ORDER BY finished_at DESC
+      ORDER BY finished_at DESC, migration_name DESC
       LIMIT 1
     )
     AND record_counts = :'record_counts'::jsonb

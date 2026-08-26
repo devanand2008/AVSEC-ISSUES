@@ -64,6 +64,8 @@ jobs:
           cache: npm
       - name: Run security preflight sensitive-file scanner
         run: node scripts/check-sensitive-files.mjs
+      - name: Validate Render deployment configuration
+        run: npm run render:validate
       - name: Install locked dependencies
         run: npm ci --include=dev
       - name: Generate Prisma client

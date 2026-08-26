@@ -71,6 +71,7 @@
     "test:all": "npm run prisma:validate && npm run typecheck && npm run lint && npm run test && npm run build",
     "check": "npm run prisma:validate && npm run typecheck && npm run lint && npm run test && npm run build",
     "security:dependencies": "node scripts/assert-secure-dependency-tree.mjs",
+    "render:validate": "node scripts/validate-render-config.mjs",
     "test:security:dependencies": "node --test scripts/assert-secure-dependency-tree.test.mjs",
     "prisma:generate": "npm run prisma:generate -w @college/api",
     "prisma:validate": "npm run prisma:validate -w @college/api",
