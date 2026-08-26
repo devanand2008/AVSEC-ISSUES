@@ -273,6 +273,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          local_migrations_json="$(
+            node <<'NODE'
+          const fs = require("node:fs");
+          const names = fs
+            .readdirSync("apps/api/prisma/migrations", { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => entry.name)
+            .sort();
+          if (names.length === 0) throw new Error("No local migrations found.");
+          process.stdout.write(JSON.stringify(names));
+          NODE
+          )"
           plain_sha256="$(sha256sum "$FULL_SQL" | awk '{print $1}')"
           encrypted_sha256="$(sha256sum "$FULL_ENCRYPTED" | awk '{print $1}')"
           manifest_sha256="$(sha256sum "$MANIFEST" | awk '{print $1}')"
@@ -291,6 +303,7 @@ jobs:
             --set schema_version="$PRISMA_MIGRATION_VERSION" \
             --set application_commit="$GITHUB_SHA" \
             --set record_counts="$BACKUP_TABLE_COUNTS_JSON" \
+            --set local_migrations_json="$local_migrations_json" \
             --file=scripts/register-external-backup.sql
 
       - name: Delete temporary unencrypted SQL and artifacts
