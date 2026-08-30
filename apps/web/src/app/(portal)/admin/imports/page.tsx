@@ -11,6 +11,7 @@ import {
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { ErrorState, LoadingState } from "@/components/query-state";
 import { StatusBadge } from "@/components/status-badge";
@@ -182,6 +183,9 @@ interface RowError {
   message: string;
   userId?: string;
   userName?: string;
+  email?: string;
+  department?: string;
+  year?: string;
 }
 interface Preview {
   job: ImportJob;
@@ -196,6 +200,7 @@ interface Preview {
     rowCount: number;
     sourceDepartmentCode: string;
     mappedDepartmentCode?: string;
+    sourceHeaders?: string[];
     status: "READY" | "HEADER_NOT_FOUND" | "EMPTY";
   }>;
   detectedStudyYear?: "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8";
@@ -242,18 +247,24 @@ interface JobDetail extends ImportJob {
 
 export default function ImportsPage() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
   const client = useQueryClient();
   const allowed = importTypes.filter((item) =>
     user?.permissions.includes(item.permission),
   );
-  const [entityType, setEntityType] = useState(allowed[0]?.value ?? "");
+  const requestedType = searchParams.get("type")?.trim().toUpperCase();
+  const initialEntityType =
+    allowed.find((item) => item.value === requestedType)?.value ??
+    allowed[0]?.value ??
+    "";
+  const [entityType, setEntityType] = useState(initialEntityType);
   const [importMode, setImportMode] = useState("CREATE_ONLY");
   const [selectedRoleCode, setSelectedRoleCode] = useState("STUDENT");
   const [resetExistingPasswords, setResetExistingPasswords] = useState(false);
   const [detectedStudyYear, setDetectedStudyYear] = useState("");
   const [duplicateResolution, setDuplicateResolution] = useState<
     "KEEP_FIRST" | "SKIP_ALL"
-  >("KEEP_FIRST");
+  >(initialEntityType === "PEOPLE" ? "SKIP_ALL" : "KEEP_FIRST");
   const [departmentMappings, setDepartmentMappings] = useState<
     Record<string, string>
   >({});
@@ -318,7 +329,10 @@ export default function ImportsPage() {
       if (["PEOPLE", "STUDENTS"].includes(entityType)) {
         if (detectedStudyYear)
           body.append("detectedStudyYear", detectedStudyYear);
-        body.append("duplicateResolution", duplicateResolution);
+        body.append(
+          "duplicateResolution",
+          entityType === "PEOPLE" ? "SKIP_ALL" : duplicateResolution,
+        );
         if (Object.keys(departmentMappings).length)
           body.append("departmentMappings", JSON.stringify(departmentMappings));
       }
@@ -331,7 +345,11 @@ export default function ImportsPage() {
       setSheetName(data.selectedSheetName ?? "");
       setColumnMapping(data.columnMapping);
       setDetectedStudyYear(data.detectedStudyYear ?? "");
-      setDuplicateResolution(data.duplicateResolution);
+      setDuplicateResolution(
+        data.job.entityType === "PEOPLE"
+          ? "SKIP_ALL"
+          : data.duplicateResolution,
+      );
       setDepartmentMappings(data.departmentMappings ?? {});
       setMessage(
         "Validation complete. Review the preview and row errors before confirming.",
@@ -445,6 +463,10 @@ export default function ImportsPage() {
           "source_department_code",
         ].includes(header),
     ) ?? [];
+  const peopleValidationSummary =
+    preview && entityType === "PEOPLE"
+      ? summarizePeopleErrors(preview.errors, preview.duplicateGroups)
+      : null;
 
   function chooseFile(nextFile?: File | null) {
     setFile(nextFile ?? null);
@@ -452,7 +474,6 @@ export default function ImportsPage() {
     setSheetName("");
     setColumnMapping({});
     setDetectedStudyYear("");
-    setDuplicateResolution("KEEP_FIRST");
     setDepartmentMappings({});
     setMessage("");
   }
@@ -494,7 +515,7 @@ export default function ImportsPage() {
             <h2>1. Prepare and validate</h2>
             <p>
               {entityType === "PEOPLE"
-                ? "Download the People template and keep its seven column names unchanged."
+                ? "Download the People template and keep its eight column names unchanged."
                 : "Use a current template, or upload a CSV/XLSX file with recognizable column names."}
             </p>
           </div>
@@ -510,6 +531,7 @@ export default function ImportsPage() {
                 setEntityType(next);
                 if (next === "PEOPLE") {
                   setImportMode("CREATE_ONLY");
+                  setDuplicateResolution("SKIP_ALL");
                 } else if (
                   ["USERS", "STUDENTS", "STAFF"].includes(next) &&
                   !["USERS", "STUDENTS", "STAFF"].includes(entityType)
@@ -518,6 +540,7 @@ export default function ImportsPage() {
                 } else if (!["USERS", "STUDENTS", "STAFF"].includes(next)) {
                   setImportMode("CREATE_ONLY");
                 }
+                if (next !== "PEOPLE") setDuplicateResolution("KEEP_FIRST");
                 if (["PEOPLE", "STUDENTS"].includes(next))
                   setSelectedRoleCode("STUDENT");
                 if (next === "STAFF" && selectedRoleCode === "STUDENT")
@@ -617,6 +640,23 @@ export default function ImportsPage() {
               </label>
             </>
           )}
+          {entityType === "PEOPLE" && (
+            <label className="field">
+              <span>Duplicate email handling</span>
+              <select
+                className="input"
+                value="SKIP_ALL"
+                disabled
+                aria-describedby="people-duplicate-policy"
+              >
+                <option value="SKIP_ALL">Skip every duplicate row</option>
+              </select>
+              <small id="people-duplicate-policy">
+                Fixed safety policy: every row in a duplicate email group is
+                rejected.
+              </small>
+            </label>
+          )}
           {["USERS", "STUDENTS", "STAFF"].includes(entityType) && (
             <label className="check-field" style={{ alignSelf: "end" }}>
               <input
@@ -677,7 +717,9 @@ export default function ImportsPage() {
             onClick={() => templateMutation.mutate()}
           >
             <Download size={17} />
-            {templateMutation.isPending ? "Preparing template..." : "Download template"}
+            {templateMutation.isPending
+              ? "Preparing template..."
+              : "Download template"}
           </button>
           <button
             className="btn btn-primary"
@@ -697,12 +739,15 @@ export default function ImportsPage() {
         <div className="card" style={{ padding: 16, marginTop: 14 }}>
           <strong>Basic People template</strong>
           <p className="muted" style={{ margin: "6px 0 0" }}>
-            Uses exactly User Name, User ID, User Password, Department, Year,
-            Class Room Number, and Mobile Number. Accounts are created as
-            students and must replace the temporary password on first login.
-            Department, Year, and Class Room Number must resolve together to
-            one active academic section assigned to that classroom; the import
-            will not guess or create a missing placement.
+            Uses exactly User Name, User ID, Official College Email, User
+            Password, Department, Year, Class Room Number, and Mobile Number.
+            User Name, User ID, Official College Email, User Password,
+            Department, and Year are required; Class Room Number and Mobile
+            Number are optional. Accounts are created as students and must
+            replace the temporary password on first login. When a classroom is
+            supplied, Department, Year, and Class Room Number must resolve to
+            one active academic section; otherwise academic placement is
+            completed during profile setup.
           </p>
         </div>
       )}
@@ -721,6 +766,18 @@ export default function ImportsPage() {
             </div>
             <StatusBadge value={preview.job.status} />
           </div>
+          {peopleValidationSummary && (
+            <div className="metric-grid" aria-label="People validation summary">
+              {Object.entries(peopleValidationSummary).map(([label, value]) => (
+                <article className="card metric-card" key={label}>
+                  <div>
+                    <span className="muted">{label}</span>
+                    <strong>{value}</strong>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
           {preview.sheetInspections.length > 0 && (
             <div className="column-map-panel">
               <div className="section-title" style={{ margin: "0 0 12px" }}>
@@ -756,6 +813,11 @@ export default function ImportsPage() {
                           ? "empty sheet"
                           : "header not found"}
                     </span>
+                    {sheet.sourceHeaders?.length ? (
+                      <small>
+                        Source columns: {sheet.sourceHeaders.join(", ")}
+                      </small>
+                    ) : null}
                     <select
                       className="input"
                       disabled={sheet.status !== "READY"}
@@ -986,22 +1048,10 @@ export default function ImportsPage() {
                   Download error report
                 </button>
               </div>
-              <div className="issue-list">
-                {preview.errors.map((error, index) => (
-                  <div key={`${error.rowNumber}-${error.field}-${index}`}>
-                    <span className="list-icon" style={{ color: "#dc2626" }}>
-                      <XCircle size={18} />
-                    </span>
-                    <span className="list-copy">
-                      <strong>
-                        Row {error.rowNumber}
-                        {error.field ? ` - ${error.field}` : ""}
-                      </strong>
-                      <small>{error.message}</small>
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <ImportErrorTable
+                errors={preview.errors}
+                label="Validation errors"
+              />
               {preview.errorsTruncated && (
                 <p className="muted">Only the first 250 errors are shown.</p>
               )}
@@ -1167,12 +1217,10 @@ export default function ImportsPage() {
                             type="button"
                             disabled={acknowledgeCredentialsMutation.isPending}
                             onClick={() =>
-                              acknowledgeCredentialsMutation.mutate(
-                                {
-                                  id: credentialClaim.jobId,
-                                  exportId: credentialClaim.exportId,
-                                },
-                              )
+                              acknowledgeCredentialsMutation.mutate({
+                                id: credentialClaim.jobId,
+                                exportId: credentialClaim.exportId,
+                              })
                             }
                           >
                             {acknowledgeCredentialsMutation.isPending
@@ -1198,23 +1246,11 @@ export default function ImportsPage() {
                         <Download size={16} />
                         Download errors
                       </button>
-                      <div className="issue-list" style={{ marginTop: 12 }}>
-                        {detail.data.result.errors
-                          .slice(0, 25)
-                          .map((error, index) => (
-                            <div key={`${error.rowNumber}-${index}`}>
-                              <span
-                                className="list-icon"
-                                style={{ color: "#dc2626" }}
-                              >
-                                <XCircle size={16} />
-                              </span>
-                              <span className="list-copy">
-                                <strong>Row {error.rowNumber}</strong>
-                                <small>{error.message}</small>
-                              </span>
-                            </div>
-                          ))}
+                      <div style={{ marginTop: 12 }}>
+                        <ImportErrorTable
+                          errors={detail.data.result.errors.slice(0, 25)}
+                          label="Completed import errors"
+                        />
                       </div>
                     </>
                   ) : (
@@ -1293,11 +1329,22 @@ function downloadErrorReport(
   filename = "import-error-report.csv",
 ) {
   const rows = [
-    ["Row Number", "User ID", "User Name", "Error"],
+    [
+      "Row Number",
+      "User Name",
+      "User ID",
+      "Email",
+      "Department",
+      "Year",
+      "Error",
+    ],
     ...errors.map((error) => [
       String(error.rowNumber),
-      error.userId ?? "",
       error.userName ?? "",
+      error.userId ?? "",
+      error.email ?? "",
+      error.department ?? "",
+      error.year ?? "",
       error.field ? `${error.field}: ${error.message}` : error.message,
     ]),
   ];
@@ -1310,6 +1357,87 @@ function downloadErrorReport(
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function summarizePeopleErrors(
+  errors: RowError[],
+  duplicateEmailGroups: Preview["duplicateGroups"],
+) {
+  const uniqueRows = (predicate: (error: RowError) => boolean) =>
+    new Set(errors.filter(predicate).map((error) => error.rowNumber)).size;
+  const field = (error: RowError) => (error.field ?? "").toLowerCase();
+  const message = (error: RowError) => error.message.toLowerCase();
+  return {
+    "Duplicate emails": new Set(
+      duplicateEmailGroups.flatMap((group) =>
+        group.locations.map((location) => location.rowNumber),
+      ),
+    ).size,
+    "Duplicate user IDs": uniqueRows(
+      (error) =>
+        field(error).includes("identity") &&
+        /(duplicate|already exists)/.test(message(error)),
+    ),
+    "Unknown departments": uniqueRows(
+      (error) =>
+        field(error).includes("department") &&
+        /(does not exist|not found|ambiguous)/.test(message(error)),
+    ),
+    "Invalid years": uniqueRows((error) => field(error) === "year"),
+    "Missing passwords": uniqueRows(
+      (error) =>
+        field(error).includes("password") &&
+        message(error).includes("required"),
+    ),
+    "Invalid emails": uniqueRows(
+      (error) =>
+        field(error) === "email" &&
+        !/(duplicate|already exists)/.test(message(error)),
+    ),
+  };
+}
+
+function ImportErrorTable({
+  errors,
+  label,
+}: {
+  errors: RowError[];
+  label: string;
+}) {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table className="data-table" aria-label={label}>
+        <thead>
+          <tr>
+            <th>Row</th>
+            <th>Name</th>
+            <th>User ID</th>
+            <th>Email</th>
+            <th>Department</th>
+            <th>Year</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {errors.map((error, index) => (
+            <tr key={`${error.rowNumber}-${error.field ?? "row"}-${index}`}>
+              <td>{error.rowNumber}</td>
+              <td>{error.userName || <span className="muted">-</span>}</td>
+              <td>{error.userId || <span className="muted">-</span>}</td>
+              <td>{error.email || <span className="muted">-</span>}</td>
+              <td>{error.department || <span className="muted">-</span>}</td>
+              <td>{error.year || <span className="muted">-</span>}</td>
+              <td>
+                {error.field
+                  ? `${error.field}: ${error.message}`
+                  : error.message}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function csvCell(value: string) {

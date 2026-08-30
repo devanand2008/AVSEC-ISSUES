@@ -2,8 +2,17 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Archive, ChevronLeft, ChevronRight, Eye,
-  RefreshCw, RotateCcw, Search, Shield, Trash2, Upload, UserPlus,
+  Archive,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Shield,
+  Trash2,
+  Upload,
+  UserPlus,
 } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -15,9 +24,16 @@ import { ActionMenu } from "@/components/ui/action-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { PeopleListSkeleton } from "@/components/ui/loading-skeleton";
-import { FilterButton, FilterBottomSheet } from "@/components/ui/filter-bottom-sheet";
+import {
+  FilterButton,
+  FilterBottomSheet,
+} from "@/components/ui/filter-bottom-sheet";
 import { ArchiveDialog } from "@/components/ui/confirmation-dialog";
-import { DependencyDialog, depIcon, type DependencyReport } from "@/components/ui/dependency-dialog";
+import {
+  DependencyDialog,
+  depIcon,
+  type DependencyReport,
+} from "@/components/ui/dependency-dialog";
 import { PermanentDeleteDialog } from "@/components/ui/permanent-delete-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import {
@@ -40,17 +56,28 @@ interface PersonRow {
   mobile: string | null;
   status: string;
   mustChangePassword: boolean;
+  profileCompletionStatus: string;
+  profileCompletionPercentage: number;
+  onboardingStudyYear: number | null;
   firstLoginCompletedAt: string | null;
   lastLoginAt: string | null;
+  createdAt: string;
   archivedAt: string | null;
   roles: Array<{ role: { code: string; name: string }; isPrimary?: boolean }>;
   studentProfile: {
     studentId: string;
+    studyYear: number | null;
     department: { code: string; name: string };
     section: {
       code: string;
       name: string;
-      assignedRoom?: { id: string; code: string; name: string; roomNumber: string | null } | null;
+      studyYear: number | null;
+      assignedRoom?: {
+        id: string;
+        code: string;
+        name: string;
+        roomNumber: string | null;
+      } | null;
     };
   } | null;
   staffProfile: {
@@ -127,6 +154,8 @@ export default function PeopleManagementPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [roleFilter, setRoleFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [profileStatusFilter, setProfileStatusFilter] = useState("");
+  const [firstLoginFilter, setFirstLoginFilter] = useState("");
   const [deptFilter, setDeptFilter] = useState("");
   const [studyYearFilter, setStudyYearFilter] = useState("");
   const [roomFilter, setRoomFilter] = useState("");
@@ -141,8 +170,10 @@ export default function PeopleManagementPage() {
   const canCreate = user?.permissions.includes("users.create") ?? false;
   const canImportUsers = user?.permissions.includes("users.import") ?? false;
   const canSuspend = user?.permissions.includes("users.suspend") ?? false;
-  const canDeletePermanently = user?.permissions.includes("users.delete_permanent") ?? false;
-  const canManageBackups = user?.permissions.includes("backups.manage") ?? false;
+  const canDeletePermanently =
+    user?.permissions.includes("users.delete_permanent") ?? false;
+  const canManageBackups =
+    user?.permissions.includes("backups.manage") ?? false;
 
   const backups = useQuery({
     queryKey: ["backups", "people-deletion"],
@@ -176,13 +207,30 @@ export default function PeopleManagementPage() {
 
   // ── People Query ──
   const people = useQuery({
-    queryKey: ["people", search, page, activeTab, roleFilter, statusFilter, deptFilter, studyYearFilter, roomFilter],
+    queryKey: [
+      "people",
+      search,
+      page,
+      activeTab,
+      roleFilter,
+      statusFilter,
+      profileStatusFilter,
+      firstLoginFilter,
+      deptFilter,
+      studyYearFilter,
+      roomFilter,
+    ],
     queryFn: () => {
-      const params = new URLSearchParams({ page: String(page), pageSize: "25" });
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: "25",
+      });
       if (search) params.set("search", search);
       Object.entries(tabParams).forEach(([k, v]) => params.set(k, v));
       if (roleFilter) params.set("role", roleFilter);
       if (statusFilter) params.set("status", statusFilter);
+      if (profileStatusFilter) params.set("profileStatus", profileStatusFilter);
+      if (firstLoginFilter) params.set("firstLogin", firstLoginFilter);
       if (deptFilter) params.set("departmentId", deptFilter);
       if (studyYearFilter) params.set("studyYear", studyYearFilter);
       if (roomFilter) params.set("roomId", roomFilter);
@@ -193,14 +241,24 @@ export default function PeopleManagementPage() {
   // ── Dependency Query ──
   const deps = useQuery({
     queryKey: ["people", depTarget?.publicId, "dependencies"],
-    queryFn: () => api.get<DependencyReportResponse>(`/admin/people/${depTarget!.publicId}/dependencies`),
+    queryFn: () =>
+      api.get<DependencyReportResponse>(
+        `/admin/people/${depTarget!.publicId}/dependencies`,
+      ),
     enabled: !!depTarget,
   });
 
   // ── Archive Mutation ──
   const archiveMutation = useMutation({
-    mutationFn: ({ id, status, reason }: { id: string; status: "ACTIVE" | "SUSPENDED" | "ARCHIVED"; reason: string }) =>
-      api.patch(`/users/${id}/status`, { status, reason }),
+    mutationFn: ({
+      id,
+      status,
+      reason,
+    }: {
+      id: string;
+      status: "ACTIVE" | "SUSPENDED" | "ARCHIVED";
+      reason: string;
+    }) => api.patch(`/users/${id}/status`, { status, reason }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["people"] });
       setArchiveTarget(null);
@@ -209,8 +267,17 @@ export default function PeopleManagementPage() {
 
   // ── Permanent Delete Mutation ──
   const deleteMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { reason: string; confirmationPhrase: string; backupReference: string } }) =>
-      api.delete(`/admin/people/${id}/permanent`, data),
+    mutationFn: ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: {
+        reason: string;
+        confirmationPhrase: string;
+        backupReference: string;
+      };
+    }) => api.delete(`/admin/people/${id}/permanent`, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["people"] });
       setDeleteTarget(null);
@@ -228,6 +295,19 @@ export default function PeopleManagementPage() {
     if (p.studentProfile) return p.studentProfile.department.name;
     if (p.staffProfile?.department) return p.staffProfile.department.name;
     return "—";
+  }
+
+  function studyYearInfo(p: PersonRow): string {
+    const year =
+      p.onboardingStudyYear ??
+      p.studentProfile?.studyYear ??
+      p.studentProfile?.section.studyYear;
+    return year ? `Year ${year}` : "—";
+  }
+
+  function firstLoginInfo(p: PersonRow): string {
+    if (p.mustChangePassword) return "Password change required";
+    return p.firstLoginCompletedAt ? "Completed" : "Not recorded";
   }
 
   // ── Helper: section info ──
@@ -249,7 +329,9 @@ export default function PeopleManagementPage() {
   }
 
   // ── Helper: status for avatar ──
-  function avatarStatus(s: string): "active" | "suspended" | "archived" | "pending" {
+  function avatarStatus(
+    s: string,
+  ): "active" | "suspended" | "archived" | "pending" {
     if (s === "ACTIVE") return "active";
     if (s === "SUSPENDED") return "suspended";
     if (s === "ARCHIVED") return "archived";
@@ -280,7 +362,11 @@ export default function PeopleManagementPage() {
         icon: <Shield size={16} />,
         onClick: () => {
           archiveMutation.reset();
-          archiveMutation.mutate({ id: p.publicId, status: "SUSPENDED", reason: "Suspended by admin" });
+          archiveMutation.mutate({
+            id: p.publicId,
+            status: "SUSPENDED",
+            reason: "Suspended by admin",
+          });
         },
       });
     }
@@ -300,7 +386,11 @@ export default function PeopleManagementPage() {
         icon: <RotateCcw size={16} />,
         onClick: () => {
           archiveMutation.reset();
-          archiveMutation.mutate({ id: p.publicId, status: "ACTIVE", reason: "Restored by admin" });
+          archiveMutation.mutate({
+            id: p.publicId,
+            status: "ACTIVE",
+            reason: "Restored by admin",
+          });
         },
       });
     }
@@ -337,7 +427,15 @@ export default function PeopleManagementPage() {
   }
 
   // ── Active filter count ──
-  const activeFilterCount = [roleFilter, statusFilter, deptFilter, studyYearFilter, roomFilter].filter(Boolean).length;
+  const activeFilterCount = [
+    roleFilter,
+    statusFilter,
+    profileStatusFilter,
+    firstLoginFilter,
+    deptFilter,
+    studyYearFilter,
+    roomFilter,
+  ].filter(Boolean).length;
 
   // ── Total / pagination ──
   const total = people.data?.meta.total ?? 0;
@@ -411,11 +509,12 @@ export default function PeopleManagementPage() {
             )}
             {canImportUsers && (
               <Link
-                href="/admin/imports"
+                href="/admin/imports?type=PEOPLE"
                 className="avs-btn avs-btn-secondary"
                 aria-label="Bulk Import"
               >
-                <Upload size={16} /> <span className="hide-mobile">Bulk Import</span>
+                <Upload size={16} />{" "}
+                <span className="hide-mobile">Bulk Import</span>
               </Link>
             )}
           </>
@@ -423,13 +522,27 @@ export default function PeopleManagementPage() {
       />
 
       {archiveMutation.isError && !archiveTarget && (
-        <div className="error-box" role="alert" style={{ marginBottom: "var(--space-4)" }}>
-          {mutationErrorMessage(archiveMutation.error, "The account status could not be updated.")}
+        <div
+          className="error-box"
+          role="alert"
+          style={{ marginBottom: "var(--space-4)" }}
+        >
+          {mutationErrorMessage(
+            archiveMutation.error,
+            "The account status could not be updated.",
+          )}
         </div>
       )}
       {deleteMutation.isError && !deleteTarget && (
-        <div className="error-box" role="alert" style={{ marginBottom: "var(--space-4)" }}>
-          {mutationErrorMessage(deleteMutation.error, "The person could not be permanently deleted.")}
+        <div
+          className="error-box"
+          role="alert"
+          style={{ marginBottom: "var(--space-4)" }}
+        >
+          {mutationErrorMessage(
+            deleteMutation.error,
+            "The person could not be permanently deleted.",
+          )}
         </div>
       )}
 
@@ -455,16 +568,35 @@ export default function PeopleManagementPage() {
       </div>
 
       {/* ── Search & Filters Bar ── */}
-      <div style={{ display: "flex", gap: "var(--space-3)", marginTop: "var(--space-4)", marginBottom: "var(--space-4)", flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: "var(--space-3)",
+          marginTop: "var(--space-4)",
+          marginBottom: "var(--space-4)",
+          flexWrap: "wrap",
+        }}
+      >
         <div style={{ flex: "1 1 280px", minWidth: 0 }}>
           <SearchBar
             value={search}
-            onChange={(v) => { setSearch(v); setPage(1); }}
+            onChange={(v) => {
+              setSearch(v);
+              setPage(1);
+            }}
             placeholder="Search by name, email, ID, mobile…"
           />
         </div>
-        <FilterButton onClick={() => setShowFilters(!showFilters)} activeCount={activeFilterCount} />
-        <button className="avs-btn avs-btn-ghost avs-btn-icon" onClick={() => void people.refetch()} aria-label="Refresh" type="button">
+        <FilterButton
+          onClick={() => setShowFilters(!showFilters)}
+          activeCount={activeFilterCount}
+        />
+        <button
+          className="avs-btn avs-btn-ghost avs-btn-icon"
+          onClick={() => void people.refetch()}
+          aria-label="Refresh"
+          type="button"
+        >
           <RefreshCw size={16} />
         </button>
       </div>
@@ -477,6 +609,8 @@ export default function PeopleManagementPage() {
         onReset={() => {
           setRoleFilter("");
           setStatusFilter("");
+          setProfileStatusFilter("");
+          setFirstLoginFilter("");
           setDeptFilter("");
           setStudyYearFilter("");
           setRoomFilter("");
@@ -485,8 +619,19 @@ export default function PeopleManagementPage() {
         }}
       >
         <div>
-          <label className="avs-label" htmlFor="filter-role">Role</label>
-          <select id="filter-role" className="avs-input avs-select" value={roleFilter} onChange={(e) => { setActiveTab(""); setRoleFilter(e.target.value); setPage(1); }}>
+          <label className="avs-label" htmlFor="filter-role">
+            Role
+          </label>
+          <select
+            id="filter-role"
+            className="avs-input avs-select"
+            value={roleFilter}
+            onChange={(e) => {
+              setActiveTab("");
+              setRoleFilter(e.target.value);
+              setPage(1);
+            }}
+          >
             <option value="">All Roles</option>
             <option value="STUDENT">Student</option>
             <option value="FACULTY">Faculty</option>
@@ -495,14 +640,27 @@ export default function PeopleManagementPage() {
             <option value="PRINCIPAL">Principal</option>
             <option value="VICE_PRINCIPAL">Vice Principal</option>
             <option value="MAINTENANCE_ADMIN">Maintenance Admin</option>
-            <option value="MAINTENANCE_SUPERVISOR">Maintenance Supervisor</option>
+            <option value="MAINTENANCE_SUPERVISOR">
+              Maintenance Supervisor
+            </option>
             <option value="MAINTENANCE_STAFF">Maintenance Staff</option>
             <option value="MAIN_ADMIN">Admin</option>
           </select>
         </div>
         <div>
-          <label className="avs-label" htmlFor="filter-status">Account Status</label>
-          <select id="filter-status" className="avs-input avs-select" value={statusFilter} onChange={(e) => { setActiveTab(""); setStatusFilter(e.target.value); setPage(1); }}>
+          <label className="avs-label" htmlFor="filter-status">
+            Account Status
+          </label>
+          <select
+            id="filter-status"
+            className="avs-input avs-select"
+            value={statusFilter}
+            onChange={(e) => {
+              setActiveTab("");
+              setStatusFilter(e.target.value);
+              setPage(1);
+            }}
+          >
             <option value="">All Statuses</option>
             <option value="ACTIVE">Active</option>
             <option value="PENDING">Pending</option>
@@ -512,7 +670,48 @@ export default function PeopleManagementPage() {
           </select>
         </div>
         <div>
-          <label className="avs-label" htmlFor="filter-dept">Department</label>
+          <label className="avs-label" htmlFor="filter-profile-status">
+            Profile Status
+          </label>
+          <select
+            id="filter-profile-status"
+            className="avs-input avs-select"
+            value={profileStatusFilter}
+            onChange={(event) => {
+              setProfileStatusFilter(event.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All Profile Statuses</option>
+            <option value="NOT_STARTED">Profile Not Started</option>
+            <option value="IN_PROGRESS">Profile In Progress</option>
+            <option value="SUBMITTED">Profile Submitted</option>
+            <option value="VERIFIED">Profile Verified</option>
+            <option value="REJECTED">Profile Rejected</option>
+          </select>
+        </div>
+        <div>
+          <label className="avs-label" htmlFor="filter-first-login">
+            First Login Status
+          </label>
+          <select
+            id="filter-first-login"
+            className="avs-input avs-select"
+            value={firstLoginFilter}
+            onChange={(event) => {
+              setFirstLoginFilter(event.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All First Login Statuses</option>
+            <option value="REQUIRED">Password Change Required</option>
+            <option value="COMPLETED">First Login Completed</option>
+          </select>
+        </div>
+        <div>
+          <label className="avs-label" htmlFor="filter-dept">
+            Department
+          </label>
           <select
             id="filter-dept"
             className="avs-input avs-select"
@@ -534,21 +733,30 @@ export default function PeopleManagementPage() {
           </select>
         </div>
         <div>
-          <label className="avs-label" htmlFor="filter-study-year">Study Year</label>
+          <label className="avs-label" htmlFor="filter-study-year">
+            Study Year
+          </label>
           <select
             id="filter-study-year"
             className="avs-input avs-select"
             value={studyYearFilter}
-            onChange={(event) => { setStudyYearFilter(event.target.value); setPage(1); }}
+            onChange={(event) => {
+              setStudyYearFilter(event.target.value);
+              setPage(1);
+            }}
           >
             <option value="">All Study Years</option>
             {[1, 2, 3, 4, 5, 6, 7, 8].map((year) => (
-              <option key={year} value={String(year)}>Year {year}</option>
+              <option key={year} value={String(year)}>
+                Year {year}
+              </option>
             ))}
           </select>
         </div>
         <div>
-          <label className="avs-label" htmlFor="filter-room">Classroom</label>
+          <label className="avs-label" htmlFor="filter-room">
+            Classroom
+          </label>
           <SearchBar
             id="filter-room-search"
             value={roomSearch}
@@ -565,7 +773,10 @@ export default function PeopleManagementPage() {
             className="avs-input avs-select"
             value={roomFilter}
             disabled={filterOptions.isLoading || filterOptions.isError}
-            onChange={(event) => { setRoomFilter(event.target.value); setPage(1); }}
+            onChange={(event) => {
+              setRoomFilter(event.target.value);
+              setPage(1);
+            }}
           >
             <option value="">All Classrooms</option>
             {filterOptions.data?.rooms.map((room) => (
@@ -576,11 +787,14 @@ export default function PeopleManagementPage() {
           </select>
         </div>
         {filterOptions.isLoading && (
-          <p className="muted" role="status">Loading Department and Classroom options...</p>
+          <p className="muted" role="status">
+            Loading Department and Classroom options...
+          </p>
         )}
         {filterOptions.isError && (
           <div className="error-box" role="alert">
-            Department and Classroom filters could not be loaded. Close and reopen filters to try again.
+            Department and Classroom filters could not be loaded. Close and
+            reopen filters to try again.
           </div>
         )}
       </FilterBottomSheet>
@@ -597,12 +811,27 @@ export default function PeopleManagementPage() {
 
       {people.isSuccess && people.data.data.length === 0 && (
         <EmptyState
-          preset={search || activeTab || activeFilterCount > 0 ? "no-results" : "no-people"}
-          title={search || activeTab || activeFilterCount > 0 ? "No results found" : "No people yet"}
-          description={search || activeTab || activeFilterCount > 0 ? "No people match the current search and filters." : "Add students and staff to get started."}
+          preset={
+            search || activeTab || activeFilterCount > 0
+              ? "no-results"
+              : "no-people"
+          }
+          title={
+            search || activeTab || activeFilterCount > 0
+              ? "No results found"
+              : "No people yet"
+          }
+          description={
+            search || activeTab || activeFilterCount > 0
+              ? "No people match the current search and filters."
+              : "Add students and staff to get started."
+          }
           action={
             !search && !activeTab && activeFilterCount === 0 && canCreate ? (
-              <Link href="/admin/people/new" className="avs-btn avs-btn-primary">
+              <Link
+                href="/admin/people/new"
+                className="avs-btn avs-btn-primary"
+              >
                 <UserPlus size={16} /> Add Person
               </Link>
             ) : undefined
@@ -624,8 +853,11 @@ export default function PeopleManagementPage() {
                     <th>Role</th>
                     <th className="hide-tablet">Department</th>
                     <th className="hide-tablet">Section</th>
-                    <th>Status</th>
-                    <th className="hide-tablet">Last Login</th>
+                    <th className="hide-tablet">Year</th>
+                    <th>Profile Status</th>
+                    <th>Account Status</th>
+                    <th className="hide-tablet">First Login</th>
+                    <th className="hide-tablet">Created</th>
                     <th style={{ width: 48 }}>
                       <span className="sr-only">Actions</span>
                     </th>
@@ -635,16 +867,41 @@ export default function PeopleManagementPage() {
                   {people.data.data.map((p) => (
                     <tr key={p.publicId}>
                       <td>
-                        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-                          <ProfileAvatar name={p.fullName} size="sm" status={avatarStatus(p.status)} />
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "var(--space-3)",
+                          }}
+                        >
+                          <ProfileAvatar
+                            name={p.fullName}
+                            size="sm"
+                            status={avatarStatus(p.status)}
+                          />
                           <div>
-                            <div className="font-medium truncate" style={{ maxWidth: 200 }}>{p.fullName}</div>
-                            <div className="caption truncate" style={{ maxWidth: 200 }}>{idInfo(p)}</div>
+                            <div
+                              className="font-medium truncate"
+                              style={{ maxWidth: 200 }}
+                            >
+                              {p.fullName}
+                            </div>
+                            <div
+                              className="caption truncate"
+                              style={{ maxWidth: 200 }}
+                            >
+                              {idInfo(p)}
+                            </div>
                           </div>
                         </div>
                       </td>
                       <td className="hide-tablet">
-                        <span className="body-text-sm truncate" style={{ maxWidth: 200, display: "block" }}>{p.email ?? "—"}</span>
+                        <span
+                          className="body-text-sm truncate"
+                          style={{ maxWidth: 200, display: "block" }}
+                        >
+                          {p.email ?? "—"}
+                        </span>
                       </td>
                       <td>
                         <span className="caption">{p.collegeIdentityId}</span>
@@ -658,16 +915,28 @@ export default function PeopleManagementPage() {
                       <td className="hide-tablet">
                         <span className="body-text-sm">{sectionInfo(p)}</span>
                       </td>
+                      <td className="hide-tablet">
+                        <span className="body-text-sm">{studyYearInfo(p)}</span>
+                      </td>
+                      <td>
+                        <StatusBadge value={p.profileCompletionStatus} />
+                      </td>
                       <td>
                         <StatusBadge value={p.status} />
                       </td>
                       <td className="hide-tablet">
+                        <span className="caption">{firstLoginInfo(p)}</span>
+                      </td>
+                      <td className="hide-tablet">
                         <span className="caption">
-                          {p.lastLoginAt ? new Date(p.lastLoginAt).toLocaleDateString() : "Never"}
+                          {new Date(p.createdAt).toLocaleDateString()}
                         </span>
                       </td>
                       <td>
-                        <ActionMenu items={actions(p)} id={`actions-${p.publicId}`} />
+                        <ActionMenu
+                          items={actions(p)}
+                          id={`actions-${p.publicId}`}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -680,7 +949,10 @@ export default function PeopleManagementPage() {
           <div className="avs-cards-responsive">
             {people.data.data.map((p) => (
               <div key={p.publicId} className="avs-entity-card">
-                <ProfileAvatar name={p.fullName} status={avatarStatus(p.status)} />
+                <ProfileAvatar
+                  name={p.fullName}
+                  status={avatarStatus(p.status)}
+                />
                 <div className="avs-entity-card-body">
                   <div className="avs-entity-card-name">{p.fullName}</div>
                   <div className="avs-entity-card-meta">
@@ -689,9 +961,26 @@ export default function PeopleManagementPage() {
                   </div>
                   <div className="avs-entity-card-meta">
                     <span>{deptInfo(p)}</span>
-                    {sectionInfo(p) !== "—" && <span>{sectionInfo(p)}</span>}
+                    <span>{studyYearInfo(p)}</span>
                   </div>
-                  <div style={{ marginTop: "var(--space-1)" }}>
+                  {sectionInfo(p) !== "—" && (
+                    <div className="avs-entity-card-meta">
+                      <span>{sectionInfo(p)}</span>
+                    </div>
+                  )}
+                  <div className="avs-entity-card-meta">
+                    <span>{firstLoginInfo(p)}</span>
+                    <span>{new Date(p.createdAt).toLocaleDateString()}</span>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "var(--space-1)",
+                      marginTop: "var(--space-1)",
+                    }}
+                  >
+                    <StatusBadge value={p.profileCompletionStatus} />
                     <StatusBadge value={p.status} />
                   </div>
                 </div>
@@ -713,10 +1002,17 @@ export default function PeopleManagementPage() {
           {totalPages > 1 && (
             <div className="avs-pagination">
               <span>
-                Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+                Showing {(page - 1) * pageSize + 1}–
+                {Math.min(page * pageSize, total)} of {total}
               </span>
               <div className="avs-pagination-controls">
-                <button className="avs-pagination-btn" aria-label="Previous page" disabled={page <= 1} onClick={() => setPage(page - 1)} type="button">
+                <button
+                  className="avs-pagination-btn"
+                  aria-label="Previous page"
+                  disabled={page <= 1}
+                  onClick={() => setPage(page - 1)}
+                  type="button"
+                >
                   <ChevronLeft size={16} />
                 </button>
                 {pageNumbers.map((pageNumber) => (
@@ -730,7 +1026,13 @@ export default function PeopleManagementPage() {
                     {pageNumber}
                   </button>
                 ))}
-                <button className="avs-pagination-btn" aria-label="Next page" disabled={page >= totalPages} onClick={() => setPage(page + 1)} type="button">
+                <button
+                  className="avs-pagination-btn"
+                  aria-label="Next page"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage(page + 1)}
+                  type="button"
+                >
                   <ChevronRight size={16} />
                 </button>
               </div>
@@ -748,12 +1050,23 @@ export default function PeopleManagementPage() {
         }}
         onConfirm={(reason) => {
           if (archiveTarget) {
-            archiveMutation.mutate({ id: archiveTarget.publicId, status: "ARCHIVED", reason });
+            archiveMutation.mutate({
+              id: archiveTarget.publicId,
+              status: "ARCHIVED",
+              reason,
+            });
           }
         }}
         userName={archiveTarget?.fullName ?? ""}
         loading={archiveMutation.isPending}
-        error={archiveMutation.isError ? mutationErrorMessage(archiveMutation.error, "The person could not be archived.") : undefined}
+        error={
+          archiveMutation.isError
+            ? mutationErrorMessage(
+                archiveMutation.error,
+                "The person could not be archived.",
+              )
+            : undefined
+        }
       />
 
       {/* ── Dependency Dialog ── */}
@@ -793,13 +1106,24 @@ export default function PeopleManagementPage() {
           createdAt: verifiedBackup?.completedAt ?? verifiedBackup?.createdAt,
         }}
         loading={deleteMutation.isPending}
-        error={deleteMutation.isError ? mutationErrorMessage(deleteMutation.error, "The person could not be permanently deleted.") : undefined}
+        error={
+          deleteMutation.isError
+            ? mutationErrorMessage(
+                deleteMutation.error,
+                "The person could not be permanently deleted.",
+              )
+            : undefined
+        }
       />
     </div>
   );
 }
 
-function paginationWindow(currentPage: number, totalPages: number, size = 5): number[] {
+function paginationWindow(
+  currentPage: number,
+  totalPages: number,
+  size = 5,
+): number[] {
   if (totalPages <= 0) return [];
   const windowSize = Math.min(size, totalPages);
   const halfWindow = Math.floor(windowSize / 2);
@@ -811,5 +1135,7 @@ function paginationWindow(currentPage: number, totalPages: number, size = 5): nu
 }
 
 function mutationErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message.trim() ? error.message : fallback;
+  return error instanceof Error && error.message.trim()
+    ? error.message
+    : fallback;
 }

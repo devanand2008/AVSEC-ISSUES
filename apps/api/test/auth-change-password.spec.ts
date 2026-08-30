@@ -53,7 +53,10 @@ function safeUserView(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function serviceHarness(passwordHash: string) {
+function serviceHarness(
+  passwordHash: string,
+  userViewOverrides: Record<string, unknown> = {},
+) {
   const tx = {
     userCredential: {
       update: jest.fn().mockResolvedValue({}),
@@ -83,7 +86,9 @@ function serviceHarness(passwordHash: string) {
     },
     user: {
       findUnique: jest.fn().mockResolvedValue(account()),
-      findUniqueOrThrow: jest.fn().mockResolvedValue(safeUserView()),
+      findUniqueOrThrow: jest
+        .fn()
+        .mockResolvedValue(safeUserView(userViewOverrides)),
     },
     $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
   };
@@ -290,6 +295,112 @@ describe("AuthService.changePassword", () => {
     expect(jwt.signAsync).toHaveBeenCalledTimes(2);
     expect(prisma.user.findUniqueOrThrow).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: USER_ID } }),
+    );
+  });
+
+  it.each(["NOT_STARTED", "IN_PROGRESS", "REJECTED"])(
+    "routes a student with %s profile status to profile setup after changing the temporary password",
+    async (profileCompletionStatus) => {
+      const { service } = serviceHarness(passwordHash, {
+        profileCompletionStatus,
+        profileCompletionPercentage: 0,
+        roles: [
+          {
+            role: {
+              collegeId: COLLEGE_ID,
+              code: "STUDENT",
+              permissions: [],
+            },
+          },
+        ],
+        studentProfile: { id: "student-profile-id" },
+      });
+
+      const result = await service.changePassword(
+        USER_ID,
+        CURRENT_PASSWORD,
+        NEW_PASSWORD,
+        SESSION_ID,
+        metadata,
+      );
+
+      expect(result.user).toEqual(
+        expect.objectContaining({
+          mustChangePassword: false,
+          profileCompletionStatus,
+          allowedNextRoute: "/profile/setup",
+        }),
+      );
+    },
+  );
+
+  it("treats a submitted student status without a student profile row as incomplete", async () => {
+    const { service } = serviceHarness(passwordHash, {
+      profileCompletionStatus: "SUBMITTED",
+      roles: [
+        {
+          role: {
+            collegeId: COLLEGE_ID,
+            code: "STUDENT",
+            permissions: [],
+          },
+        },
+      ],
+      studentProfile: null,
+    });
+
+    await expect(service.userView(USER_ID)).resolves.toEqual(
+      expect.objectContaining({
+        profileCompletionStatus: "NOT_STARTED",
+        allowedNextRoute: "/profile/setup",
+      }),
+    );
+  });
+
+  it.each(["SUBMITTED", "VERIFIED"])(
+    "allows a student with a profile row and %s status to continue to the portal",
+    async (profileCompletionStatus) => {
+      const { service } = serviceHarness(passwordHash, {
+        profileCompletionStatus,
+        roles: [
+          {
+            role: {
+              collegeId: COLLEGE_ID,
+              code: "STUDENT",
+              permissions: [],
+            },
+          },
+        ],
+        studentProfile: { id: "student-profile-id" },
+      });
+
+      await expect(service.userView(USER_ID)).resolves.toEqual(
+        expect.objectContaining({
+          profileCompletionStatus,
+          allowedNextRoute: "/",
+        }),
+      );
+    },
+  );
+
+  it("keeps forced password change ahead of incomplete profile routing", async () => {
+    const { service } = serviceHarness(passwordHash, {
+      mustChangePassword: true,
+      profileCompletionStatus: "NOT_STARTED",
+      roles: [
+        {
+          role: {
+            collegeId: COLLEGE_ID,
+            code: "FACULTY",
+            permissions: [],
+          },
+        },
+      ],
+      staffProfile: null,
+    });
+
+    await expect(service.userView(USER_ID)).resolves.toEqual(
+      expect.objectContaining({ allowedNextRoute: "/change-password" }),
     );
   });
 });

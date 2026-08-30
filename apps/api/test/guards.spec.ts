@@ -166,15 +166,59 @@ describe("authorization guards", () => {
     ).toBe(true);
   });
 
-  it("does not globally lock incomplete-profile users out of authorised features", () => {
-    const guard = new ProfileCompletionGuard(reflector());
+  it("limits incomplete-profile users to profile setup and its academic lookups", () => {
+    const guard = new ProfileCompletionGuard(
+      reflector(),
+      new ConfigService({ API_PREFIX: "service/v2" }),
+    );
     expect(
       guard.canActivate(
         context({
+          originalUrl: "/service/v2/auth/change-password",
+          method: "POST",
+          user: {
+            mustChangePassword: true,
+            profileCompletionStatus: "NOT_STARTED",
+            roles: ["STUDENT"],
+          },
+        }),
+      ),
+    ).toBe(true);
+    expect(() =>
+      guard.canActivate(
+        context({
           originalUrl: "/service/v2/learn/courses",
+          method: "GET",
           user: {
             mustChangePassword: false,
             profileCompletionStatus: "NOT_STARTED",
+            roles: ["STUDENT"],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+    expect(
+      guard.canActivate(
+        context({
+          originalUrl: "/service/v2/users/me/profile/submit",
+          method: "POST",
+          user: {
+            mustChangePassword: false,
+            profileCompletionStatus: "REJECTED",
+            roles: ["STUDENT"],
+          },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      guard.canActivate(
+        context({
+          originalUrl: "/service/v2/academic/sections?semesterId=semester-id",
+          method: "GET",
+          user: {
+            mustChangePassword: false,
+            profileCompletionStatus: "IN_PROGRESS",
+            roles: ["STUDENT"],
           },
         }),
       ),
@@ -183,9 +227,11 @@ describe("authorization guards", () => {
       guard.canActivate(
         context({
           originalUrl: "/service/v2/issues",
+          method: "GET",
           user: {
             mustChangePassword: false,
-            profileCompletionStatus: "REJECTED",
+            profileCompletionStatus: "SUBMITTED",
+            roles: ["STUDENT"],
           },
         }),
       ),

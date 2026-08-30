@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PeopleManagementPage from "./page";
 
@@ -55,18 +62,22 @@ const peopleResponse = {
       mobile: "9876543210",
       status: "ACTIVE",
       mustChangePassword: true,
+      profileCompletionStatus: "NOT_STARTED",
+      profileCompletionPercentage: 0,
+      onboardingStudyYear: 2,
       firstLoginCompletedAt: null,
       lastLoginAt: null,
+      createdAt: "2026-08-20T00:00:00.000Z",
       archivedAt: null,
-      roles: [
-        { role: { code: "STUDENT", name: "Student" }, isPrimary: true },
-      ],
+      roles: [{ role: { code: "STUDENT", name: "Student" }, isPrimary: true }],
       studentProfile: {
         studentId: "AVS001",
+        studyYear: 2,
         department: { code: "CSE", name: "Computer Science" },
         section: {
           code: "A",
           name: "Section A",
+          studyYear: 2,
           assignedRoom: {
             id: "room-cse-201",
             code: "CSE-201",
@@ -116,12 +127,16 @@ describe("People management filters", () => {
   it("keeps Bulk Import available and sends relational Department, Year, and Classroom filters", async () => {
     renderPage();
 
-    expect((await screen.findAllByText("Imported Student")).length).toBeGreaterThan(0);
+    expect(
+      (await screen.findAllByText("Imported Student")).length,
+    ).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: "Bulk Import" })).toHaveAttribute(
       "href",
-      "/admin/imports",
+      "/admin/imports?type=PEOPLE",
     );
-    expect(screen.getAllByText(/Section A .* CSE-201/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Section A .* CSE-201/).length).toBeGreaterThan(
+      0,
+    );
     expect(
       mocks.get.mock.calls.some(([path]) =>
         String(path).startsWith("/admin/people/filter-options"),
@@ -157,6 +172,12 @@ describe("People management filters", () => {
     fireEvent.change(screen.getByLabelText("Study Year"), {
       target: { value: "2" },
     });
+    fireEvent.change(screen.getByLabelText("Profile Status"), {
+      target: { value: "NOT_STARTED" },
+    });
+    fireEvent.change(screen.getByLabelText("First Login Status"), {
+      target: { value: "REQUIRED" },
+    });
     fireEvent.change(screen.getByLabelText("Classroom"), {
       target: { value: "room-cse-201" },
     });
@@ -166,8 +187,14 @@ describe("People management filters", () => {
         .map(([path]) => String(path))
         .filter((path) => path.startsWith("/admin/people?"));
       expect(peopleUrls).toContain(
-        "/admin/people?page=1&pageSize=25&departmentId=department-cse&studyYear=2&roomId=room-cse-201",
+        "/admin/people?page=1&pageSize=25&profileStatus=NOT_STARTED&firstLogin=REQUIRED&departmentId=department-cse&studyYear=2&roomId=room-cse-201",
       );
+    });
+    await waitFor(() => {
+      expect(
+        screen.getAllByText("Password change required").length,
+      ).toBeGreaterThan(0);
+      expect(screen.getAllByText("NOT STARTED").length).toBeGreaterThan(0);
     });
   });
 
@@ -263,7 +290,9 @@ describe("People management filters", () => {
   });
 
   it("shows account lifecycle mutation failures inside the active dialog", async () => {
-    mocks.patch.mockRejectedValueOnce(new Error("Archive service is unavailable."));
+    mocks.patch.mockRejectedValueOnce(
+      new Error("Archive service is unavailable."),
+    );
     renderPage();
 
     const table = await screen.findByRole("table");
@@ -279,8 +308,8 @@ describe("People management filters", () => {
       within(dialog).getByRole("button", { name: "Archive Student" }),
     );
 
-    expect(
-      await within(dialog).findByRole("alert"),
-    ).toHaveTextContent("Archive service is unavailable.");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Archive service is unavailable.",
+    );
   });
 });

@@ -15,6 +15,7 @@ const peopleRow = (overrides: Partial<ImportRow> = {}): ImportRow =>
     full_name: "Arun Kumar",
     college_identity_id: "AVS001",
     student_id: "AVS001",
+    email: "arun.kumar@avsenggcollege.ac.in",
     temporary_password: "Strong!Pass123",
     department_code: "CSE",
     year: "2",
@@ -26,6 +27,33 @@ const peopleRow = (overrides: Partial<ImportRow> = {}): ImportRow =>
   }) as ImportRow;
 
 describe("ImportsHandlerService People import", () => {
+  it("uses the same tenant official-domain policy during transactional validation", () => {
+    const service = new ImportsHandlerService(
+      {} as PrismaService,
+      new ConfigService({
+        PASSWORD_PEPPER: "test-only-pepper",
+        OFFICIAL_EMAIL_DOMAINS: "global.example.edu",
+      }),
+      {} as SectionPlacementService,
+    );
+    const assertPeopleCoreFields = (
+      service as unknown as {
+        assertPeopleCoreFields(
+          row: ImportRow,
+          domains?: readonly string[],
+        ): void;
+      }
+    ).assertPeopleCoreFields.bind(service);
+    const tenantRow = peopleRow({ email: "student@tenant.example.edu" });
+
+    expect(() =>
+      assertPeopleCoreFields(tenantRow, ["tenant.example.edu"]),
+    ).not.toThrow();
+    expect(() =>
+      assertPeopleCoreFields(tenantRow, ["different.example.edu"]),
+    ).toThrow("approved college domain");
+  });
+
   it("validates 1000 same-class rows with seven set-based database queries", async () => {
     const rows = Array.from({ length: 1_000 }, (_, index) =>
       peopleRow({
@@ -208,7 +236,10 @@ describe("ImportsHandlerService People import", () => {
         };
       });
     const batch = [
-      { row: peopleRow(), rowNumber: 2 },
+      {
+        row: peopleRow({ temporary_password: "001234567890" }),
+        rowNumber: 2,
+      },
       {
         row: peopleRow({
           college_identity_id: "AVS002",
@@ -227,7 +258,7 @@ describe("ImportsHandlerService People import", () => {
     );
 
     expect(events).toEqual([
-      "hash:Strong!Pass123",
+      "hash:001234567890",
       "hash:Second!Pass123",
       "transaction",
       "write:2",
@@ -265,9 +296,7 @@ describe("ImportsHandlerService People import", () => {
         {},
         "$argon2id$must-not-be-used",
       ),
-    ).rejects.toThrow(
-      "User Password must be 12 to 200 characters and contain an uppercase letter, lowercase letter, number, and special character.",
-    );
+    ).rejects.toThrow("Numeric-only college temporary passwords are allowed");
   });
 
   it("creates an Argon2 credential and leaves the imported profile in the completion workflow", async () => {
@@ -382,8 +411,8 @@ describe("ImportsHandlerService People import", () => {
     };
     expect(createData).toMatchObject({
       mustChangePassword: true,
-      profileCompletionStatus: "IN_PROGRESS",
-      profileCompletionPercentage: 90,
+      profileCompletionStatus: "NOT_STARTED",
+      profileCompletionPercentage: 0,
       credential: { create: { passwordChangedAt: null } },
     });
     expect(createData.firstLoginCompletedAt).toBeUndefined();

@@ -37,6 +37,11 @@ import {
   type ImportRowError,
   type ImportStudyYear,
 } from "./import.types";
+import {
+  readXlsxLexicalSheets,
+  type XlsxLexicalCell,
+  type XlsxLexicalSheet,
+} from "./xlsx-lexical-reader";
 
 const MAX_IMPORT_BYTES =
   Number(process.env.MAX_EXCEL_FILE_SIZE_MB || 10) * 1024 * 1024;
@@ -51,6 +56,7 @@ const PEOPLE_SOURCE_KEY_CONTEXT = "avs-people-import-source-encryption-v1\0";
 const PEOPLE_FIELD_LABELS: Record<string, string> = {
   full_name: "User Name",
   college_identity_id: "User ID",
+  email: "Official College Email",
   temporary_password: "User Password",
   department_code: "Department",
   year: "Year",
@@ -142,6 +148,7 @@ const HEADER_ALIASES: Record<string, string> = {
   college_id: "college_identity_id",
   college_email: "email",
   official_email: "email",
+  official_college_email: "email",
   email_address: "email",
   email_id: "email",
   mail_id: "email",
@@ -220,6 +227,7 @@ interface ParseOptions {
 export interface ImportSheetInspection {
   sheetName: string;
   headerRowNumber?: number;
+  sourceHeaders?: string[];
   rowCount: number;
   sourceDepartmentCode: string;
   mappedDepartmentCode?: string;
@@ -235,13 +243,14 @@ export interface ImportDuplicateGroup {
   }>;
 }
 
-interface AvsStudentWorkbook {
+interface AvsCredentialWorkbook {
   matrix: unknown[][];
   sheetNames: string[];
   sheetInspections: ImportSheetInspection[];
   detectedStudyYear?: ImportStudyYear;
   passwordWarnings: number;
   errors: ImportRowError[];
+  credentialLayout: true;
 }
 
 const credentialExportRowSchema = z
@@ -276,6 +285,9 @@ const importResultReportSchema = z
         message: z.string(),
         userId: z.string().max(60).optional(),
         userName: z.string().max(180).optional(),
+        email: z.string().max(254).optional(),
+        department: z.string().max(180).optional(),
+        year: z.string().max(20).optional(),
       }),
     ),
     credentials: z.array(credentialExportRowSchema).optional(),
@@ -358,6 +370,8 @@ export class ImportsFileService {
     let detectedStudyYear: ImportStudyYear | undefined;
     let passwordWarnings = 0;
     let workbookErrors: ImportRowError[] = [];
+    let credentialLayout = false;
+    let genericPeopleLexicalSheet: XlsxLexicalSheet | undefined;
     try {
       if (extension === ".csv")
         matrix = parse(file.buffer, {
@@ -369,17 +383,32 @@ export class ImportsFileService {
           trim: false,
         }) as unknown[][];
       else if (extension === ".xls") {
+        if (entityType === "PEOPLE") {
+          throw new BadRequestException(
+            "Legacy .xls People imports cannot prove exact password characters. Save the workbook as .xlsx with passwords stored as text before uploading.",
+          );
+        }
         const parsed = this.parseLegacyWorkbook(file.buffer, options.sheetName);
         matrix = parsed.matrix;
         sheetNames = parsed.sheetNames;
         selectedSheetName = parsed.selectedSheetName;
       } else {
+        const peopleLexicalSheets =
+          entityType === "PEOPLE"
+            ? await readXlsxLexicalSheets(file.buffer)
+            : undefined;
+        const avsEntityType =
+          entityType === "PEOPLE" || entityType === "STUDENTS"
+            ? entityType
+            : undefined;
         const avsWorkbook =
-          entityType === "STUDENTS" && !options.sheetName
-            ? await this.parseAvsStudentWorkbook(
+          avsEntityType && !options.sheetName
+            ? await this.parseAvsCredentialWorkbook(
                 file.buffer,
                 file.originalname,
+                avsEntityType,
                 options,
+                peopleLexicalSheets,
               )
             : null;
         if (avsWorkbook) {
@@ -389,6 +418,7 @@ export class ImportsFileService {
           detectedStudyYear = avsWorkbook.detectedStudyYear;
           passwordWarnings = avsWorkbook.passwordWarnings;
           workbookErrors = avsWorkbook.errors;
+          credentialLayout = avsWorkbook.credentialLayout;
         } else {
           const parsed = await this.parseWorkbook(
             file.buffer,
@@ -397,6 +427,16 @@ export class ImportsFileService {
           matrix = parsed.matrix;
           sheetNames = parsed.sheetNames;
           selectedSheetName = parsed.selectedSheetName;
+          if (entityType === "PEOPLE") {
+            genericPeopleLexicalSheet = selectedSheetName
+              ? peopleLexicalSheets?.get(selectedSheetName)
+              : undefined;
+            if (!genericPeopleLexicalSheet) {
+              throw new BadRequestException(
+                "The selected People worksheet could not be matched to its exact XML values.",
+              );
+            }
+          }
         }
       }
     } catch (error) {
@@ -439,23 +479,28 @@ export class ImportsFileService {
     );
     const allowed = new Set([...template.required, ...template.optional]);
     const unexpected = headers.filter((header) => !allowed.has(header));
+    const genericHeaderMessages = [
+      ...(missing.length
+        ? [
+            `Missing required headers: ${missing
+              .map((field) => this.fieldLabel(entityType, field))
+              .join(", ")}.`,
+          ]
+        : []),
+      ...(unexpected.length
+        ? [
+            `Unexpected headers: ${unexpected.join(", ")}. Map or skip these columns before confirming.`,
+          ]
+        : []),
+    ];
     const headerMessages =
-      entityType === "PEOPLE"
+      entityType === "PEOPLE" && !credentialLayout
         ? this.peopleHeaderMessages(rawHeaders)
-        : [
-            ...(missing.length
-              ? [
-                  `Missing required headers: ${missing
-                    .map((field) => this.fieldLabel(entityType, field))
-                    .join(", ")}.`,
-                ]
-              : []),
-            ...(unexpected.length
-              ? [
-                  `Unexpected headers: ${unexpected.join(", ")}. Map or skip these columns before confirming.`,
-                ]
-              : []),
-          ];
+        : genericHeaderMessages;
+    const genericPeoplePasswordColumn =
+      entityType === "PEOPLE" && genericPeopleLexicalSheet
+        ? activeColumns.find((column) => column.header === "temporary_password")
+        : undefined;
 
     const rows = matrix
       .slice(1)
@@ -463,18 +508,45 @@ export class ImportsFileService {
       .filter(({ source }) =>
         activeColumns.some((column) => this.cell(source[column.index])),
       )
-      .map(({ source, sourceRowNumber }) => {
+      .map(({ source, sourceRowNumber }, aggregateIndex) => {
+        const lexicalPassword = genericPeoplePasswordColumn
+          ? this.normalizeLexicalTemporaryPassword(
+              genericPeopleLexicalSheet?.cells.get(
+                this.excelCellAddress(
+                  genericPeoplePasswordColumn.index + 1,
+                  sourceRowNumber,
+                ),
+              ),
+            )
+          : undefined;
+        if (lexicalPassword?.warning) passwordWarnings += 1;
+        if (lexicalPassword?.error) {
+          workbookErrors.push({
+            rowNumber: aggregateIndex + 2,
+            field: "temporary_password",
+            message: lexicalPassword.error,
+          });
+        }
         const row = this.prepareRow(
           entityType,
           Object.fromEntries(
             activeColumns.map((column) => [
               column.header,
-              this.importCell(entityType, column.header, source[column.index]),
+              this.importCell(
+                entityType,
+                column.header,
+                column.header === "temporary_password" && lexicalPassword
+                  ? lexicalPassword.value
+                  : source[column.index],
+              ),
             ]),
           ) as ImportRow,
         );
         if (entityType === "PEOPLE") {
-          row.source_row_number = String(sourceRowNumber);
+          row.import_row_number = String(aggregateIndex + 2);
+          if (!row.source_row_number?.trim()) {
+            row.source_row_number = String(sourceRowNumber);
+          }
         }
         return row;
       });
@@ -903,7 +975,7 @@ export class ImportsFileService {
           field: "temporary_password",
           message:
             entityType === "PEOPLE"
-              ? "User Password must be 12 to 200 characters and contain an uppercase letter, lowercase letter, number, and special character."
+              ? this.peopleTemporaryPasswordMessage()
               : "temporary_password must be at least 6 characters and is accepted only as a first-login temporary password.",
         });
       if (
@@ -1056,9 +1128,18 @@ export class ImportsFileService {
 
   private logicalKeys(entityType: ImportEntityType, row: ImportRow): string[] {
     if (entityType === "PEOPLE") {
-      return row.college_identity_id
-        ? [`identity:${row.college_identity_id.toUpperCase()}`]
-        : [];
+      const identity = row.college_identity_id
+        ?.trim()
+        .toLocaleUpperCase("en-US");
+      const email = row.email?.trim().toLocaleLowerCase("en-US");
+      const identityIsEmail =
+        Boolean(identity) &&
+        Boolean(email) &&
+        identity?.toLocaleLowerCase("en-US") === email;
+      return [
+        identity && !identityIsEmail ? `identity:${identity}` : "",
+        email ? `email:${email}` : "",
+      ].filter(Boolean);
     }
     if (["PEOPLE", "USERS", "STUDENTS", "STAFF"].includes(entityType)) {
       if (row.subject_code) {
@@ -1185,11 +1266,15 @@ export class ImportsFileService {
     return { matrix: [], sheetNames, selectedSheetName: sheetNames[0] };
   }
 
-  private async parseAvsStudentWorkbook(
+  private async parseAvsCredentialWorkbook(
     buffer: Buffer,
     originalFileName: string,
+    entityType: "PEOPLE" | "STUDENTS",
     options: ParseOptions,
-  ): Promise<AvsStudentWorkbook | null> {
+    suppliedLexicalSheets?: ReadonlyMap<string, XlsxLexicalSheet>,
+  ): Promise<AvsCredentialWorkbook | null> {
+    const lexicalSheets =
+      suppliedLexicalSheets ?? (await readXlsxLexicalSheets(buffer));
     const workbook = new Workbook();
     await workbook.xlsx.load(
       buffer as unknown as Parameters<typeof workbook.xlsx.load>[0],
@@ -1200,8 +1285,8 @@ export class ImportsFileService {
     const sheetInspections: ImportSheetInspection[] = [];
     const dataRows: unknown[][] = [];
     const errors: ImportRowError[] = [];
-    const detectedStudyYear =
-      options.forcedStudyYear ?? this.studyYearFromFileName(originalFileName);
+    const fileStudyYear = this.studyYearFromFileName(originalFileName);
+    const detectedStudyYear = options.forcedStudyYear ?? fileStudyYear;
     let passwordWarnings = 0;
     let recognizedSheets = 0;
     let avsLayoutDetected = false;
@@ -1212,6 +1297,12 @@ export class ImportsFileService {
         row.some((cell) => this.cell(cell)),
       );
       const sourceDepartmentCode = worksheet.name.trim();
+      const lexicalSheet = lexicalSheets.get(worksheet.name);
+      if (!lexicalSheet) {
+        throw new BadRequestException(
+          `The workbook XML for sheet ${worksheet.name} could not be resolved.`,
+        );
+      }
       if (!hasContent) {
         sheetInspections.push({
           sheetName: worksheet.name,
@@ -1222,12 +1313,16 @@ export class ImportsFileService {
         continue;
       }
       const headerIndex = matrix.slice(0, 10).findIndex((row) => {
-        const headers = row.map((cell) =>
-          this.normalizeHeader(this.cell(cell), "STUDENTS"),
+        const sourceHeaders = new Set(
+          row.map((cell) => this.cell(cell).trim().toLocaleUpperCase("en-US")),
         );
-        return (
-          headers.includes("email") && headers.includes("temporary_password")
-        );
+        return [
+          "FIRST NAME",
+          "LAST NAME",
+          "EMAIL ID",
+          "PASSWORD",
+          "/PATH",
+        ].every((header) => sourceHeaders.has(header));
       });
       if (headerIndex < 0) {
         sheetInspections.push({
@@ -1243,21 +1338,21 @@ export class ImportsFileService {
       const rawHeaders =
         matrix[headerIndex]?.map((cell) => this.cell(cell)) ?? [];
       const headers = rawHeaders.map((header) =>
-        this.normalizeHeader(header, "STUDENTS", options.columnMapping),
+        this.normalizeHeader(header, entityType, options.columnMapping),
       );
       const emailIndex = headers.indexOf("email");
       const passwordIndex = headers.indexOf("temporary_password");
+      const identityIndex = headers.indexOf("college_identity_id");
       const firstNameIndex = headers.indexOf("first_name");
       const lastNameIndex = headers.indexOf("last_name");
       const fullNameIndex = headers.indexOf("full_name");
+      const departmentIndex = headers.indexOf("department_code");
+      const yearIndex = headers.indexOf("year");
+      const classroomIndex = headers.indexOf("class_room_number");
+      const mobileIndex = headers.indexOf("mobile");
       const legacyPathIndex = headers.indexOf("legacy_path");
-      const configuredDepartmentCode = this.departmentMapping(
-        options.departmentMappings,
-        sourceDepartmentCode,
-      );
-      const mappedDepartmentCode =
-        configuredDepartmentCode ?? sourceDepartmentCode;
-      if (firstNameIndex >= 0 || lastNameIndex >= 0) avsLayoutDetected = true;
+      if (firstNameIndex >= 0 || lastNameIndex >= 0 || fullNameIndex >= 0)
+        avsLayoutDetected = true;
       let sheetRowCount = 0;
 
       for (
@@ -1267,16 +1362,39 @@ export class ImportsFileService {
       ) {
         const source = matrix[matrixIndex] ?? [];
         if (!source.some((cell) => this.cell(cell))) continue;
-        const email = this.cell(source[emailIndex]);
+        const email = this.cell(source[emailIndex]).toLocaleLowerCase("en-US");
         const rawPasswordCell = worksheet
           .getRow(matrixIndex + 1)
           .getCell(passwordIndex + 1);
-        const password = this.normalizeTemporaryPassword(rawPasswordCell);
+        const lexicalPasswordCell = lexicalSheet.cells.get(
+          rawPasswordCell.address,
+        );
+        const password = this.normalizeTemporaryPassword(
+          rawPasswordCell,
+          lexicalPasswordCell,
+        );
         const firstName = this.cell(source[firstNameIndex]);
         const lastName = this.cell(source[lastNameIndex]);
         const fullName =
           this.cell(source[fullNameIndex]) ||
           [firstName, lastName].filter(Boolean).join(" ").trim();
+        const explicitCollegeIdentityId = this.cell(source[identityIndex]);
+        const collegeIdentityId =
+          explicitCollegeIdentityId || (entityType === "PEOPLE" ? email : "");
+        const explicitDepartment = this.cell(source[departmentIndex]);
+        const sourceDepartment = explicitDepartment || sourceDepartmentCode;
+        const configuredDepartmentCode = this.departmentMapping(
+          options.departmentMappings,
+          sourceDepartment,
+        );
+        const mappedDepartmentCode =
+          configuredDepartmentCode ?? sourceDepartment;
+        const explicitYear = this.cell(source[yearIndex]);
+        const normalizedExplicitYear = explicitYear
+          ? this.normalizedStudyYear(explicitYear)
+          : undefined;
+        const rowYear =
+          normalizedExplicitYear ?? (explicitYear || detectedStudyYear || "");
         const aggregateRowNumber = dataRows.length + 2;
         if (password.warning) passwordWarnings += 1;
         if (password.error) {
@@ -1286,32 +1404,77 @@ export class ImportsFileService {
             message: `${password.error} (${worksheet.name}, row ${matrixIndex + 1}).`,
           });
         }
-        dataRows.push([
-          firstName,
-          lastName,
-          fullName,
-          email,
-          password.value,
-          mappedDepartmentCode,
-          detectedStudyYear ?? "",
-          this.cell(source[legacyPathIndex]),
-          worksheet.name,
-          String(matrixIndex + 1),
-          sourceDepartmentCode,
-          password.error
-            ? "Password value requires review"
-            : password.warning
-              ? "Password exact numeric format verified"
-              : "Password format valid",
-        ]);
+        if (
+          explicitYear &&
+          detectedStudyYear &&
+          normalizedExplicitYear &&
+          normalizedExplicitYear !== detectedStudyYear
+        ) {
+          errors.push({
+            rowNumber: aggregateRowNumber,
+            field: "year",
+            message: `Study year conflicts with the workbook context (${worksheet.name}, row ${matrixIndex + 1}).`,
+          });
+        }
+        if (
+          fileStudyYear &&
+          options.forcedStudyYear &&
+          fileStudyYear !== options.forcedStudyYear
+        ) {
+          errors.push({
+            rowNumber: aggregateRowNumber,
+            field: "year",
+            message: `Selected study year conflicts with the workbook filename (${worksheet.name}, row ${matrixIndex + 1}).`,
+          });
+        }
+        const passwordStatus = password.error
+          ? "Password value requires review"
+          : password.warning
+            ? "Password exact XML integer verified"
+            : "Password text preserved";
+        dataRows.push(
+          entityType === "PEOPLE"
+            ? [
+                fullName,
+                collegeIdentityId,
+                email,
+                password.value,
+                mappedDepartmentCode,
+                rowYear,
+                this.cell(source[classroomIndex]),
+                this.cell(source[mobileIndex]),
+                worksheet.name,
+                String(matrixIndex + 1),
+                sourceDepartment,
+                passwordStatus,
+              ]
+            : [
+                firstName,
+                lastName,
+                fullName,
+                email,
+                password.value,
+                mappedDepartmentCode,
+                rowYear,
+                this.cell(source[legacyPathIndex]),
+                worksheet.name,
+                String(matrixIndex + 1),
+                sourceDepartment,
+                passwordStatus,
+              ],
+        );
         sheetRowCount += 1;
       }
       sheetInspections.push({
         sheetName: worksheet.name,
         headerRowNumber: headerIndex + 1,
+        sourceHeaders: rawHeaders.filter(Boolean),
         rowCount: sheetRowCount,
         sourceDepartmentCode,
-        mappedDepartmentCode: configuredDepartmentCode,
+        mappedDepartmentCode: this.departmentMapping(
+          options.departmentMappings,
+          sourceDepartmentCode,
+        ),
         status: "READY",
       });
     }
@@ -1319,20 +1482,35 @@ export class ImportsFileService {
     if (!recognizedSheets || !avsLayoutDetected) return null;
     return {
       matrix: [
-        [
-          "first_name",
-          "last_name",
-          "full_name",
-          "email",
-          "temporary_password",
-          "department_code",
-          "year",
-          "legacy_path",
-          "source_sheet",
-          "source_row_number",
-          "source_department_code",
-          "password_status",
-        ],
+        entityType === "PEOPLE"
+          ? [
+              "full_name",
+              "college_identity_id",
+              "email",
+              "temporary_password",
+              "department_code",
+              "year",
+              "class_room_number",
+              "mobile",
+              "source_sheet",
+              "source_row_number",
+              "source_department_code",
+              "password_status",
+            ]
+          : [
+              "first_name",
+              "last_name",
+              "full_name",
+              "email",
+              "temporary_password",
+              "department_code",
+              "year",
+              "legacy_path",
+              "source_sheet",
+              "source_row_number",
+              "source_department_code",
+              "password_status",
+            ],
         ...dataRows,
       ],
       sheetNames,
@@ -1340,6 +1518,7 @@ export class ImportsFileService {
       detectedStudyYear,
       passwordWarnings,
       errors,
+      credentialLayout: true,
     };
   }
 
@@ -1485,13 +1664,75 @@ export class ImportsFileService {
     return String(value);
   }
 
-  private normalizeTemporaryPassword(cell: Cell): {
+  private excelCellAddress(columnNumber: number, rowNumber: number): string {
+    let remaining = columnNumber;
+    let column = "";
+    while (remaining > 0) {
+      remaining -= 1;
+      column = String.fromCharCode(65 + (remaining % 26)) + column;
+      remaining = Math.floor(remaining / 26);
+    }
+    return `${column}${rowNumber}`;
+  }
+
+  private normalizeLexicalTemporaryPassword(lexical?: XlsxLexicalCell): {
     value: string;
     warning: boolean;
     error?: string;
   } {
-    if (this.isFormulaCell(cell))
+    if (!lexical || lexical.kind === "BLANK") {
+      return { value: "", warning: false };
+    }
+    if (lexical.hasFormula) {
       return { value: "", warning: true, error: AVS_PASSWORD_PRECISION_ERROR };
+    }
+    if (lexical.kind === "NUMBER") {
+      return /^\d+$/.test(lexical.rawValue)
+        ? { value: lexical.rawValue, warning: true }
+        : {
+            value: "",
+            warning: true,
+            error: AVS_PASSWORD_PRECISION_ERROR,
+          };
+    }
+    if (["SHARED_STRING", "INLINE_STRING", "STRING"].includes(lexical.kind)) {
+      return { value: lexical.text, warning: false };
+    }
+    return { value: "", warning: true, error: AVS_PASSWORD_PRECISION_ERROR };
+  }
+
+  private normalizeTemporaryPassword(
+    cell: Cell,
+    lexical?: XlsxLexicalCell,
+  ): {
+    value: string;
+    warning: boolean;
+    error?: string;
+  } {
+    if (lexical?.hasFormula || this.isFormulaCell(cell))
+      return { value: "", warning: true, error: AVS_PASSWORD_PRECISION_ERROR };
+    if (lexical) {
+      if (lexical.kind === "NUMBER") {
+        if (!/^\d+$/.test(lexical.rawValue)) {
+          return {
+            value: "",
+            warning: true,
+            error: AVS_PASSWORD_PRECISION_ERROR,
+          };
+        }
+        return { value: lexical.rawValue, warning: true };
+      }
+      if (["SHARED_STRING", "INLINE_STRING", "STRING"].includes(lexical.kind)) {
+        return { value: lexical.text, warning: false };
+      }
+      if (lexical.kind !== "BLANK") {
+        return {
+          value: "",
+          warning: true,
+          error: AVS_PASSWORD_PRECISION_ERROR,
+        };
+      }
+    }
     const value = cell.value;
     const formatted = String(cell.text ?? "").trim();
     if (typeof value === "number") {
@@ -1702,7 +1943,10 @@ export class ImportsFileService {
       header.trim().toLocaleLowerCase("en-US"),
     );
     const suppliedKeys = new Set(suppliedHeaderKeys);
-    const missing = PEOPLE_IMPORT_HEADERS.filter(
+    const requiredHeaders = IMPORT_TEMPLATES.PEOPLE.required.map(
+      (field) => PEOPLE_FIELD_LABELS[field] ?? field,
+    );
+    const missing = requiredHeaders.filter(
       (header) => !suppliedKeys.has(header.toLocaleLowerCase("en-US")),
     );
     const unexpected = rawHeaders.filter(
@@ -1898,6 +2142,11 @@ export class ImportsFileService {
           ? { userId: row.college_identity_id.slice(0, 60) }
           : {}),
         ...(row?.full_name ? { userName: row.full_name.slice(0, 180) } : {}),
+        ...(row?.email ? { email: row.email.slice(0, 254) } : {}),
+        ...(row?.department_code
+          ? { department: row.department_code.slice(0, 180) }
+          : {}),
+        ...(row?.year ? { year: row.year.slice(0, 20) } : {}),
       };
     });
   }
@@ -2038,15 +2287,35 @@ export class ImportsFileService {
     );
   }
   private validPeopleTemporaryPassword(value: string): boolean {
-    const trimmed = value.trim();
-    return (
-      trimmed.length >= 12 &&
-      trimmed.length <= 200 &&
-      /[a-z]/.test(trimmed) &&
-      /[A-Z]/.test(trimmed) &&
-      /\d/.test(trimmed) &&
-      /[^A-Za-z0-9\s]/.test(trimmed)
+    const minimum = this.config.get<number>(
+      "IMPORT_TEMP_PASSWORD_MIN_LENGTH",
+      6,
     );
+    const maximum = this.config.get<number>(
+      "IMPORT_TEMP_PASSWORD_MAX_LENGTH",
+      200,
+    );
+    const exact = value;
+    if (exact.length < minimum || exact.length > maximum) return false;
+    if (/^\d+$/.test(exact)) return true;
+    return (
+      exact.length >= 12 &&
+      /[a-z]/.test(exact) &&
+      /[A-Z]/.test(exact) &&
+      /\d/.test(exact) &&
+      /[^A-Za-z0-9\s]/.test(exact)
+    );
+  }
+  private peopleTemporaryPasswordMessage(): string {
+    const minimum = this.config.get<number>(
+      "IMPORT_TEMP_PASSWORD_MIN_LENGTH",
+      6,
+    );
+    const maximum = this.config.get<number>(
+      "IMPORT_TEMP_PASSWORD_MAX_LENGTH",
+      200,
+    );
+    return `User Password must be ${minimum} to ${maximum} exact characters. Numeric-only college temporary passwords are allowed; other passwords must contain uppercase, lowercase, number, and special characters.`;
   }
   private looksLikeFormula(field: string, value: string): boolean {
     const trimmed = value.trim();

@@ -48,8 +48,17 @@ function harness() {
     $queryRawUnsafe: jest.fn().mockResolvedValue([]),
   };
   const prisma = {
-    user: { findFirst: jest.fn() },
-    studentProfile: { findUnique: jest.fn().mockResolvedValue(null) },
+    user: {
+      findFirst: jest.fn(),
+      findUniqueOrThrow: jest.fn().mockResolvedValue({
+        collegeIdentityId: "AVS001",
+        onboardingStudyYear: 2,
+      }),
+    },
+    studentProfile: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
     userScope: { findFirst: jest.fn().mockResolvedValue(null) },
     department: { findFirst: jest.fn() },
     $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
@@ -73,6 +82,110 @@ function harness() {
 }
 
 describe("UsersService student placement integration", () => {
+  it("locks an existing student profile's complete academic placement", async () => {
+    const { service, prisma } = harness();
+    const student = {
+      ...actor,
+      id: "student-id",
+      roles: ["STUDENT"],
+      fullName: "Student One",
+    };
+    prisma.studentProfile.findFirst.mockResolvedValue({
+      department: {
+        id: "department-id",
+        code: "CSE",
+        name: "Computer Science and Engineering",
+      },
+    });
+    prisma.user.findUniqueOrThrow.mockResolvedValue({
+      fullName: "Student One",
+      collegeIdentityId: "AVS001",
+      onboardingStudyYear: null,
+      studentProfile: {
+        registerNumber: "999999990001",
+        programmeId: "programme-id",
+        sectionId: "section-id",
+        studyYear: 2,
+        section: {
+          semesterId: "semester-id",
+          semester: { academicYearId: "academic-year-id" },
+        },
+      },
+    });
+
+    const requirements = await service.profileRequirements(student);
+
+    expect(requirements.lockedFields).toEqual(
+      expect.arrayContaining([
+        "departmentId",
+        "studyYear",
+        "programmeId",
+        "academicYearId",
+        "semesterId",
+        "sectionId",
+      ]),
+    );
+    expect(requirements.lockedValues).toMatchObject({
+      department: {
+        id: "department-id",
+        code: "CSE",
+        name: "Computer Science and Engineering",
+      },
+      programmeId: "programme-id",
+      academicYearId: "academic-year-id",
+      semesterId: "semester-id",
+      sectionId: "section-id",
+      studyYear: 2,
+    });
+    expect(prisma.studentProfile.findFirst).toHaveBeenCalledWith({
+      where: {
+        userId: "student-id",
+        department: { isActive: true, archivedAt: null },
+      },
+      select: {
+        department: { select: { id: true, code: true, name: true } },
+      },
+    });
+  });
+
+  it("returns semester ownership data with the current profile", async () => {
+    const { service, prisma } = harness();
+    const student = {
+      ...actor,
+      id: "student-id",
+      roles: ["STUDENT"],
+      fullName: "Student One",
+    };
+    prisma.user.findUniqueOrThrow.mockResolvedValue({
+      id: "student-id",
+      studentProfile: {
+        section: {
+          id: "section-id",
+          semester: {
+            id: "semester-id",
+            academicYearId: "academic-year-id",
+          },
+        },
+      },
+    });
+
+    await service.myProfile(student);
+
+    expect(prisma.user.findUniqueOrThrow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          studentProfile: {
+            include: expect.objectContaining({
+              section: {
+                include: expect.objectContaining({ semester: true }),
+              },
+            }),
+          },
+        }),
+      }),
+    );
+  });
+
   it("checks and repairs canonical placement before activating a student", async () => {
     const { service, prisma, tx, placements } = harness();
     prisma.user.findFirst.mockResolvedValue({
@@ -303,6 +416,7 @@ describe("UsersService student placement integration", () => {
       programmeId: "programme-id",
       sectionId: "section-id",
       studyYear: 2,
+      registerNumber: "999999990001",
       section: {
         semesterId: "semester-id",
         semester: { academicYearId: "academic-year-id" },
@@ -322,7 +436,7 @@ describe("UsersService student placement integration", () => {
           fullName: "Student One",
           mobileNumber: "9876543210",
           collegeId: "AVS001",
-          registerNumber: "620124104001",
+          registerNumber: "999999990001",
           departmentId: "department-id",
           programmeId: "programme-id",
           academicYearId: "academic-year-id",
@@ -334,6 +448,58 @@ describe("UsersService student placement integration", () => {
       ),
     ).rejects.toThrow("Students cannot change their academic placement");
     expect(placements.placeStudent).not.toHaveBeenCalled();
+  });
+
+  it("uses the existing authoritative placement without requiring it to be echoed", async () => {
+    const { service, prisma, placements } = harness();
+    prisma.studentProfile.findFirst.mockResolvedValue({
+      department: {
+        id: "department-id",
+        code: "CSE",
+        name: "Computer Science and Engineering",
+      },
+    });
+    prisma.studentProfile.findUnique.mockResolvedValue({
+      departmentId: "department-id",
+      programmeId: "programme-id",
+      sectionId: "section-id",
+      studyYear: 2,
+      registerNumber: "999999990001",
+      section: {
+        semesterId: "semester-id",
+        semester: { academicYearId: "academic-year-id" },
+      },
+    });
+    const student = {
+      ...actor,
+      id: "student-id",
+      roles: ["STUDENT"],
+      fullName: "Student One",
+    };
+
+    await service.submitMyProfile(
+      student,
+      {
+        fullName: "Student One",
+        mobileNumber: "9876543210",
+        collegeId: "AVS001",
+      },
+      "request-id",
+    );
+
+    expect(placements.placeStudent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sectionId: "section-id",
+        profile: expect.objectContaining({
+          departmentId: "department-id",
+          programmeId: "programme-id",
+          academicYearId: "academic-year-id",
+          semesterId: "semester-id",
+          studyYear: 2,
+        }),
+      }),
+    );
   });
 
   it("routes student profile submission through the canonical placement transaction", async () => {
@@ -351,7 +517,6 @@ describe("UsersService student placement integration", () => {
         fullName: "Student One",
         mobileNumber: "9876543210",
         collegeId: "AVS001",
-        registerNumber: "620124104001",
         departmentId: "department-id",
         programmeId: "programme-id",
         academicYearId: "academic-year-id",
@@ -374,7 +539,7 @@ describe("UsersService student placement integration", () => {
           programmeId: "programme-id",
           academicYearId: "academic-year-id",
           semesterId: "semester-id",
-          registerNumber: "620124104001",
+          registerNumber: null,
           studyYear: 2,
         }),
       }),
@@ -397,7 +562,6 @@ describe("UsersService student placement integration", () => {
           fullName: "Student One",
           mobileNumber: "9876543210",
           collegeId: "AVS001",
-          registerNumber: "620124104001",
           departmentId: "department-id",
           programmeId: "programme-id",
           academicYearId: "academic-year-id",
@@ -479,7 +643,7 @@ describe("UsersService student placement integration", () => {
             academicYearId: "academic-year-id",
             semesterId: "semester-id",
             sectionId: "section-id",
-            registerNumber: "620124104001",
+            registerNumber: "999999990001",
             studyYear: 2,
           },
         },

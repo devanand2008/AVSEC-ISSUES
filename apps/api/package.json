@@ -51,6 +51,7 @@
     "date-fns-tz": "3.2.0",
     "dotenv": "17.2.3",
     "exceljs": "^4.4.0",
+    "fast-xml-parser": "5.10.1",
     "firebase-admin": "^14.2.0",
     "helmet": "8.1.0",
     "ioredis": "5.11.1",
@@ -73,6 +74,7 @@
     "socket.io": "4.8.3",
     "tsx": "4.20.6",
     "ulid": "3.0.1",
+    "unzipper": "0.12.5",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "4.4.3"
   },

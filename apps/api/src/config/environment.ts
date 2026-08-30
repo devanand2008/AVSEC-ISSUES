@@ -210,6 +210,18 @@ export const environmentSchema = z
       .default("AVS Engineering College"),
     EMAIL_FROM_ADDRESS: optionalString,
     OFFICIAL_EMAIL_DOMAINS: z.string().trim().default("avsenggcollege.ac.in"),
+    IMPORT_TEMP_PASSWORD_MIN_LENGTH: z.coerce
+      .number()
+      .int()
+      .min(6)
+      .max(64)
+      .default(6),
+    IMPORT_TEMP_PASSWORD_MAX_LENGTH: z.coerce
+      .number()
+      .int()
+      .min(12)
+      .max(200)
+      .default(200),
     FIREBASE_PROJECT_ID: optionalString,
     FIREBASE_CLIENT_EMAIL: optionalString,
     FIREBASE_PRIVATE_KEY: optionalString,
@@ -307,6 +319,16 @@ export const environmentSchema = z
     DEVELOPMENT_ADMIN_PASSWORD: optionalString,
   })
   .superRefine((environment, context) => {
+    if (
+      environment.IMPORT_TEMP_PASSWORD_MIN_LENGTH >
+      environment.IMPORT_TEMP_PASSWORD_MAX_LENGTH
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["IMPORT_TEMP_PASSWORD_MAX_LENGTH"],
+        message: "must be at least IMPORT_TEMP_PASSWORD_MIN_LENGTH",
+      });
+    }
     if (environment.WHATSAPP_ENABLED) {
       const required = [
         "WHATSAPP_PHONE_NUMBER_ID",
@@ -482,7 +504,10 @@ export const environmentSchema = z
         message: "must be false in production",
       });
     }
-    if (!environment.PASSWORD_PEPPER || environment.PASSWORD_PEPPER.length < 32) {
+    if (
+      !environment.PASSWORD_PEPPER ||
+      environment.PASSWORD_PEPPER.length < 32
+    ) {
       context.addIssue({
         code: "custom",
         path: ["PASSWORD_PEPPER"],

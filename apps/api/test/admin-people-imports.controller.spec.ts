@@ -32,6 +32,9 @@ describe("AdminPeopleImportsController error report", () => {
             rowNumber: 7,
             userId: '=HYPERLINK("https://example.invalid")',
             userName: "+Formula User",
+            email: "student@avsenggcollege.ac.in",
+            department: "CSE",
+            year: "2",
             message: "@Invalid department",
             field: "temporary_password",
             temporaryPassword: "TopSecret@123",
@@ -56,15 +59,21 @@ describe("AdminPeopleImportsController error report", () => {
     );
     expect(Object.keys(rows[0] ?? {})).toEqual([
       "Row Number",
-      "User ID",
       "User Name",
+      "User ID",
+      "Official College Email",
+      "Department",
+      "Year",
       "Error",
     ]);
     expect(rows).toEqual([
       {
         "Row Number": "7",
-        "User ID": '\'=HYPERLINK("https://example.invalid")',
         "User Name": "'+Formula User",
+        "User ID": '\'=HYPERLINK("https://example.invalid")',
+        "Official College Email": "student@avsenggcollege.ac.in",
+        Department: "CSE",
+        Year: "2",
         Error: "'@Invalid department",
       },
     ]);
@@ -79,7 +88,7 @@ describe("AdminPeopleImportsController error report", () => {
     const content = await streamText(file);
 
     expect(content.replace(/^\uFEFF/, "").trim()).toBe(
-      "Row Number,User ID,User Name,Error",
+      "Row Number,User Name,User ID,Official College Email,Department,Year,Error",
     );
   });
 

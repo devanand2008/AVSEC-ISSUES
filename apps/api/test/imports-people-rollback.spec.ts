@@ -28,8 +28,8 @@ function unchangedImportedUser(id: string) {
     mustChangePassword: true,
     firstLoginCompletedAt: null as Date | null,
     lastLoginAt: null as Date | null,
-    profileCompletionStatus: "IN_PROGRESS",
-    profileCompletionPercentage: 90,
+    profileCompletionStatus: "NOT_STARTED",
+    profileCompletionPercentage: 0,
     credential: {
       passwordChangedAt: null,
       failedAttemptCount: 0,
@@ -252,20 +252,23 @@ describe("People import rollback safety", () => {
         };
       },
     ],
-  ])("rejects a post-import %s change before any delete", async (_label, mutate) => {
-    const id = "00000000-0000-4000-8000-000000000012";
-    const user = unchangedImportedUser(id);
-    mutate(user);
-    const tx = rollbackTransaction({ users: [user] });
+  ])(
+    "rejects a post-import %s change before any delete",
+    async (_label, mutate) => {
+      const id = "00000000-0000-4000-8000-000000000012";
+      const user = unchangedImportedUser(id);
+      mutate(user);
+      const tx = rollbackTransaction({ users: [user] });
 
-    await expect(rollbackPeople(handlerService(), tx, [id])).rejects.toThrow(
-      "has been used or changed",
-    );
+      await expect(rollbackPeople(handlerService(), tx, [id])).rejects.toThrow(
+        "has been used or changed",
+      );
 
-    expect(tx.sectionMembership.deleteMany).not.toHaveBeenCalled();
-    expect(tx.studentProfile.deleteMany).not.toHaveBeenCalled();
-    expect(tx.user.deleteMany).not.toHaveBeenCalled();
-  });
+      expect(tx.sectionMembership.deleteMany).not.toHaveBeenCalled();
+      expect(tx.studentProfile.deleteMany).not.toHaveBeenCalled();
+      expect(tx.user.deleteMany).not.toHaveBeenCalled();
+    },
+  );
 
   it("blocks a dynamically discovered cascading dependency before deleting baseline records", async () => {
     const id = "00000000-0000-4000-8000-000000000013";

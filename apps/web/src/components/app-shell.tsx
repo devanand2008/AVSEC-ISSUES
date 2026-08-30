@@ -33,6 +33,7 @@ import {
   navigationBadgeCount,
   type NotificationSummary,
 } from "@/features/shell/notification-summary";
+import { requiresProfileSetup } from "@/features/auth/post-login-routing";
 import styles from "./app-shell.module.css";
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, loading, logout } = useAuth();
@@ -47,12 +48,20 @@ export function AppShell({ children }: { children: ReactNode }) {
   const canReadNotifications = Boolean(
     user?.permissions.includes("notifications.read_own"),
   );
+  const profileSetupRequired = Boolean(
+    user && !user.mustChangePassword && requiresProfileSetup(user),
+  );
+  const onProfileSetupRoute = pathname === "/profile/setup";
   const notificationSummary = useQuery({
     queryKey: ["notification-summary"],
     queryFn: ({ signal }) =>
       api.get<NotificationSummary>("/notifications/summary", { signal }),
     enabled:
-      !loading && Boolean(user) && !user?.mustChangePassword && canReadNotifications,
+      !loading &&
+      Boolean(user) &&
+      !user?.mustChangePassword &&
+      !profileSetupRequired &&
+      canReadNotifications,
     staleTime: 30_000,
     refetchInterval: 60_000,
     retry: false,
@@ -73,12 +82,29 @@ export function AppShell({ children }: { children: ReactNode }) {
       router.replace("/suspended");
     else if (user?.mustChangePassword && pathname !== "/change-password")
       router.replace("/change-password");
+    else if (profileSetupRequired && !onProfileSetupRoute)
+      router.replace("/profile/setup");
     else if (user && !routeAllowed) router.replace("/unauthorized");
-  }, [loading, user, router, pathname, routeAllowed]);
+  }, [
+    loading,
+    user,
+    router,
+    pathname,
+    routeAllowed,
+    profileSetupRequired,
+    onProfileSetupRoute,
+  ]);
 
   // Fetch pending announcements
   useEffect(() => {
-    if (loading || !user || !routeAllowed || user.mustChangePassword) return;
+    if (
+      loading ||
+      !user ||
+      !routeAllowed ||
+      user.mustChangePassword ||
+      profileSetupRequired
+    )
+      return;
     if (
       ["/login", "/change-password", "/suspended", "/unauthorized"].includes(
         pathname,
@@ -94,9 +120,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         }
       })
       .catch(console.error);
-  }, [loading, user, routeAllowed, pathname]);
+  }, [loading, user, routeAllowed, pathname, profileSetupRequired]);
   useEffect(() => {
-    if (loading || !user || user.mustChangePassword) return;
+    if (loading || !user || user.mustChangePassword || profileSetupRequired)
+      return;
     const source = new EventSource(apiEventUrl("/announcements/stream"), {
       withCredentials: true,
     });
@@ -110,7 +137,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
     source.onerror = () => source.close();
     return () => source.close();
-  }, [loading, user]);
+  }, [loading, user, profileSetupRequired]);
   useEffect(() => {
     if (loading || !user) return;
     const frame = window.requestAnimationFrame(() => {
@@ -123,7 +150,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [loading, pathname, user]);
-  if (loading || !user || !routeAllowed)
+  const redirectingToProfileSetup =
+    profileSetupRequired && !onProfileSetupRoute;
+  if (loading || !user || !routeAllowed || redirectingToProfileSetup)
     return (
       <div
         style={{ minHeight: "100dvh", display: "grid", placeItems: "center" }}
@@ -284,10 +313,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main className="content">{children}</main>
-        {user.permissions.includes("ai.use") && pathname !== "/avs-bot" && (
-          <AvsBotWidget />
-        )}
-        <MobileBottomNavigation />
+        {!profileSetupRequired &&
+          user.permissions.includes("ai.use") &&
+          pathname !== "/avs-bot" && <AvsBotWidget />}
+        {!profileSetupRequired && <MobileBottomNavigation />}
       </div>
 
       {/* Announcements Auto-Display Popup */}

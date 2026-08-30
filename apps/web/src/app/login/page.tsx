@@ -24,6 +24,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
 import { loginErrorMessage } from "./login-error";
 import { probeLoginReadiness, type LoginReadiness } from "./login-readiness";
+import { getPostAuthenticationRoute } from "@/features/auth/post-login-routing";
 
 type LoginHint = {
   identifier: string;
@@ -77,10 +78,11 @@ export default function LoginPage() {
     if (readinessRun.current === run) setReadiness(result);
     readinessRunning.current = false;
   }, []);
-  // Prefetch the dashboard and change-password pages so navigation is instant after login
+  // Prefetch every first-login destination so navigation is instant after login.
   useEffect(() => {
     router.prefetch("/");
     router.prefetch("/change-password");
+    router.prefetch("/profile/setup");
     const warmServer = () => {
       if (document.visibilityState === "visible") {
         void checkConnection();
@@ -115,10 +117,7 @@ export default function LoginPage() {
           JSON.stringify({ identifier, collegeCode }),
         );
       else window.localStorage.removeItem("avs_login_hint");
-      router.push(
-        user.allowedNextRoute ??
-          (user.mustChangePassword ? "/change-password" : "/"),
-      );
+      router.push(getPostAuthenticationRoute(user));
     } catch (caught: unknown) {
       setError(loginErrorMessage(caught));
       setBusy(false);

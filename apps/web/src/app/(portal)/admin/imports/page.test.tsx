@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   post: vi.fn(),
   postForm: vi.fn(),
   download: vi.fn(),
+  routeParams: new URLSearchParams(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -31,6 +32,10 @@ vi.mock("@/providers/auth-provider", () => ({
       roles: ["MAIN_ADMIN"],
     },
   }),
+}));
+
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => mocks.routeParams,
 }));
 
 const peopleJob = {
@@ -52,6 +57,7 @@ const peoplePreview = {
   rawHeaders: [
     "User Name",
     "User ID",
+    "Official College Email",
     "User Password",
     "Department",
     "Year",
@@ -61,6 +67,7 @@ const peoplePreview = {
   headers: [
     "full_name",
     "college_identity_id",
+    "email",
     "temporary_password",
     "department_code",
     "year",
@@ -68,22 +75,46 @@ const peoplePreview = {
     "mobile",
   ],
   columnMapping: {},
-  sheetNames: ["People"],
-  selectedSheetName: "People",
-  sheetInspections: [],
+  sheetNames: ["CSE"],
+  selectedSheetName: "CSE",
+  sheetInspections: [
+    {
+      sheetName: "CSE",
+      headerRowNumber: 1,
+      rowCount: 3,
+      sourceDepartmentCode: "CSE",
+      mappedDepartmentCode: "CSE",
+      sourceHeaders: [
+        "FIRST NAME",
+        "LAST NAME",
+        "EMAIL ID",
+        "PASSWORD",
+        "/PATH",
+      ],
+      status: "READY",
+    },
+  ],
   passwordWarnings: 0,
   duplicateRowCount: 0,
   duplicateGroups: [],
-  duplicateResolution: "KEEP_FIRST",
-  departmentMappings: {},
+  duplicateResolution: "SKIP_ALL",
+  departmentMappings: { CSE: "CSE" },
   unresolvedDepartmentMappings: [],
-  departmentOptions: [],
+  departmentOptions: [
+    {
+      id: "department-cse",
+      code: "CSE",
+      name: "Computer Science and Engineering",
+      shortName: "CSE",
+    },
+  ],
   previewRows: [
     {
       rowNumber: 2,
       values: {
         full_name: "Valid Student",
         college_identity_id: "AVS001",
+        email: "valid.student@avsenggcollege.ac.in",
         temporary_password: "NeverRender!123",
         department_code: "CSE",
         year: "2",
@@ -97,8 +128,11 @@ const peoplePreview = {
       rowNumber: 3,
       userId: "AVS002",
       userName: "Invalid Student",
-      field: "Mobile Number",
-      message: "Mobile Number must contain 7 to 15 digits.",
+      email: "invalid.student@avsenggcollege.ac.in",
+      department: "CSE",
+      year: "2",
+      field: "User ID",
+      message: "User ID is required.",
     },
   ],
   errorsTruncated: false,
@@ -120,6 +154,7 @@ describe("People bulk import page", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.routeParams = new URLSearchParams();
     mocks.get.mockImplementation((path: string) => {
       if (path === "/imports") return Promise.resolve([]);
       if (path === "/imports/job-1") return Promise.resolve(peopleJob);
@@ -136,13 +171,20 @@ describe("People bulk import page", () => {
       await screen.findByText("Basic People template"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Uses exactly User Name, User ID, User Password/),
+      screen.getByText(
+        /Uses exactly User Name, User ID, Official College Email, User Password/,
+      ),
     ).toHaveTextContent(
-      "User Name, User ID, User Password, Department, Year, Class Room Number, and Mobile Number",
+      "User Name, User ID, Official College Email, User Password, Department, Year, Class Room Number, and Mobile Number",
     );
     expect(
-      screen.getByText(/must resolve together to one active academic section/),
+      screen.getByText(/Class Room Number and Mobile Number are optional/),
     ).toBeInTheDocument();
+    const duplicatePolicy = screen.getByRole("combobox", {
+      name: /Duplicate email handling/,
+    });
+    expect(duplicatePolicy).toBeDisabled();
+    expect(duplicatePolicy).toHaveValue("SKIP_ALL");
     expect(
       screen.queryByLabelText(
         "Reset existing users to imported temporary password",
@@ -185,7 +227,39 @@ describe("People bulk import page", () => {
   });
 
   it("keeps passwords out of preview and confirms cancellation in the shared dialog", async () => {
-    mocks.postForm.mockResolvedValue(peoplePreview);
+    mocks.postForm.mockResolvedValue({
+      ...peoplePreview,
+      duplicateRowCount: 2,
+      duplicateGroups: [
+        {
+          normalizedEmail: "duplicate@avsenggcollege.ac.in",
+          locations: [{ rowNumber: 4 }, { rowNumber: 5 }],
+        },
+      ],
+      errors: [
+        ...peoplePreview.errors,
+        {
+          rowNumber: 4,
+          userId: "AVS004",
+          userName: "Duplicate Student",
+          email: "duplicate@avsenggcollege.ac.in",
+          department: "UNKNOWN",
+          year: "9",
+          field: "department_code",
+          message: "Department UNKNOWN does not exist.",
+        },
+        {
+          rowNumber: 5,
+          userId: "AVS004",
+          userName: "Duplicate Student Two",
+          email: "duplicate@avsenggcollege.ac.in",
+          department: "CSE",
+          year: "2",
+          field: "college_identity_id",
+          message: "User ID already exists.",
+        },
+      ],
+    });
     const view = renderPage();
     fireEvent.change(screen.getByLabelText("Import type"), {
       target: { value: "USERS" },
@@ -220,10 +294,53 @@ describe("People bulk import page", () => {
     );
     const submitted = mocks.postForm.mock.calls[0]?.[1] as FormData;
     expect(submitted.get("entityType")).toBe("PEOPLE");
+    expect(submitted.get("duplicateResolution")).toBe("SKIP_ALL");
     expect(submitted.get("resetExistingPasswords")).toBeNull();
     expect(screen.getByText("Valid Student")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Source columns: FIRST NAME, LAST NAME, EMAIL ID, PASSWORD, /PATH",
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByText("NeverRender!123")).not.toBeInTheDocument();
     expect(screen.queryByText("Column mapping")).not.toBeInTheDocument();
+    const summary = screen.getByLabelText("People validation summary");
+    expect(within(summary).getByText("Duplicate emails")).toBeInTheDocument();
+    expect(within(summary).getByText("Duplicate user IDs")).toBeInTheDocument();
+    expect(
+      within(summary).getByText("Unknown departments"),
+    ).toBeInTheDocument();
+    expect(within(summary).getByText("Invalid years")).toBeInTheDocument();
+    expect(within(summary).getByText("Missing passwords")).toBeInTheDocument();
+    expect(within(summary).getByText("Invalid emails")).toBeInTheDocument();
+    expect(within(summary).getAllByText("2")).toHaveLength(1);
+
+    const errors = screen.getByRole("table", { name: "Validation errors" });
+    expect(
+      within(errors).getByRole("columnheader", { name: "Row" }),
+    ).toBeInTheDocument();
+    expect(
+      within(errors).getByRole("columnheader", { name: "Name" }),
+    ).toBeInTheDocument();
+    expect(
+      within(errors).getByRole("columnheader", { name: "User ID" }),
+    ).toBeInTheDocument();
+    expect(
+      within(errors).getByRole("columnheader", { name: "Email" }),
+    ).toBeInTheDocument();
+    expect(
+      within(errors).getByRole("columnheader", { name: "Department" }),
+    ).toBeInTheDocument();
+    expect(
+      within(errors).getByRole("columnheader", { name: "Year" }),
+    ).toBeInTheDocument();
+    expect(
+      within(errors).getByText("invalid.student@avsenggcollege.ac.in"),
+    ).toBeInTheDocument();
+    expect(within(errors).getAllByText("CSE")).not.toHaveLength(0);
+    expect(
+      within(errors).getByText("User ID: User ID is required."),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel import" }));
     const dialog = screen.getByRole("alertdialog");

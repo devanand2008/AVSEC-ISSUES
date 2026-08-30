@@ -35,6 +35,7 @@ import {
 
 interface ImportCreateOptions {
   resetExistingPasswords?: boolean;
+  officialEmailDomains?: readonly string[];
 }
 
 interface PeopleBatchRow {
@@ -119,7 +120,7 @@ export class ImportsHandlerService {
     // large import cannot create an unbounded CPU/memory spike.
     for (const item of rows) {
       const row = { ...item.row };
-      this.assertPeopleCoreFields(row);
+      this.assertPeopleCoreFields(row, options.officialEmailDomains);
       preparedRows.push({
         row,
         rowNumber: item.rowNumber,
@@ -333,6 +334,7 @@ export class ImportsHandlerService {
     rows: ImportRow[],
     importMode: ImportMode,
     preInvalidRows: ReadonlySet<number> = new Set<number>(),
+    officialEmailDomains?: readonly string[],
   ): Promise<ImportRowError[]> {
     if (entityType === "PEOPLE") {
       return this.validatePeopleBatch(
@@ -340,6 +342,7 @@ export class ImportsHandlerService {
         rows,
         importMode,
         preInvalidRows,
+        officialEmailDomains,
       );
     }
     if (!["USERS", "STUDENTS", "STAFF", "PROGRAMMES"].includes(entityType))
@@ -387,6 +390,7 @@ export class ImportsHandlerService {
     rows: ImportRow[],
     importMode: ImportMode,
     preInvalidRows: ReadonlySet<number>,
+    officialEmailDomains?: readonly string[],
   ): Promise<ImportRowError[]> {
     if (!["CREATE_ONLY", "VALIDATE_ONLY"].includes(importMode)) {
       throw new BadRequestException(
@@ -411,13 +415,12 @@ export class ImportsHandlerService {
 
     for (const item of candidates) {
       try {
-        this.assertPeopleCoreFields(item.row);
+        this.assertPeopleCoreFields(item.row, officialEmailDomains);
         if (!item.row.department_code?.trim()) {
           throw new BadRequestException("Department is required.");
         }
-        this.importStudyYear(item.row.year);
-        if (!item.row.class_room_number?.trim()) {
-          throw new BadRequestException("Class Room Number is required.");
+        if (!this.importStudyYear(item.row.year)) {
+          throw new BadRequestException("Year is required.");
         }
       } catch (error) {
         if (isRetryableImportInfrastructureError(error)) throw error;
@@ -432,6 +435,9 @@ export class ImportsHandlerService {
     const identities = [
       ...new Set(coreValid.map((item) => item.row.college_identity_id.trim())),
     ];
+    const emails = [
+      ...new Set(coreValid.map((item) => item.row.email.trim().toLowerCase())),
+    ];
     const [roles, existingUsers, existingProfiles] = await Promise.all([
       this.prisma.role.findMany({
         where: {
@@ -445,9 +451,16 @@ export class ImportsHandlerService {
       this.prisma.user.findMany({
         where: {
           collegeId,
-          collegeIdentityId: { in: identities, mode: "insensitive" },
+          OR: [
+            { collegeIdentityId: { in: identities, mode: "insensitive" } },
+            { normalizedEmail: { in: emails } },
+          ],
         },
-        select: { id: true, collegeIdentityId: true },
+        select: {
+          id: true,
+          collegeIdentityId: true,
+          normalizedEmail: true,
+        },
       }),
       this.prisma.studentProfile.findMany({
         where: {
@@ -474,6 +487,11 @@ export class ImportsHandlerService {
         profile.studentId.toLocaleLowerCase("en-US"),
       ),
     ]);
+    const existingEmails = new Set(
+      existingUsers
+        .map((user) => user.normalizedEmail?.toLocaleLowerCase("en-US"))
+        .filter((email): email is string => Boolean(email)),
+    );
     for (const item of coreValid) {
       if (
         existingIdentities.has(
@@ -485,6 +503,10 @@ export class ImportsHandlerService {
           "A user with this User ID already exists.",
           "college_identity_id",
         );
+      } else if (
+        existingEmails.has(item.row.email.toLocaleLowerCase("en-US"))
+      ) {
+        reject(item, "A user with this email already exists.", "email");
       }
     }
 
@@ -538,7 +560,9 @@ export class ImportsHandlerService {
     }
 
     const departmentValid = identityValid.filter(
-      (item) => !invalidRows.has(item.rowNumber),
+      (item) =>
+        !invalidRows.has(item.rowNumber) &&
+        Boolean(item.row.class_room_number?.trim()),
     );
     if (!departmentValid.length) return errors;
     const classroomValues = [
@@ -1196,7 +1220,7 @@ export class ImportsHandlerService {
         ].some(
           (value) => value !== undefined && value.getTime() > unchangedBefore,
         );
-        const unchangedImportedState =
+        const unchangedAccountState =
           !touchedAfterImport &&
           user.version === 1 &&
           user.status === AccountStatus.ACTIVE &&
@@ -1204,19 +1228,20 @@ export class ImportsHandlerService {
           user.mustChangePassword &&
           user.firstLoginCompletedAt === null &&
           user.lastLoginAt === null &&
-          user.profileCompletionStatus === "IN_PROGRESS" &&
-          user.profileCompletionPercentage === 90 &&
+          user.profileCompletionStatus === "NOT_STARTED" &&
+          user.profileCompletionPercentage === 0 &&
           user.credential?.passwordChangedAt === null &&
           user.credential.failedAttemptCount === 0 &&
           user.credential.lockedUntil === null &&
           user.roles.length === 1 &&
           role?.role.code === "STUDENT" &&
           user.scopes.length === 1 &&
+          scope?.issueCategoryId === null &&
+          user.staffProfile === null;
+        const unchangedPlacedState =
+          profile !== null &&
           scope?.scopeType === ScopeType.SECTION &&
           scope.scopeId !== null &&
-          scope.issueCategoryId === null &&
-          profile !== null &&
-          user.staffProfile === null &&
           user.sectionMemberships.length === 1 &&
           membership?.sectionId === profile.sectionId &&
           membership.status === AcademicMembershipStatus.ACTIVE &&
@@ -1224,7 +1249,15 @@ export class ImportsHandlerService {
           membership.endsOn === null &&
           membership.changedById === null &&
           scope.scopeId === profile.sectionId;
-        if (!unchangedImportedState) {
+        const unchangedStagedState =
+          profile === null &&
+          scope?.scopeType === ScopeType.DEPARTMENT &&
+          scope.scopeId !== null &&
+          user.sectionMemberships.length === 0;
+        if (
+          !unchangedAccountState ||
+          (!unchangedPlacedState && !unchangedStagedState)
+        ) {
           throw new BadRequestException(
             `Imported People account ${user.id} has been used or changed and cannot be rolled back safely.`,
           );
@@ -1232,6 +1265,14 @@ export class ImportsHandlerService {
       }
 
       await this.assertNoCascadingPeopleDependencies(tx, userIds);
+
+      const expectedProfiles = users.filter(
+        (user) => user.studentProfile !== null,
+      ).length;
+      const expectedMemberships = users.reduce(
+        (count, user) => count + user.sectionMemberships.length,
+        0,
+      );
 
       const memberships = await tx.sectionMembership.deleteMany({
         where: { studentUserId: { in: userIds } },
@@ -1247,8 +1288,8 @@ export class ImportsHandlerService {
         },
       });
       if (
-        memberships.count !== userIds.length ||
-        profiles.count !== userIds.length ||
+        memberships.count !== expectedMemberships ||
+        profiles.count !== expectedProfiles ||
         removed.count !== userIds.length
       ) {
         throw new BadRequestException(
@@ -1411,7 +1452,9 @@ export class ImportsHandlerService {
 
     this.ensureAccountIdentity(row);
     const createsStudentProfile =
-      ["PEOPLE", "STUDENT"].includes(kind) || this.hasStudentProfileData(row);
+      kind === "STUDENT" ||
+      (kind === "PEOPLE" && Boolean(row.class_room_number?.trim())) ||
+      this.hasStudentProfileData(row);
     const createsStaffProfile = this.hasStaffProfileData(row);
     const existing = await this.findExistingUserForValidation(
       collegeId,
@@ -1607,7 +1650,7 @@ export class ImportsHandlerService {
         "Validate-only jobs cannot create or update users.",
       );
     if (kind === "PEOPLE") {
-      this.assertPeopleCoreFields(row);
+      this.assertPeopleCoreFields(row, options.officialEmailDomains);
       row.role_codes = "STUDENT";
       row.student_id = row.college_identity_id;
       row.account_status = "ACTIVE";
@@ -1643,7 +1686,9 @@ export class ImportsHandlerService {
       );
     const normalizedEmail = row.email?.toLowerCase() || undefined;
     const createsStudentProfile =
-      ["PEOPLE", "STUDENT"].includes(kind) || this.hasStudentProfileData(row);
+      kind === "STUDENT" ||
+      (kind === "PEOPLE" && Boolean(row.class_room_number?.trim())) ||
+      this.hasStudentProfileData(row);
     const createsStaffProfile = this.hasStaffProfileData(row);
     const existing = await this.findExistingUser(
       tx,
@@ -1837,13 +1882,13 @@ export class ImportsHandlerService {
         mustChangePassword: true,
         profileCompletionStatus:
           kind === "PEOPLE"
-            ? "IN_PROGRESS"
+            ? "NOT_STARTED"
             : createsStudentProfile || createsStaffProfile
               ? "SUBMITTED"
               : "NOT_STARTED",
         profileCompletionPercentage:
           kind === "PEOPLE"
-            ? 90
+            ? 0
             : createsStudentProfile || createsStaffProfile
               ? 100
               : 0,
@@ -4157,6 +4202,15 @@ export class ImportsHandlerService {
       ...(entityType === "PEOPLE" && row.full_name
         ? { userName: row.full_name.slice(0, 180) }
         : {}),
+      ...(entityType === "PEOPLE" && row.email
+        ? { email: row.email.slice(0, 254) }
+        : {}),
+      ...(entityType === "PEOPLE" && row.department_code
+        ? { department: row.department_code.slice(0, 180) }
+        : {}),
+      ...(entityType === "PEOPLE" && row.year
+        ? { year: row.year.slice(0, 20) }
+        : {}),
     };
   }
   private errorMessage(error: unknown, row?: ImportRow): string {
@@ -4225,29 +4279,42 @@ export class ImportsHandlerService {
     return chars.join("");
   }
   private assertTemporaryPassword(value: string, peoplePolicy = false): void {
-    const trimmed = value.trim();
+    const exact = value;
+    const minimum = this.config.get<number>(
+      "IMPORT_TEMP_PASSWORD_MIN_LENGTH",
+      6,
+    );
+    const maximum = this.config.get<number>(
+      "IMPORT_TEMP_PASSWORD_MAX_LENGTH",
+      200,
+    );
     if (
       peoplePolicy &&
       !(
-        trimmed.length >= 12 &&
-        trimmed.length <= 200 &&
-        /[a-z]/.test(trimmed) &&
-        /[A-Z]/.test(trimmed) &&
-        /\d/.test(trimmed) &&
-        /[^A-Za-z0-9\s]/.test(trimmed)
+        exact.length >= minimum &&
+        exact.length <= maximum &&
+        (/^\d+$/.test(exact) ||
+          (exact.length >= 12 &&
+            /[a-z]/.test(exact) &&
+            /[A-Z]/.test(exact) &&
+            /\d/.test(exact) &&
+            /[^A-Za-z0-9\s]/.test(exact)))
       )
     ) {
       throw new BadRequestException(
-        "User Password must be 12 to 200 characters and contain an uppercase letter, lowercase letter, number, and special character.",
+        `User Password must be ${minimum} to ${maximum} exact characters. Numeric-only college temporary passwords are allowed; other passwords must contain uppercase, lowercase, number, and special characters.`,
       );
     }
-    if (!peoplePolicy && trimmed.length < 6) {
+    if (!peoplePolicy && exact.trim().length < 6) {
       throw new BadRequestException(
         "temporary_password must be at least 6 characters.",
       );
     }
   }
-  private assertPeopleCoreFields(row: ImportRow): void {
+  private assertPeopleCoreFields(
+    row: ImportRow,
+    configuredOfficialDomains?: readonly string[],
+  ): void {
     const fullName = row.full_name?.trim() ?? "";
     if (!fullName) throw new BadRequestException("User Name is required.");
     if (fullName.length > 180) {
@@ -4267,6 +4334,27 @@ export class ImportsHandlerService {
         "User ID must contain at most 60 characters.",
       );
     }
+    const email = row.email?.trim().toLowerCase() ?? "";
+    if (!email) {
+      throw new BadRequestException("Official College Email is required.");
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestException("Official College Email is not valid.");
+    }
+    const officialDomains = new Set(
+      (
+        configuredOfficialDomains ??
+        this.config.get<string>("OFFICIAL_EMAIL_DOMAINS", "").split(",")
+      )
+        .map((domain) => domain.trim().toLowerCase().replace(/^@/, ""))
+        .filter(Boolean),
+    );
+    const emailDomain = email.slice(email.lastIndexOf("@") + 1);
+    if (officialDomains.size && !officialDomains.has(emailDomain)) {
+      throw new BadRequestException(
+        "Official College Email must use an approved college domain.",
+      );
+    }
     const password = row.temporary_password ?? "";
     if (!password) throw new BadRequestException("User Password is required.");
     if (password !== password.trim()) {
@@ -4275,7 +4363,7 @@ export class ImportsHandlerService {
       );
     }
     this.assertTemporaryPassword(password, true);
-    if (!/^\d{7,15}$/.test(row.mobile ?? "")) {
+    if (row.mobile && !/^\d{7,15}$/.test(row.mobile)) {
       throw new BadRequestException(
         "Mobile Number must contain only 7 to 15 digits.",
       );

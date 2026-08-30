@@ -124,7 +124,7 @@ describe("SectionPlacementService", () => {
         accountStatus: AccountStatus.ACTIVE,
         profile: {
           studentId: "AVS001",
-          registerNumber: "620124104001",
+          registerNumber: "999999990001",
           departmentId: section.semester.programme.departmentId,
           programmeId: section.semester.programme.id,
           academicYearId: section.semester.academicYearId,
@@ -147,7 +147,7 @@ describe("SectionPlacementService", () => {
       accountStatus: AccountStatus.ACTIVE,
       profile: {
         studentId: "AVS001",
-        registerNumber: "620124104001",
+        registerNumber: "999999990001",
         departmentId: section.semester.programme.departmentId,
         programmeId: section.semester.programme.id,
         academicYearId: section.semester.academicYearId,
@@ -165,7 +165,7 @@ describe("SectionPlacementService", () => {
           programmeId: section.semester.programme.id,
           sectionId: section.id,
           studyYear: 2,
-          registerNumber: "620124104001",
+          registerNumber: "999999990001",
           admissionYear: 2026,
         }),
       }),

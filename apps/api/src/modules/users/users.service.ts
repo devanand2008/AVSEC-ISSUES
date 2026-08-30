@@ -91,14 +91,44 @@ export class UsersService {
     const lockedDepartment = await this.lockedDepartment(user.id);
     const onboarding = await this.prisma.user.findUniqueOrThrow({
       where: { id: user.id },
-      select: { fullName: true, onboardingStudyYear: true },
+      select: {
+        fullName: true,
+        collegeIdentityId: true,
+        onboardingStudyYear: true,
+        studentProfile: {
+          select: {
+            registerNumber: true,
+            programmeId: true,
+            sectionId: true,
+            studyYear: true,
+            section: {
+              select: {
+                semesterId: true,
+                semester: { select: { academicYearId: true } },
+              },
+            },
+          },
+        },
+      },
     });
+    const lockedAcademicPlacement = onboarding.studentProfile
+      ? {
+          programmeId: onboarding.studentProfile.programmeId,
+          academicYearId:
+            onboarding.studentProfile.section.semester.academicYearId,
+          semesterId: onboarding.studentProfile.section.semesterId,
+          sectionId: onboarding.studentProfile.sectionId,
+        }
+      : null;
+    const lockedStudyYear =
+      onboarding.onboardingStudyYear ??
+      onboarding.studentProfile?.studyYear ??
+      null;
     const schemas = {
       STUDENT: {
         requiredFields: [
           "fullName",
           "collegeId",
-          "registerNumber",
           "departmentId",
           "mobileNumber",
           "programmeId",
@@ -167,14 +197,26 @@ export class UsersService {
       ...schema,
       lockedFields: [
         "email",
+        "collegeId",
+        "registerNumber",
         ...(lockedDepartment ? ["departmentId"] : []),
+        ...(lockedStudyYear != null ? ["studyYear"] : []),
+        ...(lockedAcademicPlacement
+          ? ["programmeId", "academicYearId", "semesterId", "sectionId"]
+          : []),
         "primaryRole",
       ],
       lockedValues: {
         email: user.email,
         fullName: onboarding.fullName,
-        studyYear: onboarding.onboardingStudyYear,
+        collegeIdentityId: onboarding.collegeIdentityId,
+        registerNumber: onboarding.studentProfile?.registerNumber ?? null,
+        studyYear: lockedStudyYear,
         department: lockedDepartment,
+        programmeId: lockedAcademicPlacement?.programmeId ?? null,
+        academicYearId: lockedAcademicPlacement?.academicYearId ?? null,
+        semesterId: lockedAcademicPlacement?.semesterId ?? null,
+        sectionId: lockedAcademicPlacement?.sectionId ?? null,
         primaryRole,
       },
     };
@@ -206,6 +248,7 @@ export class UsersService {
             programme: true,
             section: {
               include: {
+                semester: true,
                 assignedRoom: {
                   select: {
                     id: true,
@@ -352,31 +395,24 @@ export class UsersService {
     const role = this.primaryProfileRole(user.roles);
     const lockedDepartment = await this.lockedDepartment(user.id);
     if (role === "STUDENT") {
-      const collegeId = this.requiredString(input.collegeId, "College ID");
-      const registerNumber = this.requiredString(
-        input.registerNumber,
-        "Register Number",
-      );
-      const departmentId =
-        lockedDepartment?.id ??
-        this.requiredString(input.departmentId, "Department");
-      const programmeId = this.requiredString(input.programmeId, "Programme");
-      const academicYearId = this.requiredString(
-        input.academicYearId,
-        "Academic Year",
-      );
-      const semesterId = this.requiredString(input.semesterId, "Semester");
-      const sectionId = this.requiredString(input.sectionId, "Section");
-      const mobileNumber = this.requiredString(
-        input.mobileNumber,
-        "Mobile Number",
-      );
-      const studyYear = this.requiredInteger(
-        input.studyYear,
-        "Study year",
-        1,
-        4,
-      );
+      const onboarding = await this.prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+        select: {
+          collegeIdentityId: true,
+          onboardingStudyYear: true,
+        },
+      });
+      const collegeId = onboarding.collegeIdentityId;
+      const requestedCollegeId = this.optionalString(input.collegeId);
+      if (
+        requestedCollegeId &&
+        requestedCollegeId.toLocaleLowerCase("en-US") !==
+          collegeId.toLocaleLowerCase("en-US")
+      ) {
+        throw new ForbiddenException(
+          "College ID is controlled by an administrator and cannot be changed.",
+        );
+      }
       const existingPlacement = await this.prisma.studentProfile.findUnique({
         where: { userId: user.id },
         select: {
@@ -384,6 +420,7 @@ export class UsersService {
           programmeId: true,
           sectionId: true,
           studyYear: true,
+          registerNumber: true,
           section: {
             select: {
               semesterId: true,
@@ -392,14 +429,91 @@ export class UsersService {
           },
         },
       });
+      const requestedDepartmentId = this.optionalString(input.departmentId);
+      if (
+        lockedDepartment &&
+        requestedDepartmentId &&
+        requestedDepartmentId !== lockedDepartment.id
+      ) {
+        throw new ForbiddenException(
+          "Department is controlled by an administrator and cannot be changed.",
+        );
+      }
+      const requestedProgrammeId = this.optionalString(input.programmeId);
+      const requestedAcademicYearId = this.optionalString(input.academicYearId);
+      const requestedSemesterId = this.optionalString(input.semesterId);
+      const requestedSectionId = this.optionalString(input.sectionId);
       if (
         existingPlacement &&
-        (existingPlacement.departmentId !== departmentId ||
-          existingPlacement.programmeId !== programmeId ||
-          existingPlacement.sectionId !== sectionId ||
-          existingPlacement.studyYear !== studyYear ||
-          existingPlacement.section.semesterId !== semesterId ||
-          existingPlacement.section.semester.academicYearId !== academicYearId)
+        ((requestedDepartmentId &&
+          requestedDepartmentId !== existingPlacement.departmentId) ||
+          (requestedProgrammeId &&
+            requestedProgrammeId !== existingPlacement.programmeId) ||
+          (requestedAcademicYearId &&
+            requestedAcademicYearId !==
+              existingPlacement.section.semester.academicYearId) ||
+          (requestedSemesterId &&
+            requestedSemesterId !== existingPlacement.section.semesterId) ||
+          (requestedSectionId &&
+            requestedSectionId !== existingPlacement.sectionId))
+      ) {
+        throw new ForbiddenException(
+          "Students cannot change their academic placement. Contact an authorised administrator.",
+        );
+      }
+      const departmentId =
+        existingPlacement?.departmentId ??
+        lockedDepartment?.id ??
+        this.requiredString(input.departmentId, "Department");
+      const programmeId =
+        existingPlacement?.programmeId ??
+        this.requiredString(input.programmeId, "Programme");
+      const academicYearId =
+        existingPlacement?.section.semester.academicYearId ??
+        this.requiredString(input.academicYearId, "Academic Year");
+      const semesterId =
+        existingPlacement?.section.semesterId ??
+        this.requiredString(input.semesterId, "Semester");
+      const sectionId =
+        existingPlacement?.sectionId ??
+        this.requiredString(input.sectionId, "Section");
+      const mobileNumber = this.requiredString(
+        input.mobileNumber,
+        "Mobile Number",
+      );
+      const studyYear =
+        onboarding.onboardingStudyYear ??
+        existingPlacement?.studyYear ??
+        this.requiredInteger(input.studyYear, "Study year", 1, 4);
+      const requestedStudyYear =
+        input.studyYear == null || input.studyYear === ""
+          ? undefined
+          : this.requiredInteger(input.studyYear, "Study year", 1, 4);
+      if (
+        onboarding.onboardingStudyYear != null &&
+        requestedStudyYear != null &&
+        requestedStudyYear !== onboarding.onboardingStudyYear
+      ) {
+        throw new ForbiddenException(
+          "Study year is controlled by an administrator and cannot be changed.",
+        );
+      }
+      const registerNumber = existingPlacement?.registerNumber ?? null;
+      const requestedRegisterNumber = this.optionalString(input.registerNumber);
+      if (
+        requestedRegisterNumber &&
+        requestedRegisterNumber.toLocaleLowerCase("en-US") !==
+          registerNumber?.toLocaleLowerCase("en-US")
+      ) {
+        throw new ForbiddenException(
+          "Register number is controlled by an administrator and cannot be changed.",
+        );
+      }
+      if (
+        existingPlacement &&
+        ((lockedDepartment &&
+          existingPlacement.departmentId !== lockedDepartment.id) ||
+          existingPlacement.studyYear !== studyYear)
       ) {
         throw new ForbiddenException(
           "Students cannot change their academic placement. Contact an authorised administrator.",
@@ -790,6 +904,7 @@ export class UsersService {
           profileVerifiedAt: true,
           firstLoginCompletedAt: true,
           lastLoginAt: true,
+          createdAt: true,
           roles: {
             select: {
               isPrimary: true,
@@ -3733,11 +3848,24 @@ export class UsersService {
       },
       select: { scopeId: true },
     });
-    if (!scope?.scopeId) return null;
-    return this.prisma.department.findFirst({
-      where: { id: scope.scopeId, isActive: true, archivedAt: null },
-      select: { id: true, code: true, name: true },
+    if (scope?.scopeId) {
+      return this.prisma.department.findFirst({
+        where: { id: scope.scopeId, isActive: true, archivedAt: null },
+        select: { id: true, code: true, name: true },
+      });
+    }
+    const profile = await this.prisma.studentProfile.findFirst({
+      where: {
+        userId,
+        department: { isActive: true, archivedAt: null },
+      },
+      select: {
+        department: {
+          select: { id: true, code: true, name: true },
+        },
+      },
     });
+    return profile?.department ?? null;
   }
 
   private requiredString(value: unknown, label: string): string {
@@ -3815,7 +3943,6 @@ export class UsersService {
             "fullName",
             "mobileNumber",
             "collegeId",
-            "registerNumber",
             "departmentId",
             "programmeId",
             "academicYearId",

@@ -29,16 +29,18 @@ interface PeopleImportOptions {
 
 const peopleFileInterceptor = FileInterceptor("file", {
   limits: {
-    fileSize:
-      Number(process.env.MAX_EXCEL_FILE_SIZE_MB || 10) * 1024 * 1024,
+    fileSize: Number(process.env.MAX_EXCEL_FILE_SIZE_MB || 10) * 1024 * 1024,
     files: 1,
   },
 });
 
 const PEOPLE_ERROR_REPORT_COLUMNS = [
   "Row Number",
-  "User ID",
   "User Name",
+  "User ID",
+  "Official College Email",
+  "Department",
+  "Year",
   "Error",
 ] as const;
 
@@ -49,7 +51,7 @@ function safeCsvCell(value: string | undefined): string {
 
 @ApiTags("admin-people-imports")
 @Permissions("users.import")
-@Controller("admin/people/import")
+@Controller(["admin/people/import", "admin/people/imports"])
 export class AdminPeopleImportsController {
   constructor(private readonly imports: ImportsService) {}
 
@@ -126,7 +128,7 @@ export class AdminPeopleImportsController {
     return this.imports.cancel(user, batchId, requestId, "PEOPLE");
   }
 
-  @Get("history")
+  @Get(["", "history"])
   history(@CurrentUser() user: AuthPrincipal) {
     return this.imports.list(user, "PEOPLE");
   }
@@ -147,8 +149,7 @@ export class AdminPeopleImportsController {
     const detail = await this.imports.get(user, batchId, "PEOPLE");
     return {
       batchId,
-      errors:
-        "result" in detail && detail.result ? detail.result.errors : [],
+      errors: "result" in detail && detail.result ? detail.result.errors : [],
     };
   }
 
@@ -163,8 +164,11 @@ export class AdminPeopleImportsController {
     const csv = stringify(
       errors.map((error) => ({
         "Row Number": error.rowNumber,
-        "User ID": safeCsvCell(error.userId),
         "User Name": safeCsvCell(error.userName),
+        "User ID": safeCsvCell(error.userId),
+        "Official College Email": safeCsvCell(error.email),
+        Department: safeCsvCell(error.department),
+        Year: safeCsvCell(error.year),
         Error: safeCsvCell(error.message),
       })),
       { columns: [...PEOPLE_ERROR_REPORT_COLUMNS], header: true },

@@ -911,23 +911,45 @@ export class AuthService {
     const hasRequiredProfileRows =
       (!needsStudentProfile || Boolean(user.studentProfile)) &&
       (!needsStaffProfile || Boolean(user.staffProfile));
+    const needsManagedProfile = needsStudentProfile || needsStaffProfile;
     const storedStatus = user.profileCompletionStatus;
-    const profileCompletionStatus =
+    let profileCompletionStatus:
+      | "NOT_STARTED"
+      | "IN_PROGRESS"
+      | "SUBMITTED"
+      | "VERIFIED"
+      | "REJECTED" =
       storedStatus === "VERIFIED" ||
       storedStatus === "REJECTED" ||
-      storedStatus === "IN_PROGRESS"
+      storedStatus === "IN_PROGRESS" ||
+      storedStatus === "SUBMITTED" ||
+      storedStatus === "NOT_STARTED"
         ? storedStatus
         : hasRequiredProfileRows
-          ? storedStatus === "NOT_STARTED"
-            ? "SUBMITTED"
-            : ((storedStatus as "SUBMITTED" | undefined) ?? "SUBMITTED")
+          ? "SUBMITTED"
           : "NOT_STARTED";
+    if (
+      needsManagedProfile &&
+      !hasRequiredProfileRows &&
+      (profileCompletionStatus === "SUBMITTED" ||
+        profileCompletionStatus === "VERIFIED")
+    ) {
+      profileCompletionStatus = "NOT_STARTED";
+    }
+    const needsProfileSetup =
+      needsManagedProfile &&
+      (!hasRequiredProfileRows ||
+        profileCompletionStatus === "NOT_STARTED" ||
+        profileCompletionStatus === "IN_PROGRESS" ||
+        profileCompletionStatus === "REJECTED");
     const allowedNextRoute =
       user.status !== "ACTIVE"
         ? "/suspended"
         : user.mustChangePassword
           ? "/change-password"
-          : "/";
+          : needsProfileSetup
+            ? "/profile/setup"
+            : "/";
     return { profileCompletionStatus, allowedNextRoute };
   }
 }

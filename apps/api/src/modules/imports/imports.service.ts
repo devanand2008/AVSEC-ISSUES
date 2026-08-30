@@ -210,13 +210,16 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
       user.collegeId,
       options.departmentMappings,
     );
+    const officialEmailDomains = await this.officialEmailDomains(
+      user.collegeId,
+    );
     const parsed = await this.files.parse(file, entityType, {
       sheetName: options.sheetName,
       columnMapping: options.columnMapping,
       departmentMappings: departmentContext.mappings,
       duplicateResolution: options.duplicateResolution,
       forcedStudyYear: options.detectedStudyYear,
-      officialEmailDomains: await this.officialEmailDomains(user.collegeId),
+      officialEmailDomains,
     });
     this.applySelectedRole(entityType, parsed.rows, options.selectedRoleCode);
     const departmentMappingPreview = this.departmentMappingPreview(
@@ -230,6 +233,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
       parsed.rows,
       options.importMode,
       new Set(parsed.errors.map((error) => error.rowNumber)),
+      officialEmailDomains,
     );
     const allErrors = [...parsed.errors, ...databaseErrors];
     const invalidRows = new Set(allErrors.map((error) => error.rowNumber));
@@ -394,17 +398,14 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
       unresolvedDepartmentMappings: departmentMappingPreview.unresolved,
       previewRows: parsed.rows.slice(0, 25).map((row, index) => ({
         rowNumber: importRowNumber(entityType, row, index + 2),
-        values: this.safePreviewRow(row),
+        values: this.safePreviewRow(entityType, row),
       })),
       errors: allErrors.slice(0, 250),
       errorsTruncated: allErrors.length > 250,
     };
   }
 
-  async list(
-    user: AuthPrincipal,
-    expectedEntityType?: ImportEntityType,
-  ) {
+  async list(user: AuthPrincipal, expectedEntityType?: ImportEntityType) {
     const permittedEntityTypes = expectedEntityType
       ? [expectedEntityType]
       : this.permittedEntityTypes(user);
@@ -481,12 +482,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     requestId: string,
     expectedEntityType?: ImportEntityType,
   ) {
-    const job = await this.findAuthorized(
-      user,
-      id,
-      true,
-      expectedEntityType,
-    );
+    const job = await this.findAuthorized(user, id, true, expectedEntityType);
     this.assertPermission(user, this.entityType(job.entityType));
     if (job.importMode === "VALIDATE_ONLY")
       throw new ConflictException(
@@ -587,12 +583,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     requestId: string,
     expectedEntityType?: ImportEntityType,
   ) {
-    const job = await this.findAuthorized(
-      user,
-      id,
-      true,
-      expectedEntityType,
-    );
+    const job = await this.findAuthorized(user, id, true, expectedEntityType);
     const entityType = this.entityType(job.entityType);
     this.assertPermission(user, entityType);
     if (job.status !== "READY" && job.status !== "CANCELLED") {
@@ -1438,6 +1429,9 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
         size: buffer.length,
       } as Express.Multer.File;
       const importMode = this.importMode(importJob.importMode);
+      const officialEmailDomains = await this.officialEmailDomains(
+        importJob.collegeId,
+      );
       const parsed = await this.files.parse(file, entityType, {
         sheetName: importJob.selectedSheetName ?? undefined,
         columnMapping: this.asColumnMapping(importJob.columnMapping),
@@ -1450,9 +1444,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
         forcedStudyYear: this.studyYearFromColumnMapping(
           importJob.columnMapping,
         ),
-        officialEmailDomains: await this.officialEmailDomains(
-          importJob.collegeId,
-        ),
+        officialEmailDomains,
       });
       this.applySelectedRole(
         entityType,
@@ -1471,6 +1463,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
         parsed.rows,
         importMode,
         new Set(parsed.errors.map((error) => error.rowNumber)),
+        officialEmailDomains,
       );
       const errors: ImportRowError[] = [
         ...parsed.errors,
@@ -1513,7 +1506,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
                 importJob.id,
                 importJob.requestedById,
                 importMode,
-                { resetExistingPasswords },
+                { resetExistingPasswords, officialEmailDomains },
                 attemptToken,
               );
               records.forEach(recordSuccess);
@@ -1547,7 +1540,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
                       importJob.id,
                       importJob.requestedById,
                       importMode,
-                      { resetExistingPasswords },
+                      { resetExistingPasswords, officialEmailDomains },
                       attemptToken,
                     ),
                   );
@@ -2100,7 +2093,10 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
       resetExistingPasswords: this.booleanOption(raw.resetExistingPasswords),
       departmentMappings: this.parseDepartmentMappings(raw.departmentMappings),
       detectedStudyYear: this.studyYearOption(raw.detectedStudyYear),
-      duplicateResolution: this.duplicateResolution(raw.duplicateResolution),
+      duplicateResolution:
+        entityType === "PEOPLE"
+          ? "SKIP_ALL"
+          : this.duplicateResolution(raw.duplicateResolution),
     };
   }
 
@@ -2630,7 +2626,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
         ? (value as { domains: unknown[] }).domains
         : undefined;
     if (!domains) return undefined;
-    return domains
+    const normalized = domains
       .filter((domain): domain is string => typeof domain === "string")
       .map((domain) => domain.trim().toLowerCase().replace(/^@/, ""))
       .filter((domain) =>
@@ -2638,6 +2634,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
           domain,
         ),
       );
+    return normalized.length ? normalized : undefined;
   }
 
   private assertPermission(
@@ -2702,7 +2699,30 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
       updatedAt: job.updatedAt,
     };
   }
-  private safePreviewRow(row: ImportRow): ImportRow {
+  private safePreviewRow(
+    entityType: ImportEntityType,
+    row: ImportRow,
+  ): ImportRow {
+    if (entityType === "PEOPLE") {
+      const safeFields = [
+        "full_name",
+        "college_identity_id",
+        "email",
+        "department_code",
+        "year",
+        "class_room_number",
+        "mobile",
+        "source_sheet",
+        "source_row_number",
+        "source_department_code",
+        "password_status",
+      ] as const;
+      return Object.fromEntries(
+        safeFields.flatMap((field) =>
+          row[field] === undefined ? [] : [[field, row[field]]],
+        ),
+      ) as ImportRow;
+    }
     const { temporary_password: _temporaryPassword, ...safeRow } = row;
     return safeRow as ImportRow;
   }
@@ -2758,6 +2778,15 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
         : {}),
       ...(entityType === "PEOPLE" && row?.full_name
         ? { userName: row.full_name.slice(0, 180) }
+        : {}),
+      ...(entityType === "PEOPLE" && row?.email
+        ? { email: row.email.slice(0, 254) }
+        : {}),
+      ...(entityType === "PEOPLE" && row?.department_code
+        ? { department: row.department_code.slice(0, 180) }
+        : {}),
+      ...(entityType === "PEOPLE" && row?.year
+        ? { year: row.year.slice(0, 20) }
         : {}),
     };
   }

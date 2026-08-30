@@ -28,7 +28,10 @@ interface QueueJobInput {
 }
 
 interface PrivateImportsService {
-  ensureQueueJobScheduled(importJobId: string, recovery?: boolean): Promise<void>;
+  ensureQueueJobScheduled(
+    importJobId: string,
+    recovery?: boolean,
+  ): Promise<void>;
   deletePendingResultAndClear(
     importJobId: string,
     collegeId: string,
@@ -38,7 +41,9 @@ interface PrivateImportsService {
   credentialWorkbook(rows: CredentialExportRow[]): Promise<Buffer>;
 }
 
-function importsServiceWith(dependencies: Record<string, unknown>): ImportsService {
+function importsServiceWith(
+  dependencies: Record<string, unknown>,
+): ImportsService {
   const service = Object.create(ImportsService.prototype) as ImportsService;
   Object.defineProperties(
     service,
@@ -116,9 +121,10 @@ describe("ImportsService queue and worker reliability", () => {
     const service = importsServiceWith({ queue });
     const jobId = "00000000-0000-4000-8000-000000000102";
 
-    await (
-      service as unknown as PrivateImportsService
-    ).ensureQueueJobScheduled(jobId, true);
+    await (service as unknown as PrivateImportsService).ensureQueueJobScheduled(
+      jobId,
+      true,
+    );
 
     expect(terminal.remove).toHaveBeenCalledTimes(1);
     expect(queue.add).toHaveBeenCalledWith(
@@ -303,13 +309,11 @@ describe("ImportsService queue and worker reliability", () => {
     };
     const handler = {
       validate: jest.fn().mockResolvedValue([]),
-      createPeopleBatch: jest
-        .fn()
-        .mockRejectedValue(
-          Object.assign(new Error("response lost after COMMIT"), {
-            code: "ECONNRESET",
-          }),
-        ),
+      createPeopleBatch: jest.fn().mockRejectedValue(
+        Object.assign(new Error("response lost after COMMIT"), {
+          code: "ECONNRESET",
+        }),
+      ),
       create: jest.fn(),
     };
     const service = importsServiceWith({
@@ -412,7 +416,9 @@ describe("ImportsService queue and worker reliability", () => {
     const jobId = "00000000-0000-4000-8000-000000000106";
     const collegeId = "00000000-0000-4000-8000-000000000204";
     const storageKey =
-      `colleges/${collegeId}/imports/results/${jobId}-` + "a".repeat(64) + ".json";
+      `colleges/${collegeId}/imports/results/${jobId}-` +
+      "a".repeat(64) +
+      ".json";
     const updateMany = jest.fn().mockResolvedValue({ count: 0 });
     const tx = { importJob: { updateMany } };
     const prisma = {
@@ -446,7 +452,9 @@ describe("ImportsService queue and worker reliability", () => {
     const jobId = "00000000-0000-4000-8000-000000000109";
     const collegeId = "00000000-0000-4000-8000-000000000209";
     const storageKey =
-      `colleges/${collegeId}/imports/results/${jobId}-` + "b".repeat(64) + ".json";
+      `colleges/${collegeId}/imports/results/${jobId}-` +
+      "b".repeat(64) +
+      ".json";
     const updateMany = jest
       .fn()
       .mockResolvedValueOnce({ count: 1 })
@@ -524,6 +532,7 @@ describe("ImportsHandlerService worker fencing", () => {
             row: {
               full_name: "Stale Worker",
               college_identity_id: "AVS003",
+              email: "stale.worker@avsenggcollege.ac.in",
               temporary_password: "Strong!Password3",
               mobile: "9876543210",
             } as ImportRow,
@@ -584,8 +593,7 @@ describe("encrypted import credential escrow", () => {
   it("provides one retry-safe claim, then atomically acknowledges and erases escrow", async () => {
     const collegeId = "00000000-0000-4000-8000-000000000208";
     const actorId = "00000000-0000-4000-8000-000000000308";
-    const resultStorageKey =
-      `colleges/${collegeId}/imports/results/${importJobId}.json`;
+    const resultStorageKey = `colleges/${collegeId}/imports/results/${importJobId}.json`;
     const encrypted = encryptImportCredential(
       "test-only-import-escrow-pepper",
       importJobId,
@@ -727,12 +735,7 @@ describe("encrypted import credential escrow", () => {
     const competingExportId = "22222222-2222-4222-8222-222222222222";
 
     const competingClaims = await Promise.allSettled([
-      service.credentials(
-        actor,
-        importJobId,
-        "request-claim-1",
-        firstExportId,
-      ),
+      service.credentials(actor, importJobId, "request-claim-1", firstExportId),
       service.credentials(
         actor,
         importJobId,
@@ -745,7 +748,9 @@ describe("encrypted import credential escrow", () => {
       "rejected",
     ]);
     const winningClaim = competingClaims.find(
-      (result): result is PromiseFulfilledResult<{
+      (
+        result,
+      ): result is PromiseFulfilledResult<{
         fileName: string;
         content: Buffer;
         exportId: string;

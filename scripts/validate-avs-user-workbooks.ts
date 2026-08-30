@@ -33,16 +33,16 @@ async function main() {
         originalname: basename(absolutePath),
         size: buffer.length,
       } as Express.Multer.File,
-      "STUDENTS",
+      "PEOPLE",
+      { duplicateResolution: "SKIP_ALL" },
     );
     const invalidRows = new Set(parsed.errors.map((error) => error.rowNumber));
     const errorsByField = Object.fromEntries(
       [...new Set(parsed.errors.map((error) => error.field ?? "row"))].map(
         (field) => [
           field,
-          parsed.errors.filter(
-            (error) => (error.field ?? "row") === field,
-          ).length,
+          parsed.errors.filter((error) => (error.field ?? "row") === field)
+            .length,
         ],
       ),
     );
@@ -57,8 +57,7 @@ async function main() {
         message,
         parsed.errors.filter(
           (error) =>
-            error.message.replace(/\s+\([^)]*, row \d+\)\.?$/, "") ===
-            message,
+            error.message.replace(/\s+\([^)]*, row \d+\)\.?$/, "") === message,
         ).length,
       ]),
     );
@@ -70,6 +69,7 @@ async function main() {
           sheets: parsed.sheetInspections.map((sheet) => ({
             name: sheet.sheetName,
             headerRow: sheet.headerRowNumber ?? null,
+            columns: sheet.sourceHeaders ?? [],
             rows: sheet.rowCount,
             status: sheet.status,
           })),

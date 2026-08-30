@@ -6,9 +6,10 @@ import * as XLSX from "xlsx";
 
 import type { AuthPrincipal } from "../src/common/http/request-context";
 import { RoomType } from "../src/generated/prisma/enums";
-import type {
-  CredentialExportRow,
-  ImportRow,
+import {
+  importRowNumber,
+  type CredentialExportRow,
+  type ImportRow,
 } from "../src/modules/imports/import.types";
 import { ImportsFileService } from "../src/modules/imports/imports-file.service";
 import { ImportsService } from "../src/modules/imports/imports.service";
@@ -92,10 +93,9 @@ describe("ImportsFileService", () => {
     );
     const parsed = await service.parse(
       csvFile(
-        [
-          "campus_code,block_code,floor_code,code,name,room_type",
-          ...rows,
-        ].join("\n"),
+        ["campus_code,block_code,floor_code,code,name,room_type", ...rows].join(
+          "\n",
+        ),
       ),
       "ROOMS",
     );
@@ -405,7 +405,7 @@ describe("ImportsFileService", () => {
     expect(parsed.rows[1]).toMatchObject({
       full_name: "Second Student",
       department_code: "ME",
-      temporary_password: "001234",
+      temporary_password: "1234",
       source_sheet: "MECH",
       source_row_number: "3",
     });
@@ -496,7 +496,7 @@ describe("ImportsFileService", () => {
       ["FIRST NAME", "LAST NAME", "EMAIL ID", "PASSWORD", "/PATH"],
       ["Wrong", "Domain", "wrong@example.edu", "", "/one"],
     ]);
-    sheet.getCell("D2").value = Number.MAX_SAFE_INTEGER + 1;
+    sheet.getCell("D2").value = 1234.5;
     const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
     const parsed = await restrictedService.parse(
       {
@@ -608,7 +608,7 @@ describe("ImportsFileService", () => {
   it("supports the canonical student template headers and keeps register number distinct", async () => {
     const parsed = await service.parse(
       csvFile(
-        "full_name,official_email,college_id,register_number,department_code,academic_year,study_year,semester,section,temporary_password,mobile\nCanonical Student,student@college.edu,AVS001,620124104001,AIDS,2026-2027,2,3,B,TempPass@123,9876543210\n",
+        "full_name,official_email,college_id,register_number,department_code,academic_year,study_year,semester,section,temporary_password,mobile\nCanonical Student,student@college.edu,AVS001,999999990001,AIDS,2026-2027,2,3,B,TempPass@123,9876543210\n",
       ),
       "STUDENTS",
       { departmentMappings: { AIDS: "AI & DS" } },
@@ -619,7 +619,7 @@ describe("ImportsFileService", () => {
       email: "student@college.edu",
       college_identity_id: "AVS001",
       student_id: "AVS001",
-      register_number: "620124104001",
+      register_number: "999999990001",
       department_code: "AI & DS",
       source_department_code: "AIDS",
       academic_year: "2026-2027",
@@ -809,13 +809,284 @@ describe("ImportsFileService", () => {
     );
   });
 
-  it("accepts only the exact seven People headers and keeps physical Excel row numbers", async () => {
+  it("SKIP_ALL rejects every cross-sheet PEOPLE duplicate email while preserving physical locations", async () => {
+    const headers = [
+      "FIRST NAME",
+      "LAST NAME",
+      "EMAIL ID",
+      "PASSWORD",
+      "/PATH",
+      "USER ID",
+      "DEPARTMENT",
+      "YEAR",
+    ];
+    const parsed = await service.parse(
+      await multiSheetWorkbookFile(
+        {
+          CSE: [
+            [],
+            headers,
+            [
+              "First",
+              "Person",
+              "duplicate@avsenggcollege.ac.in",
+              "Strong!Pass123",
+              "/one",
+              "AVS-CSE-001",
+              "CSE",
+              "2",
+            ],
+          ],
+          ECE: [
+            [],
+            headers,
+            [
+              "Second",
+              "Person",
+              "DUPLICATE@AVSENGGCOLLEGE.AC.IN",
+              "Strong!Pass456",
+              "/two",
+              "AVS-ECE-001",
+              "ECE",
+              "2",
+            ],
+          ],
+        },
+        "people.xlsx",
+      ),
+      "PEOPLE",
+      { duplicateResolution: "SKIP_ALL" },
+    );
+
+    expect(
+      parsed.rows.map((row) => ({
+        importRowNumber: row.import_row_number,
+        sourceSheet: row.source_sheet,
+        sourceRowNumber: row.source_row_number,
+      })),
+    ).toEqual([
+      {
+        importRowNumber: "2",
+        sourceSheet: "CSE",
+        sourceRowNumber: "3",
+      },
+      {
+        importRowNumber: "3",
+        sourceSheet: "ECE",
+        sourceRowNumber: "3",
+      },
+    ]);
+    expect(
+      parsed.rows.map((row, index) =>
+        importRowNumber("PEOPLE", row, index + 2),
+      ),
+    ).toEqual([2, 3]);
+    expect(parsed.duplicateGroups).toEqual([
+      {
+        normalizedEmail: "duplicate@avsenggcollege.ac.in",
+        locations: [
+          { rowNumber: 2, sheetName: "CSE", sourceRowNumber: 3 },
+          { rowNumber: 3, sheetName: "ECE", sourceRowNumber: 3 },
+        ],
+      },
+    ]);
+    const emailErrors = parsed.errors.filter(
+      (error) => error.field === "email" && /duplicate/i.test(error.message),
+    );
+    expect(emailErrors).toHaveLength(2);
+    expect(new Set(emailErrors.map((error) => error.rowNumber))).toEqual(
+      new Set([2, 3]),
+    );
+    expect(emailErrors.map((error) => error.userId).sort()).toEqual([
+      "AVS-CSE-001",
+      "AVS-ECE-001",
+    ]);
+    expect(emailErrors.map((error) => error.message).join(" ")).toEqual(
+      expect.stringContaining("CSE, row 3"),
+    );
+    expect(emailErrors.map((error) => error.message).join(" ")).toEqual(
+      expect.stringContaining("ECE, row 3"),
+    );
+    expect(parsed.duplicateRowCount).toBe(2);
+    expect(parsed.errors).toHaveLength(2);
+  });
+
+  it("derives AVS People login IDs from the full normalized official email", async () => {
+    const parsed = await service.parse(
+      await multiSheetWorkbookFile(
+        {
+          CSE: [
+            ["FIRST NAME", "LAST NAME", "EMAIL ID", "PASSWORD", "/PATH"],
+            [
+              "Sample",
+              "Surname",
+              "  SAMPLE.STUDENT@AVSENGGCOLLEGE.AC.IN  ",
+              "Strong!Pass123",
+              "/ignored",
+            ],
+          ],
+        },
+        "AVSEC USERS FOR 2ND YEAR.xlsx",
+      ),
+      "PEOPLE",
+    );
+
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0]).toMatchObject({
+      full_name: "Sample Surname",
+      college_identity_id: "sample.student@avsenggcollege.ac.in",
+      student_id: "sample.student@avsenggcollege.ac.in",
+      email: "sample.student@avsenggcollege.ac.in",
+      role_codes: "STUDENT",
+      department_code: "CSE",
+      year: "2",
+    });
+    expect(parsed.errors).toEqual([]);
+  });
+
+  it("reports AVS email-derived identity duplicates once per affected row without exposing passwords", async () => {
+    const parsed = await service.parse(
+      await multiSheetWorkbookFile(
+        {
+          CSE: [
+            ["FIRST NAME", "LAST NAME", "EMAIL ID", "PASSWORD", "/PATH"],
+            [
+              "First",
+              "Student",
+              "duplicate@avsenggcollege.ac.in",
+              "FirstSecret!123",
+              "/ignored-one",
+            ],
+          ],
+          ECE: [
+            ["FIRST NAME", "LAST NAME", "EMAIL ID", "PASSWORD", "/PATH"],
+            [
+              "Second",
+              "Student",
+              "DUPLICATE@AVSENGGCOLLEGE.AC.IN",
+              "SecondSecret!456",
+              "/ignored-two",
+            ],
+          ],
+        },
+        "AVSEC USERS FOR 3RD YEAR.xlsx",
+      ),
+      "PEOPLE",
+      { duplicateResolution: "SKIP_ALL" },
+    );
+
+    expect(parsed.rows.map((row) => row.college_identity_id)).toEqual([
+      "duplicate@avsenggcollege.ac.in",
+      "duplicate@avsenggcollege.ac.in",
+    ]);
+    expect(parsed.duplicateRowCount).toBe(2);
+    expect(parsed.errors).toHaveLength(2);
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rowNumber: 2, field: "email" }),
+        expect.objectContaining({ rowNumber: 3, field: "email" }),
+      ]),
+    );
+    expect(JSON.stringify(parsed.errors)).not.toMatch(
+      /FirstSecret|SecondSecret/,
+    );
+  });
+
+  it("keeps an explicit User ID mandatory for generic People templates", async () => {
     const parsed = await service.parse(
       csvFile(
         [
-          "User Name,User ID,User Password,Department,Year,Class Room Number,Mobile Number",
+          "User Name,Official College Email,User Password,Department,Year,Class Room Number,Mobile Number",
+          "Generic Student,generic.student@avsenggcollege.ac.in,Strong!Pass123,CSE,2,,",
+        ].join("\n"),
+      ),
+      "PEOPLE",
+    );
+
+    expect(parsed.rows[0]?.college_identity_id).toBeUndefined();
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rowNumber: 2,
+          message: expect.stringContaining("Missing required headers: User ID"),
+        }),
+        expect.objectContaining({
+          rowNumber: 2,
+          field: "college_identity_id",
+          message: "User ID is required.",
+        }),
+      ]),
+    );
+  });
+
+  it("SKIP_ALL rejects every cross-sheet PEOPLE duplicate User ID case-insensitively", async () => {
+    const headers = [
+      "FIRST NAME",
+      "LAST NAME",
+      "EMAIL ID",
+      "PASSWORD",
+      "/PATH",
+      "USER ID",
+      "DEPARTMENT",
+      "YEAR",
+    ];
+    const parsed = await service.parse(
+      await multiSheetWorkbookFile(
+        {
+          CSE: [
+            headers,
+            [
+              "First",
+              "Person",
+              "first.person@avsenggcollege.ac.in",
+              "Strong!Pass123",
+              "/one",
+              "avs-duplicate-id",
+              "CSE",
+              "2",
+            ],
+          ],
+          ECE: [
+            headers,
+            [
+              "Second",
+              "Person",
+              "second.person@avsenggcollege.ac.in",
+              "Strong!Pass456",
+              "/two",
+              "AVS-DUPLICATE-ID",
+              "ECE",
+              "2",
+            ],
+          ],
+        },
+        "people.xlsx",
+      ),
+      "PEOPLE",
+      { duplicateResolution: "SKIP_ALL" },
+    );
+
+    const identityErrors = parsed.errors.filter(
+      (error) =>
+        error.field === "college_identity_id" &&
+        /duplicate/i.test(error.message),
+    );
+    expect(identityErrors).toHaveLength(2);
+    expect(new Set(identityErrors.map((error) => error.rowNumber))).toEqual(
+      new Set([2, 3]),
+    );
+    expect(parsed.duplicateRowCount).toBe(2);
+    expect(parsed.duplicateGroups).toEqual([]);
+    expect(parsed.errors).toHaveLength(2);
+  });
+
+  it("accepts the eight People CSV headers and keeps physical source row numbers", async () => {
+    const parsed = await service.parse(
+      csvFile(
+        [
+          "User Name,User ID,Official College Email,User Password,Department,Year,Class Room Number,Mobile Number",
           "",
-          "Arun Kumar,AVS001,Strong!Pass123,CSE,2,CSE-201,9876543210",
+          "Arun Kumar,AVS001,arun.kumar@avsenggcollege.ac.in,Strong!Pass123,CSE,2,CSE-201,9876543210",
         ].join("\n"),
       ),
       "PEOPLE",
@@ -824,6 +1095,7 @@ describe("ImportsFileService", () => {
     expect(parsed.headers).toEqual([
       "full_name",
       "college_identity_id",
+      "email",
       "temporary_password",
       "department_code",
       "year",
@@ -831,12 +1103,109 @@ describe("ImportsFileService", () => {
       "mobile",
     ]);
     expect(parsed.rows[0]).toMatchObject({
+      import_row_number: "2",
       source_row_number: "3",
       full_name: "Arun Kumar",
       college_identity_id: "AVS001",
+      email: "arun.kumar@avsenggcollege.ac.in",
       temporary_password: "Strong!Pass123",
     });
     expect(parsed.errors).toEqual([]);
+  });
+
+  it("uses exact OOXML password lexemes for canonical People workbooks", async () => {
+    const workbook = new Workbook();
+    const worksheet = workbook.addWorksheet("People");
+    worksheet.addRows([
+      [
+        "User Name",
+        "User ID",
+        "Official College Email",
+        "User Password",
+        "Department",
+        "Year",
+        "Class Room Number",
+        "Mobile Number",
+      ],
+      [
+        "Leading Zero",
+        "AVS001",
+        "leading.zero@avsenggcollege.ac.in",
+        "001234567890",
+        "CSE",
+        "2",
+        "",
+        "",
+      ],
+      [
+        "Unsafe Decimal",
+        "AVS002",
+        "unsafe.decimal@avsenggcollege.ac.in",
+        "",
+        "CSE",
+        "2",
+        "",
+        "",
+      ],
+      [
+        "Exact Integer",
+        "AVS003",
+        "exact.integer@avsenggcollege.ac.in",
+        "",
+        "CSE",
+        "2",
+        "",
+        "",
+      ],
+    ]);
+    worksheet.getCell("D3").value = 1234.5;
+    worksheet.getCell("D4").value = 999999990002;
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    const parsed = await service.parse(
+      {
+        buffer,
+        originalname: "people-template.xlsx",
+        size: buffer.length,
+      } as Express.Multer.File,
+      "PEOPLE",
+      { duplicateResolution: "SKIP_ALL" },
+    );
+
+    expect(parsed.rows[0]?.temporary_password).toBe("001234567890");
+    expect(parsed.rows[1]?.temporary_password).toBe("");
+    expect(parsed.rows[2]?.temporary_password).toBe("999999990002");
+    expect(parsed.passwordWarnings).toBe(2);
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rowNumber: 3,
+          field: "temporary_password",
+          message: expect.stringContaining(
+            "without losing precision",
+          ) as string,
+        }),
+      ]),
+    );
+    expect(
+      parsed.errors.some(
+        (error) =>
+          error.rowNumber === 2 && error.field === "temporary_password",
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects legacy XLS People credentials because exact password bytes cannot be proven", async () => {
+    await expect(
+      service.parse(
+        {
+          buffer: Buffer.from("legacy-xls"),
+          originalname: "people.xls",
+          size: 10,
+        } as Express.Multer.File,
+        "PEOPLE",
+      ),
+    ).rejects.toThrow("cannot prove exact password characters");
   });
 
   it("reports renamed People columns as friendly missing and unexpected headers", async () => {
@@ -857,7 +1226,7 @@ describe("ImportsFileService", () => {
         userId: "AVS001",
         userName: "Arun Kumar",
         message: expect.stringMatching(
-          /Missing required headers: Class Room Number.*Unexpected headers: Classroom Number/,
+          /Missing required headers: Official College Email.*Unexpected headers: Classroom Number/,
         ) as string,
       }),
     );
@@ -869,8 +1238,8 @@ describe("ImportsFileService", () => {
     const parsed = await service.parse(
       csvFile(
         [
-          "User Name,User ID,User Password,Department,Year,Class Room Number,Mobile Number,User ID",
-          `Arun Kumar,AVS001,${password},CSE,2,CSE-201,9876543210,AVS002`,
+          "User Name,User ID,Official College Email,User Password,Department,Year,Class Room Number,Mobile Number,User ID",
+          `Arun Kumar,AVS001,arun.kumar@avsenggcollege.ac.in,${password},CSE,2,CSE-201,9876543210,AVS002`,
         ].join("\n"),
       ),
       "PEOPLE",
@@ -894,6 +1263,7 @@ describe("ImportsFileService", () => {
           [
             "User Name",
             "User ID",
+            "Official College Email",
             "User Password",
             "Department",
             "Year",
@@ -903,6 +1273,7 @@ describe("ImportsFileService", () => {
           [
             "Arun Kumar",
             " AVS001",
+            "arun.kumar@avsenggcollege.ac.in",
             "Strong!Pass123 ",
             "CSE",
             "2",
@@ -934,6 +1305,37 @@ describe("ImportsFileService", () => {
 
 describe("ImportsService Excel workbooks", () => {
   const service = Object.create(ImportsService.prototype) as ImportsService;
+
+  it("allowlists People preview fields so unexpected credential columns cannot leak", () => {
+    const safePreviewRow = (
+      service as unknown as {
+        safePreviewRow: (entityType: "PEOPLE", row: ImportRow) => ImportRow;
+      }
+    ).safePreviewRow.bind(service);
+    const preview = safePreviewRow("PEOPLE", {
+      full_name: "Safe Student",
+      college_identity_id: "safe.student@avsenggcollege.ac.in",
+      email: "safe.student@avsenggcollege.ac.in",
+      department_code: "CSE",
+      year: "2",
+      temporary_password: "must-not-render",
+      password: "must-not-render",
+      mailbox_password: "must-not-render",
+      unexpected_secret: "must-not-render",
+      password_status: "Password text preserved",
+      import_row_number: "2",
+    } as unknown as ImportRow);
+
+    expect(preview).toEqual({
+      full_name: "Safe Student",
+      college_identity_id: "safe.student@avsenggcollege.ac.in",
+      email: "safe.student@avsenggcollege.ac.in",
+      department_code: "CSE",
+      year: "2",
+      password_status: "Password text preserved",
+    });
+    expect(JSON.stringify(preview)).not.toContain("must-not-render");
+  });
 
   it("previews and confirms the canonical student template without a source student_id column", async () => {
     const persistenceEvents: string[] = [];
@@ -988,8 +1390,8 @@ describe("ImportsService Excel workbooks", () => {
         }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
-      $transaction: jest.fn(
-        async (work: (tx: unknown) => Promise<unknown>) => work(prisma),
+      $transaction: jest.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work(prisma),
       ),
     };
     const handler = { validate: jest.fn().mockResolvedValue([]) };
@@ -1023,7 +1425,7 @@ describe("ImportsService Excel workbooks", () => {
       permissions: ["users.import"],
     } as AuthPrincipal;
     const file = csvFile(
-      "full_name,official_email,college_id,register_number,department_code,programme_code,academic_year,study_year,semester,section,temporary_password,mobile\nCanonical Student,canonical.student@college.edu,AVS001,620124104001,CSE,,2026-27,2,3,A,AvsTemp@2026!,9876543210\n",
+      "full_name,official_email,college_id,register_number,department_code,programme_code,academic_year,study_year,semester,section,temporary_password,mobile\nCanonical Student,canonical.student@college.edu,AVS001,999999990001,CSE,,2026-27,2,3,A,AvsTemp@2026!,9876543210\n",
     );
 
     const preview = await importService.preview(
@@ -1041,7 +1443,7 @@ describe("ImportsService Excel workbooks", () => {
     expect(preview.previewRows[0]?.values).toMatchObject({
       college_identity_id: "AVS001",
       student_id: "AVS001",
-      register_number: "620124104001",
+      register_number: "999999990001",
     });
     expect(preview.previewRows[0]?.values.temporary_password).toBeUndefined();
     expect(persistenceEvents).toEqual(["job-persisted", "source-uploaded"]);
@@ -1179,6 +1581,7 @@ describe("ImportsService Excel workbooks", () => {
       [firstRow, secondRow],
       "CREATE_ONLY",
       new Set([2]),
+      undefined,
     );
     expect(handler.create).toHaveBeenCalledTimes(1);
     expect(handler.create).toHaveBeenCalledWith(
@@ -1335,6 +1738,7 @@ describe("ImportsService Excel workbooks", () => {
   it("falls back from a failed People batch to exact row-level outcomes", async () => {
     const source = Buffer.from("stored mixed people import", "utf8");
     const suppliedPassword = "Fallback!Pass123";
+    const officialEmailDomains = ["tenant.example.edu"];
     const rows = [
       {
         full_name: "Valid Person",
@@ -1362,7 +1766,11 @@ describe("ImportsService Excel workbooks", () => {
       status: "QUEUED",
     };
     const prisma = {
-      appSetting: { findUnique: jest.fn().mockResolvedValue(null) },
+      appSetting: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ value: officialEmailDomains }),
+      },
       importJobRecord: { findMany: jest.fn().mockResolvedValue([]) },
       importJob: {
         findUnique: jest.fn().mockResolvedValue(importJob),
@@ -1439,6 +1847,22 @@ describe("ImportsService Excel workbooks", () => {
 
     expect(handler.createPeopleBatch).toHaveBeenCalledTimes(1);
     expect(handler.create).toHaveBeenCalledTimes(2);
+    expect(handler.createPeopleBatch).toHaveBeenCalledWith(
+      importJob.collegeId,
+      expect.any(Array),
+      importJob.id,
+      importJob.requestedById,
+      "CREATE_ONLY",
+      { resetExistingPasswords: false, officialEmailDomains },
+      expect.any(String),
+    );
+    const createCalls = handler.create.mock.calls as unknown as unknown[][];
+    for (const call of createCalls) {
+      expect(call[7]).toEqual({
+        resetExistingPasswords: false,
+        officialEmailDomains,
+      });
+    }
     const report = files.saveReport.mock.calls[0]?.[1] as {
       successful: unknown[];
       errors: Array<{ rowNumber: number; message: string }>;
@@ -1625,6 +2049,7 @@ describe("ImportsService Excel workbooks", () => {
     expect(headers?.slice(1)).toEqual([
       "User Name",
       "User ID",
+      "Official College Email",
       "User Password",
       "Department",
       "Year",
@@ -2084,8 +2509,8 @@ describe("ImportsService Excel workbooks", () => {
           },
         ]),
       },
-      $transaction: jest.fn(
-        async (work: (tx: unknown) => Promise<unknown>) => work({}),
+      $transaction: jest.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
       ),
     };
     const handler = {
