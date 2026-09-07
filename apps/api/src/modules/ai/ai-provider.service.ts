@@ -1,10 +1,11 @@
 import { Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { AiProviderStreamEvent } from "./ai.types";
+import { AnthropicService } from "./anthropic.service";
 import { GeminiService } from "./gemini.service";
 import { OpenAiService } from "./openai.service";
 
-export type AiProviderName = "gemini" | "openai";
+export type AiProviderName = "anthropic" | "gemini" | "openai";
 
 @Injectable()
 export class AiProviderService {
@@ -16,6 +17,7 @@ export class AiProviderService {
     private readonly config: ConfigService,
     private readonly openai: OpenAiService,
     private readonly gemini: GeminiService,
+    private readonly anthropic: AnthropicService,
   ) {
     this.enabled = config.get<boolean>("AVS_BOT_ENABLED", false);
     this.primaryProvider = config.get<AiProviderName>(
@@ -32,11 +34,11 @@ export class AiProviderService {
   configuration() {
     const openai = this.openai.configuration();
     const gemini = this.gemini.configuration();
-    const primary = this.primaryProvider === "gemini" ? gemini : openai;
+    const anthropic = this.anthropic.configuration();
+    const providers = { anthropic, gemini, openai };
+    const primary = providers[this.primaryProvider];
     const fallback = this.fallbackProvider
-      ? this.fallbackProvider === "gemini"
-        ? gemini
-        : openai
+      ? providers[this.fallbackProvider]
       : null;
     return {
       enabled: this.enabled,
@@ -49,7 +51,7 @@ export class AiProviderService {
       model: primary.model,
       fallbackProvider: this.fallbackProvider,
       fallbackConfigured: fallback ? fallback.configured : false,
-      providers: { gemini, openai },
+      providers,
       knowledgeProvider: openai.knowledgeProvider,
       vectorStoreConfigured: openai.vectorStoreConfigured,
       api: primary.api,
@@ -94,17 +96,27 @@ export class AiProviderService {
       let completion: AiProviderStreamEvent | null = null;
       try {
         const stream =
-          provider === "gemini"
-            ? this.gemini.stream(
-                {
-                  instructions: input.instructions,
-                  prompt: input.prompt,
-                  model,
-                  maxOutputTokens: input.maxOutputTokens,
-                },
-                signal,
-              )
-            : this.openai.stream({ ...input, model }, signal);
+          provider === "openai"
+            ? this.openai.stream({ ...input, model }, signal)
+            : provider === "gemini"
+              ? this.gemini.stream(
+                  {
+                    instructions: input.instructions,
+                    prompt: input.prompt,
+                    model,
+                    maxOutputTokens: input.maxOutputTokens,
+                  },
+                  signal,
+                )
+              : this.anthropic.stream(
+                  {
+                    instructions: input.instructions,
+                    prompt: input.prompt,
+                    model,
+                    maxOutputTokens: input.maxOutputTokens,
+                  },
+                  signal,
+                );
         for await (const event of stream) {
           if (event.type === "delta") {
             if (!event.delta) continue;
@@ -157,9 +169,11 @@ export class AiProviderService {
     const results = await Promise.all(
       names.map(async (provider) => ({
         provider,
-        ...(provider === "gemini"
-          ? await this.gemini.testConnection()
-          : await this.openai.testConnection()),
+        ...(provider === "openai"
+          ? await this.openai.testConnection()
+          : provider === "gemini"
+            ? await this.gemini.testConnection()
+            : await this.anthropic.testConnection()),
       })),
     );
     const failed = results.find((result) => !result.ok);
@@ -173,7 +187,11 @@ export class AiProviderService {
   }
 
   errorCategory(error: unknown): string {
-    return this.gemini.errorCategory(error) ?? this.openai.errorCategory(error);
+    return (
+      this.anthropic.errorCategory(error) ??
+      this.gemini.errorCategory(error) ??
+      this.openai.errorCategory(error)
+    );
   }
 
   private providerModel(
@@ -184,10 +202,14 @@ export class AiProviderService {
     const compatible = candidate
       ? provider === "gemini"
         ? candidate.startsWith("gemini-")
-        : !candidate.startsWith("gemini-")
+        : provider === "anthropic"
+          ? candidate.startsWith("claude-")
+          : !candidate.startsWith("gemini-") && !candidate.startsWith("claude-")
       : false;
     return provider === "gemini"
       ? this.gemini.model(compatible ? candidate : undefined)
-      : this.openai.model(compatible ? candidate : undefined);
+      : provider === "anthropic"
+        ? this.anthropic.model(compatible ? candidate : undefined)
+        : this.openai.model(compatible ? candidate : undefined);
   }
 }

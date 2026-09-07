@@ -48,6 +48,35 @@ describe("AVS Bot provider-aware usage pricing", () => {
     );
   });
 
+  it("uses Anthropic rates for Claude models", async () => {
+    const update = jest.fn().mockResolvedValue({});
+    const service = new AiUsageService(
+      { aiUsageRecord: { update } } as unknown as PrismaService,
+      {
+        get: (key: string, fallback?: unknown) =>
+          ({
+            AVS_BOT_PRIMARY_PROVIDER: "anthropic",
+            AVS_BOT_FALLBACK_PROVIDER: "none",
+            ANTHROPIC_INPUT_COST_PER_MILLION_USD: 2,
+            ANTHROPIC_OUTPUT_COST_PER_MILLION_USD: 8,
+          })[key] ?? fallback,
+      } as ConfigService,
+    );
+
+    expect(service.pricingConfigured()).toBe(true);
+    await service.complete("anthropic-usage", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      latencyMs: 10,
+      model: "claude-test-model",
+    });
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ estimatedCost: 10 }),
+      }),
+    );
+  });
+
   it("does not claim complete pricing when a selected provider has no rates", () => {
     const service = new AiUsageService(
       {} as PrismaService,

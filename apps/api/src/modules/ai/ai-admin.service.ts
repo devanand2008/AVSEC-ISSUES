@@ -60,6 +60,9 @@ export class AiAdminService {
       provider: this.provider.configuration(),
       secrets: {
         apiKeyPresent: this.provider.configuration().configured,
+        anthropicApiKeyPresent: Boolean(
+          this.config.get<string>("ANTHROPIC_API_KEY"),
+        ),
         geminiApiKeyPresent: Boolean(this.config.get<string>("GEMINI_API_KEY")),
         openAiApiKeyPresent: Boolean(this.config.get<string>("OPENAI_API_KEY")),
         apiKeyExposed: false,

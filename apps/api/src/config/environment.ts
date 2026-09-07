@@ -240,10 +240,33 @@ export const environmentSchema = z
       z.url().optional(),
     ),
     AVS_BOT_ENABLED: booleanString(),
-    AVS_BOT_PRIMARY_PROVIDER: z.enum(["gemini", "openai"]).default("openai"),
+    AVS_BOT_PRIMARY_PROVIDER: z
+      .enum(["anthropic", "gemini", "openai"])
+      .default("openai"),
     AVS_BOT_FALLBACK_PROVIDER: z
-      .enum(["gemini", "openai", "none"])
+      .enum(["anthropic", "gemini", "openai", "none"])
       .default("none"),
+    ANTHROPIC_API_KEY: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.string().min(20).optional(),
+    ),
+    ANTHROPIC_MODEL: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z
+        .string()
+        .trim()
+        .regex(/^claude-[a-zA-Z0-9._-]+$/)
+        .max(100)
+        .optional(),
+    ),
+    ANTHROPIC_REQUEST_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(5_000)
+      .max(120_000)
+      .default(45_000),
+    ANTHROPIC_INPUT_COST_PER_MILLION_USD: optionalPositiveNumber,
+    ANTHROPIC_OUTPUT_COST_PER_MILLION_USD: optionalPositiveNumber,
     GEMINI_API_KEY: z.preprocess(
       (value) => (value === "" ? undefined : value),
       z.string().min(20).optional(),
@@ -397,10 +420,18 @@ export const environmentSchema = z
         });
       }
       const required = new Set<
-        "GEMINI_API_KEY" | "GEMINI_MODEL" | "OPENAI_API_KEY" | "OPENAI_MODEL"
+        | "ANTHROPIC_API_KEY"
+        | "ANTHROPIC_MODEL"
+        | "GEMINI_API_KEY"
+        | "GEMINI_MODEL"
+        | "OPENAI_API_KEY"
+        | "OPENAI_MODEL"
       >();
       for (const provider of providers) {
-        if (provider === "gemini") {
+        if (provider === "anthropic") {
+          required.add("ANTHROPIC_API_KEY");
+          required.add("ANTHROPIC_MODEL");
+        } else if (provider === "gemini") {
           required.add("GEMINI_API_KEY");
           required.add("GEMINI_MODEL");
         } else {
@@ -545,6 +576,7 @@ export const environmentSchema = z
       ["S3_SECRET_KEY", environment.S3_SECRET_KEY],
       ["DEVICE_TOKEN_ENCRYPTION_KEY", environment.DEVICE_TOKEN_ENCRYPTION_KEY],
       ["SMTP_PASSWORD", environment.SMTP_PASSWORD],
+      ["ANTHROPIC_API_KEY", environment.ANTHROPIC_API_KEY],
       ["GEMINI_API_KEY", environment.GEMINI_API_KEY],
       ["OPENAI_API_KEY", environment.OPENAI_API_KEY],
       ["GOOGLE_OAUTH_CLIENT_SECRET", environment.GOOGLE_OAUTH_CLIENT_SECRET],

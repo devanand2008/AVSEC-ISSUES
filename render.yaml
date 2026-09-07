@@ -151,6 +151,22 @@ services:
       # ── AVS Bot (optional) ────────────────────────────────────────────────────
       - key: AVS_BOT_ENABLED
         value: "false"
+      - key: AVS_BOT_PRIMARY_PROVIDER
+        value: anthropic
+      - key: AVS_BOT_FALLBACK_PROVIDER
+        value: none
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-5
+      - key: ANTHROPIC_REQUEST_TIMEOUT_MS
+        value: "45000"
+      - key: ANTHROPIC_INPUT_COST_PER_MILLION_USD
+        value: "2"
+      - key: ANTHROPIC_OUTPUT_COST_PER_MILLION_USD
+        value: "10"
+      - key: AI_KNOWLEDGE_PROVIDER
+        value: internal
 
       # First production administrator. The password is used only if no Main
       # Admin exists yet, and the user must change it on first login.

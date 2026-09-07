@@ -141,6 +141,27 @@ describe("environment policy", () => {
     expect(environment.OPENAI_MODEL).toBe("project-available-model");
   });
 
+  it("accepts Anthropic as the AVS Bot provider only with its server key and model", () => {
+    const environment = validateEnvironment({
+      ...base,
+      AVS_BOT_ENABLED: "true",
+      AVS_BOT_PRIMARY_PROVIDER: "anthropic",
+      ANTHROPIC_API_KEY: "test-anthropic-key-with-more-than-20-characters",
+      ANTHROPIC_MODEL: "claude-test-model",
+    });
+    expect(environment.AVS_BOT_PRIMARY_PROVIDER).toBe("anthropic");
+    expect(environment.ANTHROPIC_MODEL).toBe("claude-test-model");
+
+    expect(() =>
+      validateEnvironment({
+        ...base,
+        AVS_BOT_ENABLED: "true",
+        AVS_BOT_PRIMARY_PROVIDER: "anthropic",
+        ANTHROPIC_MODEL: "claude-test-model",
+      }),
+    ).toThrow(/ANTHROPIC_API_KEY/);
+  });
+
   it("accepts Gemini primary with an OpenAI fallback only when both are complete", () => {
     const environment = validateEnvironment({
       ...base,

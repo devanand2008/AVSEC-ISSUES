@@ -122,6 +122,26 @@ test("rejects embedded Gemini API key assignments", (t) => {
   );
 });
 
+test("rejects embedded Anthropic API key assignments", (t) => {
+  const assignment = [
+    "export const ANTHROPIC_API",
+    "_KEY = '",
+    "not-a-real-but-secret-shaped-anthropic-key",
+    "';\n",
+  ].join("");
+  const repository = createRepository(t, {
+    "config/provider.ts": assignment,
+  });
+
+  const result = scan(repository);
+
+  assert.equal(result.status, 1);
+  assert.match(
+    result.stderr,
+    /config\/provider\.ts \(contains embedded secret/,
+  );
+});
+
 test("scans test files and the allowed environment example for real key shapes", (t) => {
   const openAiShape = ["sk", "proj", "abcdefghijklmnopqrstuvwx"].join("-");
   const googleShape = ["AIza", "abcdefghijklmnopqrstuvwxyz123456"].join("");

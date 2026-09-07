@@ -139,7 +139,7 @@ class _AiAdminDashboardState extends State<_AiAdminDashboard> {
               ),
               title: const Text('Provider configuration'),
               subtitle: Text(
-                'Responses API • ${provider['model'] ?? 'model not configured'} • ${provider['knowledgeProvider'] ?? 'internal'}',
+                '${provider['api'] ?? 'AI API'} • ${provider['model'] ?? 'model not configured'} • ${provider['knowledgeProvider'] ?? 'internal'}',
               ),
             ),
           ),
@@ -507,7 +507,7 @@ class _AiAdminSettingsState extends State<_AiAdminSettings> {
           SnackBar(
             content: Text(
               result['ok'] == true
-                  ? 'OpenAI Responses API connection succeeded.'
+                  ? 'AVS Bot AI provider connection succeeded.'
                   : 'Connection failed: ${result['category']}',
             ),
           ),
@@ -538,7 +538,7 @@ class _AiAdminSettingsState extends State<_AiAdminSettings> {
           value: _enabled,
           title: const Text('Enable AVS Bot for this college'),
           subtitle: const Text(
-            'Requires a newly generated server-side key and a model available to the OpenAI project.',
+            'Requires a server-side provider key and a model available to that provider account.',
           ),
           onChanged: _saving
               ? null
@@ -556,9 +556,9 @@ class _AiAdminSettingsState extends State<_AiAdminSettings> {
         TextField(
           controller: _model,
           decoration: const InputDecoration(
-            labelText: 'OpenAI model',
+            labelText: 'AI model',
             helperText:
-                'Enter a model confirmed available to the backend OpenAI project.',
+                'Enter a model confirmed available to the configured backend provider.',
           ),
         ),
         const SizedBox(height: 12),

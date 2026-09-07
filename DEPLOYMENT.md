@@ -37,7 +37,7 @@ The production override assumes one TLS reverse-proxy hop by default. Set `TRUST
 
 The production API container runs `prisma migrate deploy` followed by the idempotent production bootstrap before starting NestJS. Set `DEVELOPMENT_COLLEGE_CODE`, `PRODUCTION_COLLEGE_NAME`, `PRODUCTION_ADMIN_IDENTITY_ID`, `DEVELOPMENT_ADMIN_NAME`, `DEVELOPMENT_ADMIN_EMAIL`, and a strong `DEVELOPMENT_ADMIN_PASSWORD` in the deployment secret manager. Despite the legacy environment-variable prefix, this bootstrap is production-only: it creates the college, RBAC catalog, and initial Main Admin, requires a password change, never resets an existing credential, and never inserts demo data.
 
-The root `render.yaml` is the supported one-click Docker deployment. It provisions PostgreSQL 17 and persistent Key Value storage and prompts for required private object-storage and initial-admin values. Review the selected paid plans in Render before approving the Blueprint. Google Drive, Firebase, WhatsApp, email, AVS Bot, and malware scanning remain disabled until their institution-owned credentials are configured and verified.
+The root `render.yaml` is the supported one-click Docker deployment. It provisions PostgreSQL 17 and persistent Key Value storage and prompts for required private object-storage, Anthropic, and initial-admin values. Review the selected paid plans in Render before approving the Blueprint. AVS Bot uses the server-only Anthropic key and model configured by the Blueprint; Google Drive, Firebase, WhatsApp, email, and malware scanning remain disabled until their institution-owned credentials are configured and verified.
 
 ## Providers and files
 

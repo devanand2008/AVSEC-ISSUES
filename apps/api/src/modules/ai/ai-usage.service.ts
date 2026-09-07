@@ -119,26 +119,21 @@ export class AiUsageService {
   }
 
   pricingConfigured(): boolean {
-    const primary = this.config.get<"gemini" | "openai">(
+    const primary = this.config.get<"anthropic" | "gemini" | "openai">(
       "AVS_BOT_PRIMARY_PROVIDER",
       "openai",
     );
-    const fallback = this.config.get<"gemini" | "openai" | "none">(
-      "AVS_BOT_FALLBACK_PROVIDER",
-      "none",
-    );
+    const fallback = this.config.get<
+      "anthropic" | "gemini" | "openai" | "none"
+    >("AVS_BOT_FALLBACK_PROVIDER", "none");
     return [primary, ...(fallback === "none" ? [] : [fallback])].every(
       (provider) =>
         Boolean(
           this.config.get<number>(
-            provider === "gemini"
-              ? "GEMINI_INPUT_COST_PER_MILLION_USD"
-              : "OPENAI_INPUT_COST_PER_MILLION_USD",
+            `${this.providerPrefix(provider)}_INPUT_COST_PER_MILLION_USD`,
           ) &&
             this.config.get<number>(
-              provider === "gemini"
-                ? "GEMINI_OUTPUT_COST_PER_MILLION_USD"
-                : "OPENAI_OUTPUT_COST_PER_MILLION_USD",
+              `${this.providerPrefix(provider)}_OUTPUT_COST_PER_MILLION_USD`,
             ),
         ),
     );
@@ -273,7 +268,11 @@ export class AiUsageService {
     outputTokens: number,
     model?: string,
   ): number {
-    const prefix = model?.startsWith("gemini-") ? "GEMINI" : "OPENAI";
+    const prefix = model?.startsWith("gemini-")
+      ? "GEMINI"
+      : model?.startsWith("claude-")
+        ? "ANTHROPIC"
+        : "OPENAI";
     const inputRate = this.config.get<number>(
       `${prefix}_INPUT_COST_PER_MILLION_USD`,
     );
@@ -288,5 +287,12 @@ export class AiUsageService {
         1_000_000
       ).toFixed(6),
     );
+  }
+
+  private providerPrefix(
+    provider: "anthropic" | "gemini" | "openai",
+  ): "ANTHROPIC" | "GEMINI" | "OPENAI" {
+    if (provider === "anthropic") return "ANTHROPIC";
+    return provider === "gemini" ? "GEMINI" : "OPENAI";
   }
 }

@@ -11,6 +11,7 @@ import { AiKnowledgeService } from "./ai-knowledge.service";
 import { AiProviderService } from "./ai-provider.service";
 import { AiSafetyService } from "./ai-safety.service";
 import { AiUsageService } from "./ai-usage.service";
+import { AnthropicService } from "./anthropic.service";
 import { GeminiService } from "./gemini.service";
 import { OpenAiService } from "./openai.service";
 
@@ -20,6 +21,7 @@ import { OpenAiService } from "./openai.service";
   providers: [
     OpenAiService,
     GeminiService,
+    AnthropicService,
     AiProviderService,
     AiSafetyService,
     AiUsageService,

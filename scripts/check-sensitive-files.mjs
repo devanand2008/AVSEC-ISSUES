@@ -132,7 +132,7 @@ function checkSensitiveFiles() {
     /(mongodb(?:\+srv)?:\/\/(?!\$\{)(?![^:\s]+:(?:build|validation|test|password|strong-password|example|placeholder|ci-[^@\s]+)@)[^:\s]+:[^@\s]+@)/i,
     /(postgres(?:ql)?:\/\/(?!\$\{)(?![^:\s]+:(?:build|validation|test|password|strong-password|example|placeholder|ci-[^@\s]+)@)[^:\s]+:[^@\s]+@)/i,
     ...universalCredentialPatterns,
-    /(JWT_(?:ACCESS|REFRESH)_SECRET|CSRF_SECRET|SMTP_PASSWORD|S3_SECRET_KEY|WHATSAPP_ACCESS_TOKEN|WHATSAPP_APP_SECRET|GEMINI_API_KEY|OPENAI_API_KEY|GOOGLE_OAUTH_CLIENT_SECRET|GOOGLE_DRIVE_ENCRYPTION_KEY|BACKUP_ENCRYPTION_KEY|RENDER_API_KEY|GITHUB_TOKEN|FIREBASE_PRIVATE_KEY|DEVICE_TOKEN_ENCRYPTION_KEY|PASSWORD_PEPPER|FEEDBACK_SUBMISSION_SECRET)[ \t]*[:=](?!-)[ \t]*["']?(?!\$\{?|REPLACE|replace|change-this|ci-|example|placeholder|access-secret|refresh-secret|csrf-secret|smtp-password|production-storage-secret|z\.|optional|environment\.|process\.|config\.|Boolean\(|String\(|Number\()[^"'\s#]{16,}/i,
+    /(JWT_(?:ACCESS|REFRESH)_SECRET|CSRF_SECRET|SMTP_PASSWORD|S3_SECRET_KEY|WHATSAPP_ACCESS_TOKEN|WHATSAPP_APP_SECRET|ANTHROPIC_API_KEY|GEMINI_API_KEY|OPENAI_API_KEY|GOOGLE_OAUTH_CLIENT_SECRET|GOOGLE_DRIVE_ENCRYPTION_KEY|BACKUP_ENCRYPTION_KEY|RENDER_API_KEY|GITHUB_TOKEN|FIREBASE_PRIVATE_KEY|DEVICE_TOKEN_ENCRYPTION_KEY|PASSWORD_PEPPER|FEEDBACK_SUBMISSION_SECRET)[ \t]*[:=](?!-)[ \t]*["']?(?!\$\{?|REPLACE|replace|change-this|ci-|example|placeholder|access-secret|refresh-secret|csrf-secret|smtp-password|production-storage-secret|z\.|optional|environment\.|process\.|config\.|Boolean\(|String\(|Number\()[^"'\s#]{16,}/i,
     /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/,
   ];
 

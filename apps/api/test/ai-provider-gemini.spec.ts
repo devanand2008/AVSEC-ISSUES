@@ -1,5 +1,6 @@
 import type { ConfigService } from "@nestjs/config";
 import { AiProviderService } from "../src/modules/ai/ai-provider.service";
+import type { AnthropicService } from "../src/modules/ai/anthropic.service";
 import {
   GeminiRequestError,
   GeminiService,
@@ -10,6 +11,26 @@ function config(values: Record<string, unknown>): ConfigService {
   return {
     get: (key: string, fallback?: unknown) => values[key] ?? fallback,
   } as ConfigService;
+}
+
+function anthropicStub(): AnthropicService {
+  return {
+    configuration: () => ({
+      configured: false,
+      model: null,
+      api: "Anthropic Messages API",
+    }),
+    model: () => "claude-test-model",
+    stream: async function* () {
+      yield* [];
+    },
+    testConnection: jest.fn().mockResolvedValue({
+      ok: false,
+      model: null,
+      category: "provider_unavailable",
+    }),
+    errorCategory: () => null,
+  } as unknown as AnthropicService;
 }
 
 describe("AVS Bot Gemini provider", () => {
@@ -191,6 +212,7 @@ describe("AVS Bot provider fallback", () => {
         errorCategory: (error: unknown) =>
           error instanceof GeminiRequestError ? error.category : null,
       } as unknown as GeminiService,
+      anthropicStub(),
     );
     const events = [];
     for await (const event of provider.stream(
@@ -250,6 +272,7 @@ describe("AVS Bot provider fallback", () => {
         errorCategory: (error: unknown) =>
           error instanceof GeminiRequestError ? error.category : null,
       } as unknown as GeminiService,
+      anthropicStub(),
     );
 
     const consume = async () => {
@@ -298,6 +321,7 @@ describe("AVS Bot provider fallback", () => {
         },
         errorCategory: () => null,
       } as unknown as GeminiService,
+      anthropicStub(),
     );
 
     const consume = async () => {
@@ -353,6 +377,7 @@ describe("AVS Bot provider fallback", () => {
         stream: geminiStream,
         errorCategory: () => null,
       } as unknown as GeminiService,
+      anthropicStub(),
     );
     const events = [];
     for await (const event of provider.stream(
@@ -405,6 +430,7 @@ describe("AVS Bot provider fallback", () => {
         }),
         errorCategory: () => null,
       } as unknown as GeminiService,
+      anthropicStub(),
     );
 
     expect(provider.model("legacy-openai-model")).toBe("gemini-test-model");

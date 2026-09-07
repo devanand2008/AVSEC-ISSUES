@@ -79,6 +79,8 @@ import { BackupsModule } from "./modules/backups/backups.module";
             "GOOGLE_OAUTH_CLIENT_SECRET",
             "GOOGLE_DRIVE_ENCRYPTION_KEY",
             "BACKUP_ENCRYPTION_KEY",
+            "ANTHROPIC_API_KEY",
+            "anthropicApiKey",
             "GEMINI_API_KEY",
             "geminiApiKey",
             "OPENAI_API_KEY",
