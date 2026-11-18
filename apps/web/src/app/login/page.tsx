@@ -117,8 +117,7 @@ export default function LoginPage() {
       <aside className={styles.brandPanel}>
         <CollegeBranding priority />
         <div className={styles.brandCopy}>
-          <p className={styles.eyebrow}>AVS Campus</p>
-          <p className={styles.brandTitle}>Your campus<br />in one place.</p>
+          <p className={styles.brandTitle}>Campus services</p>
           <p className={styles.brandDescription}>
             Check attendance, read announcements, get in touch, and report
             campus issues.
@@ -131,7 +130,6 @@ export default function LoginPage() {
         <div className={styles.formWrap}>
           <CollegeBranding className={styles.mobileBrand} priority />
           <header className={styles.formHeader}>
-            <p className={styles.eyebrow}>Campus portal</p>
             <h1 id="login-title">Sign in</h1>
             <p>Use your college ID or the email registered with AVS.</p>
           </header>

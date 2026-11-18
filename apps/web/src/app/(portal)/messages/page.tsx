@@ -285,6 +285,7 @@ function MessagesPageInner() {
     const socket = io(resolveRuntimeUrl(process.env.NEXT_PUBLIC_SOCKET_URL ?? "/realtime"), {
       withCredentials: true,
       transports: ["websocket", "polling"],
+      tryAllTransports: true,
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 750,
