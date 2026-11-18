@@ -114,15 +114,22 @@ async function loginStudent(page: Page) {
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
 }
 
-async function chooseBaseLocation(page: Page, hierarchy: TestHierarchy) {
-  await page.getByLabel("Campus").selectOption({ label: hierarchy.campusName });
-  await page.getByLabel("Block").selectOption({ label: hierarchy.blockName });
-  await page.getByLabel("Floor").selectOption({ label: hierarchy.floorName });
+async function chooseLocation(page: Page, label: string, name: string) {
+  const field = page.getByLabel(label, { exact: true });
+  const option = field.locator("option").filter({ hasText: name });
+  await expect(option).toHaveCount(1);
+  await field.selectOption((await option.getAttribute("value"))!);
+}
 
-  await page.getByLabel("Block").selectOption({ label: hierarchy.alternateBlockName });
+async function chooseBaseLocation(page: Page, hierarchy: TestHierarchy) {
+  await chooseLocation(page, "Campus", hierarchy.campusName);
+  await chooseLocation(page, "Block", hierarchy.blockName);
+  await chooseLocation(page, "Floor", hierarchy.floorName);
+
+  await chooseLocation(page, "Block", hierarchy.alternateBlockName);
   await expect(page.getByLabel("Floor")).toHaveValue("");
-  await page.getByLabel("Block").selectOption({ label: hierarchy.blockName });
-  await page.getByLabel("Floor").selectOption({ label: hierarchy.floorName });
+  await chooseLocation(page, "Block", hierarchy.blockName);
+  await chooseLocation(page, "Floor", hierarchy.floorName);
 }
 
 async function completeIssueDetails(page: Page, title: string) {
@@ -149,7 +156,7 @@ test("Issue Reporting supports rooms, areas, registered/custom/no assets and gua
   await expect(page.getByText("Select a campus.", { exact: true })).toBeVisible();
   await chooseBaseLocation(page, hierarchy);
   await page.getByRole("radio", { name: /^Room/ }).check();
-  await page.getByLabel("Room").selectOption({ label: hierarchy.roomName });
+  await chooseLocation(page, "Room", hierarchy.roomName);
   await page.locator("#assetMode select").selectOption("REGISTERED");
   const registeredAsset = page.getByLabel("Registered asset");
   const registeredOption = registeredAsset.locator("option").filter({ hasText: hierarchy.roomAssetName });
@@ -172,7 +179,7 @@ test("Issue Reporting supports rooms, areas, registered/custom/no assets and gua
   await page.getByRole("button", { name: "Report another" }).click();
   await chooseBaseLocation(page, hierarchy);
   await page.getByRole("radio", { name: /^Area/ }).check();
-  await page.getByLabel("Existing area").selectOption({ label: hierarchy.areaName });
+  await chooseLocation(page, "Existing area", hierarchy.areaName);
   await expect(page.locator("#assetMode select")).toHaveValue("NONE");
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Choose a category" })).toBeVisible();
