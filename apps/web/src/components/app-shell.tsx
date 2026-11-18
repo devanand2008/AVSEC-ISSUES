@@ -4,14 +4,16 @@ import {
   Bell,
   ChevronDown,
   CircleUserRound,
+  FileWarning,
   LogOut,
   Menu,
+  Search,
   Settings,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CollegeBranding, LoadingLogo } from "@/components/college-branding";
 import { useAuth } from "@/providers/auth-provider";
@@ -40,6 +42,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [navigationQuery, setNavigationQuery] = useState("");
+  const openButton = useRef<HTMLButtonElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const sideNav = useRef<HTMLElement>(null);
+  const profileButton = useRef<HTMLButtonElement>(null);
   const [profile, setProfile] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [pendingAnnouncements, setPendingAnnouncements] = useState<
@@ -68,6 +75,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   });
   const routeAllowed =
     !user || canAccessPortalPath(pathname, user.permissions, user.roles);
+  function closeNavigation() {
+    setOpen(false);
+    window.requestAnimationFrame(() => openButton.current?.focus());
+  }
   function handleLogout() {
     if (signingOut) return;
     setSigningOut(true);
@@ -139,14 +150,37 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => source.close();
   }, [loading, user, profileSetupRequired]);
   useEffect(() => {
+    if (!open && !profile) return;
+    if (open) closeButton.current?.focus();
+    function dismiss(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (open) closeNavigation();
+      else {
+        setProfile(false);
+        profileButton.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", dismiss);
+    return () => window.removeEventListener("keydown", dismiss);
+  }, [open, profile]);
+  useEffect(() => {
+    if (!open) return;
+    const desktop = window.matchMedia("(min-width: 1001px)");
+    function onResize(event: MediaQueryListEvent) {
+      if (event.matches) setOpen(false);
+    }
+    desktop.addEventListener("change", onResize);
+    return () => desktop.removeEventListener("change", onResize);
+  }, [open]);
+  useEffect(() => {
     if (loading || !user) return;
     const frame = window.requestAnimationFrame(() => {
-      const nav = document.querySelector<HTMLElement>(".side-nav");
-      const active = document.querySelector<HTMLElement>(".side-nav a.active");
+      const nav = sideNav.current;
+      const active = nav?.querySelector<HTMLElement>("a.active");
       if (!nav || !active) return;
-      const top = active.offsetTop - nav.offsetTop;
-      const centeredTop = top - (nav.clientHeight - active.clientHeight) / 2;
-      nav.scrollTo({ top: Math.max(0, centeredTop), behavior: "auto" });
+      const top = active.getBoundingClientRect().top - nav.getBoundingClientRect().top;
+      if (top < 0 || top + active.offsetHeight > nav.clientHeight)
+        nav.scrollTop += top - (nav.clientHeight - active.offsetHeight) / 2;
     });
     return () => window.cancelAnimationFrame(frame);
   }, [loading, pathname, user]);
@@ -162,22 +196,37 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
   const nav = visibleNavigation(user.permissions, user.roles);
   const activeNavigationHref = getActiveNavigationHref(pathname, nav);
+  const navQuery = navigationQuery.trim().toLowerCase();
+  const matchingNav = nav.filter((item) => item.label.toLowerCase().includes(navQuery));
   const currentAnnouncement = pendingAnnouncements[0];
   return (
     <div className="app-frame">
-      <aside className={`sidebar ${open ? "sidebar-open" : ""}`}>
+      <a className={styles.skipLink} tabIndex={open ? -1 : undefined} href="#main-content">Skip to main content</a>
+      <aside id="portal-sidebar" className={`sidebar ${open ? "sidebar-open" : ""}`}>
         <div className="sidebar-brand">
           <CollegeBranding compact />
           <button
             className="sidebar-close"
-            onClick={() => setOpen(false)}
+            ref={closeButton}
+            onClick={closeNavigation}
             aria-label="Close navigation"
           >
             <X />
           </button>
         </div>
-        <nav className="side-nav" aria-label="Main navigation">
-          {nav.map((item) => {
+        <label className={styles.navigationFilter}>
+          <Search size={17} aria-hidden />
+          <input
+            type="search"
+            aria-label="Filter navigation"
+            placeholder="Find a page"
+            value={navigationQuery}
+            onChange={(event) => setNavigationQuery(event.target.value)}
+          />
+        </label>
+        <nav ref={sideNav} className="side-nav" aria-label="Main navigation">
+          {matchingNav.length === 0 && <p className={styles.noMatches} role="status">No matching pages</p>}
+          {matchingNav.map((item) => {
             const active = item.href === activeNavigationHref;
             const Icon = item.icon;
             const badgeCount = navigationBadgeCount(
@@ -189,7 +238,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 className={`${styles.navigationLink} ${active ? "active" : ""}`.trim()}
                 href={item.href}
                 key={item.href}
-                onClick={() => setOpen(false)}
+                aria-current={active ? (pathname === item.href ? "page" : "location") : undefined}
+                onClick={() => {
+                  setNavigationQuery("");
+                  if (open) closeNavigation();
+                }}
               >
                 <Icon size={19} />
                 <span className={styles.navLabel}>{item.label}</span>
@@ -212,16 +265,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="sidebar-help">
-          <span className="eyebrow" style={{ color: "#93c5fd" }}>
-            Campus services
-          </span>
-          <strong>Spot a problem?</strong>
-          <span>Report it in under a minute.</span>
-          <Link
-            href="/report-issue"
-            className="btn"
-            style={{ background: "white", color: "#1e3a8a" }}
-          >
+          <Link href="/report-issue" className="btn" onClick={() => {
+            if (open) closeNavigation();
+          }}>
+            <FileWarning size={18} aria-hidden />
             Report issue
           </Link>
         </div>
@@ -230,15 +277,19 @@ export function AppShell({ children }: { children: ReactNode }) {
         <button
           className="sidebar-scrim"
           aria-label="Close navigation"
-          onClick={() => setOpen(false)}
+          tabIndex={-1}
+          onClick={closeNavigation}
         />
       )}
-      <div className="main-column">
+      <div className="main-column" inert={open}>
         <header className="topbar">
           <button
             className="menu-button"
+            ref={openButton}
             onClick={() => setOpen(true)}
             aria-label="Open navigation"
+            aria-expanded={open}
+            aria-controls="portal-sidebar"
           >
             <Menu />
           </button>
@@ -267,7 +318,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="profile-menu">
             <button
               className="profile-button"
+              ref={profileButton}
               onClick={() => setProfile(!profile)}
+              aria-label={`Account menu for ${user.fullName}`}
               aria-expanded={profile}
             >
               <span className="avatar">
@@ -284,7 +337,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               <ChevronDown size={15} />
             </button>
             {profile && (
-              <div className="profile-popover card">
+              <div className="profile-popover card" onClick={(event) => {
+                if ((event.target as HTMLElement).closest("a")) setProfile(false);
+              }}>
                 <Link href="/profile">
                   <CircleUserRound size={17} />
                   Profile
@@ -312,7 +367,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           </div>
         </header>
-        <main className="content">{children}</main>
+        <main id="main-content" className="content" tabIndex={-1}>{children}</main>
         {!profileSetupRequired &&
           user.permissions.includes("ai.use") &&
           pathname !== "/avs-bot" && <AvsBotWidget />}

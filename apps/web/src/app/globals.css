@@ -26,7 +26,7 @@
   --text: #0f172a;
   --muted: #64748b;
   --border: #dce6f2;
-  --sidebar: #0b3d91;
+  --sidebar: #10284f;
   --radius: 14px;
   --shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.04);
 }
@@ -791,6 +791,7 @@ body:has([data-notification-ui="true"]) .pwa-install-button {
 
 @media (max-width: 780px) {
   body:has(.auth-page),
+  body:has([data-login-page]),
   body:has(.change-pw-page) {
     position: relative;
   }
@@ -801,6 +802,7 @@ body:has([data-notification-ui="true"]) .pwa-install-button {
     padding-bottom: calc(84px + env(safe-area-inset-bottom));
   }
   body:has(.auth-page) .pwa-install-button,
+  body:has([data-login-page]) .pwa-install-button,
   body:has(.change-pw-page) .pwa-install-button {
     position: absolute;
   }
@@ -816,7 +818,7 @@ body:has([data-notification-ui="true"]) .pwa-install-button {
   top: 0;
   height: 100dvh;
   padding: 18px 12px;
-  background: var(--sidebar);
+  background: linear-gradient(172deg, var(--sidebar), #0e3674);
   color: #dbeafe;
   display: flex;
   flex-direction: column;
@@ -893,30 +895,20 @@ body:has([data-notification-ui="true"]) .pwa-install-button {
   color: white;
 }
 .side-nav a.active {
-  background: #2563eb;
+  background: #234f8c;
   color: white;
-  box-shadow: 0 8px 18px rgba(29, 78, 216, 0.3);
+  box-shadow: inset 3px 0 #a8c9ff;
 }
 .sidebar-help {
   flex: 0 0 auto;
-  margin-top: 12px;
-  padding: 13px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.055);
-  border-radius: 8px;
-  display: grid;
-  gap: 8px;
-  font-size: 0.81rem;
-  color: #dbeafe;
-}
-.sidebar-help strong {
-  color: white;
-  font-size: 0.94rem;
+  margin: 8px 4px 0;
+  padding-top: 10px;
+  border-top: 1px solid #ffffff2e;
 }
 .sidebar-help .btn {
-  min-height: 44px;
-  padding: 7px 10px;
-  margin-top: 3px;
+  width: 100%;
+  background: #fff;
+  color: #173e79;
 }
 .main-column {
   min-width: 0;
@@ -1107,14 +1099,17 @@ body:has(.pwa-install-button) .avs-bot-launcher {
   .sidebar {
     position: fixed;
     left: 0;
-    width: 272px;
+    width: min(296px, 92vw);
     padding-top: max(18px, env(safe-area-inset-top));
     padding-bottom: max(18px, env(safe-area-inset-bottom));
     transform: translateX(-102%);
-    transition: transform 0.2s ease;
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0s 0.2s;
   }
   .sidebar.sidebar-open {
     transform: translateX(0);
+    visibility: visible;
+    transition-delay: 0s;
   }
   .sidebar-close,
   .menu-button {

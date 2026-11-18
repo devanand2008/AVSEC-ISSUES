@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  CheckCircle2,
-  Eye,
-  EyeOff,
-  LockKeyhole,
-  ShieldCheck,
-} from "lucide-react";
+import { ArrowRight, Eye, EyeOff, LoaderCircle, WifiOff } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -16,15 +10,13 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import {
-  CollegeBranding,
-  collegeBranding,
-} from "@/components/college-branding";
+import { CollegeBranding } from "@/components/college-branding";
 import { api } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
 import { loginErrorMessage } from "./login-error";
 import { probeLoginReadiness, type LoginReadiness } from "./login-readiness";
 import { getPostAuthenticationRoute } from "@/features/auth/post-login-routing";
+import styles from "./login.module.css";
 
 type LoginHint = {
   identifier: string;
@@ -33,23 +25,19 @@ type LoginHint = {
 };
 
 function readLoginHint(): LoginHint {
-  if (typeof window === "undefined")
-    return { identifier: "", collegeCode: "", remember: false };
-  const saved = window.localStorage.getItem("avs_login_hint");
-  if (!saved) return { identifier: "", collegeCode: "", remember: false };
+  const emptyHint = { identifier: "", collegeCode: "", remember: false };
+  if (typeof window === "undefined") return emptyHint;
   try {
-    const parsed = JSON.parse(saved) as {
-      identifier?: string;
-      collegeCode?: string;
-    };
+    const saved = window.localStorage.getItem("avs_login_hint");
+    if (!saved) return emptyHint;
+    const parsed = JSON.parse(saved);
     return {
-      identifier: parsed.identifier ?? "",
-      collegeCode: parsed.collegeCode ?? "",
+      identifier: typeof parsed?.identifier === "string" ? parsed.identifier : "",
+      collegeCode: typeof parsed?.collegeCode === "string" ? parsed.collegeCode : "",
       remember: true,
     };
   } catch {
-    window.localStorage.removeItem("avs_login_hint");
-    return { identifier: "", collegeCode: "", remember: false };
+    return emptyHint;
   }
 }
 
@@ -68,14 +56,12 @@ export default function LoginPage() {
     "checking",
   );
   const readinessRunning = useRef(false);
-  const readinessRun = useRef(0);
   const checkConnection = useCallback(async () => {
     if (readinessRunning.current) return;
     readinessRunning.current = true;
-    const run = ++readinessRun.current;
     setReadiness("checking");
     const result = await probeLoginReadiness(() => api.warmup());
-    if (readinessRun.current === run) setReadiness(result);
+    setReadiness(result);
     readinessRunning.current = false;
   }, []);
   // Prefetch every first-login destination so navigation is instant after login.
@@ -92,7 +78,6 @@ export default function LoginPage() {
     window.addEventListener("online", warmServer);
     document.addEventListener("visibilitychange", warmServer);
     return () => {
-      readinessRun.current += 1;
       window.removeEventListener("online", warmServer);
       document.removeEventListener("visibilitychange", warmServer);
     };
@@ -111,12 +96,16 @@ export default function LoginPage() {
         password,
         collegeCode.trim() || undefined,
       );
-      if (remember)
-        window.localStorage.setItem(
-          "avs_login_hint",
-          JSON.stringify({ identifier, collegeCode }),
-        );
-      else window.localStorage.removeItem("avs_login_hint");
+      try {
+        if (remember)
+          window.localStorage.setItem(
+            "avs_login_hint",
+            JSON.stringify({ identifier: identifier.trim(), collegeCode: collegeCode.trim() }),
+          );
+        else window.localStorage.removeItem("avs_login_hint");
+      } catch {
+        // Some browser privacy settings disable storage. Sign-in still works.
+      }
       router.push(getPostAuthenticationRoute(user));
     } catch (caught: unknown) {
       setError(loginErrorMessage(caught));
@@ -124,197 +113,131 @@ export default function LoginPage() {
     }
   }
   return (
-    <main className="auth-page">
-      <section className="auth-brand">
+    <main className={styles.page} data-login-page>
+      <aside className={styles.brandPanel}>
         <CollegeBranding priority />
-        <div style={{ maxWidth: 560, position: "relative", zIndex: 1 }}>
-          <span className="eyebrow" style={{ color: "#bfdbfe" }}>
-            Campus Management System
-          </span>
-          <h1
-            style={{
-              fontSize: "clamp(2.25rem,5vw,4.2rem)",
-              lineHeight: 1.04,
-              margin: "16px 0 22px",
-            }}
-          >
-            {collegeBranding.collegeName}
-          </h1>
-          <p
-            style={{
-              color: "#dbeafe",
-              fontSize: "1.05rem",
-              lineHeight: 1.7,
-              maxWidth: 510,
-            }}
-          >
-            Attendance, campus issue reporting, internal communication and
-            administration in one secure AVS workspace.
+        <div className={styles.brandCopy}>
+          <p className={styles.eyebrow}>AVS Campus</p>
+          <p className={styles.brandTitle}>Your campus<br />in one place.</p>
+          <p className={styles.brandDescription}>
+            Check attendance, read announcements, get in touch, and report
+            campus issues.
           </p>
-          <div style={{ display: "grid", gap: 14, marginTop: 34 }}>
-            {[
-              "Role and scope protected",
-              "Real campus service updates",
-              "Works on phones and desktops",
-            ].map((item) => (
-              <div
-                key={item}
-                style={{ display: "flex", alignItems: "center", gap: 10 }}
-              >
-                <CheckCircle2 size={19} color="#93c5fd" />
-                {item}
-              </div>
-            ))}
-          </div>
         </div>
-        <small style={{ color: "#bfdbfe", position: "relative", zIndex: 1 }}>
-          Authorized AVS users only
-        </small>
-      </section>
-      <section className="auth-form-wrap">
-        <form className="auth-form" onSubmit={submit}>
-          <CollegeBranding className="auth-form-branding" priority />
-          <span className="eyebrow auth-welcome">Welcome back</span>
-          <h1 className="auth-title">Sign in</h1>
-          <p className="muted auth-description">
-            Use your college ID or official email. Accounts are created by the
-            administrator.
-          </p>
-          {error && (
-            <div
-              className="error-box"
-              role="alert"
-              style={{ marginBottom: 18 }}
-            >
-              {error}
-            </div>
-          )}
-          {readiness !== "ready" && (
-            <div
-              className="error-box"
-              role="status"
-              style={{ marginBottom: 18 }}
-            >
-              <span>
-                {readiness === "checking"
-                  ? "Connecting to the AVS server. Sign-in will be available when it is ready."
-                  : readiness === "offline"
-                    ? "This device is offline. Reconnect to continue."
-                    : "The AVS server has not responded yet. Retry the connection before signing in."}
-              </span>
-              <button
-                className="btn btn-secondary"
-                type="button"
-                disabled={readiness === "checking"}
-                onClick={() => void checkConnection()}
-                style={{ marginTop: 10 }}
-              >
-                {readiness === "checking"
-                  ? "Connecting..."
-                  : "Retry Connection"}
-              </button>
-            </div>
-          )}
-          <div className="auth-fields">
+        <span className={styles.brandFooter}>For students, faculty, and staff</span>
+      </aside>
+
+      <section className={styles.formPanel} aria-labelledby="login-title">
+        <div className={styles.formWrap}>
+          <CollegeBranding className={styles.mobileBrand} priority />
+          <header className={styles.formHeader}>
+            <p className={styles.eyebrow}>Campus portal</p>
+            <h1 id="login-title">Sign in</h1>
+            <p>Use your college ID or the email registered with AVS.</p>
+          </header>
+
+          <form className={styles.form} onSubmit={submit} aria-busy={busy}>
+            {error && <div className="error-box" role="alert">{error}</div>}
+
             <div className="field">
               <label htmlFor="identifier">College ID or Email</label>
               <input
                 className="input"
                 id="identifier"
+                name="username"
                 autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
                 value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
+                onChange={(event) => setIdentifier(event.target.value)}
                 required
               />
             </div>
+
+            <div className="field">
+              <div className={styles.passwordLabel}>
+                <label htmlFor="password">Password</label>
+                <Link className={styles.recoveryLink} href="/forgot-password">
+                  Forgot password?
+                </Link>
+              </div>
+              <div className={styles.passwordField}>
+                <input
+                  className="input"
+                  id="password"
+                  name="password"
+                  type={visible ? "text" : "password"}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                />
+                <button
+                  className={styles.showPassword}
+                  type="button"
+                  onClick={() => setVisible(!visible)}
+                  aria-label={visible ? "Hide password" : "Show password"}
+                  aria-controls="password"
+                >
+                  {visible ? <EyeOff size={19} aria-hidden /> : <Eye size={19} aria-hidden />}
+                </button>
+              </div>
+            </div>
+
             <div className="field">
               <label htmlFor="collegeCode">
-                College code{" "}
-                <span className="muted" style={{ fontWeight: 400 }}>
-                  (if requested)
-                </span>
+                College code <span className={styles.optional}>(if requested)</span>
               </label>
               <input
                 className="input"
                 id="collegeCode"
+                name="collegeCode"
+                autoCapitalize="characters"
+                spellCheck={false}
                 value={collegeCode}
-                onChange={(e) => setCollegeCode(e.target.value.toUpperCase())}
+                onChange={(event) => setCollegeCode(event.target.value.toUpperCase())}
               />
             </div>
-            <div className="field">
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <label htmlFor="password">Password</label>
-                <Link
-                  href="/forgot-password"
-                  style={{ color: "var(--primary)", fontWeight: 650 }}
-                >
-                  Forgot password?
-                </Link>
-              </div>
-              <div style={{ position: "relative" }}>
-                <input
-                  className="input"
-                  style={{ paddingRight: 46 }}
-                  id="password"
-                  type={visible ? "text" : "password"}
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setVisible(!visible)}
-                  aria-label={visible ? "Hide password" : "Show password"}
-                  style={{
-                    position: "absolute",
-                    right: 5,
-                    top: 1,
-                    width: 40,
-                    minHeight: 40,
-                    border: 0,
-                    background: "transparent",
-                    color: "var(--muted)",
-                  }}
-                >
-                  {visible ? <EyeOff size={19} /> : <Eye size={19} />}
-                </button>
-              </div>
-            </div>
-            <label className="check-field" style={{ color: "var(--text)" }}>
+
+            <label className={`check-field ${styles.remember}`}>
               <input
                 type="checkbox"
                 checked={remember}
                 onChange={(event) => setRemember(event.target.checked)}
               />
-              Remember this device
+              Remember my ID on this device
             </label>
-            <button
-              className="btn btn-primary"
-              disabled={busy || readiness !== "ready"}
-              style={{ width: "100%", marginTop: 5 }}
-            >
-              {busy ? (
-                "Signing in..."
-              ) : (
-                <>
-                  <LockKeyhole size={18} />
-                  Login
-                </>
-              )}
+
+            {readiness !== "ready" && (
+              <div className={styles.connection}>
+                {readiness === "checking" ? (
+                  <LoaderCircle className={styles.spinner} size={19} aria-hidden />
+                ) : (
+                  <WifiOff size={19} aria-hidden />
+                )}
+                <div>
+                  <span role="status">
+                    {readiness === "checking"
+                      ? "Connecting to the campus server…"
+                      : readiness === "offline"
+                        ? "You’re offline. Reconnect to sign in."
+                        : "The campus server hasn’t responded yet."}
+                  </span>
+                  {readiness !== "checking" && (
+                    <button type="button" onClick={() => void checkConnection()}>
+                      Retry connection
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <button className="btn btn-primary" disabled={busy || readiness !== "ready"}>
+              {busy ? "Signing in…" : "Secure sign in"}
+              {!busy && <ArrowRight size={18} aria-hidden />}
             </button>
-          </div>
-          <div className="auth-security">
-            <ShieldCheck
-              size={19}
-              style={{ flex: "0 0 auto", color: "var(--success)" }}
-            />
-            <small>
-              Your session is protected. Never share your temporary password or
-              verification code.
-            </small>
-          </div>
-        </form>
+          </form>
+        </div>
       </section>
     </main>
   );

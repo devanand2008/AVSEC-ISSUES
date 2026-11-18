@@ -1,0 +1,20 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "npm ci --include=dev",
+  "buildCommand": "npm run build --workspace @college/shared-types && npm run build --workspace @college/validation && npm run build --workspace @college/web",
+  "rewrites": [
+    {
+      "source": "/health/:path*",
+      "destination": "https://avs-college-portal.onrender.com/health/:path*"
+    },
+    {
+      "source": "/api/v1/:path*",
+      "destination": "https://avs-college-portal.onrender.com/api/v1/:path*"
+    },
+    {
+      "source": "/socket.io/:path*",
+      "destination": "https://avs-college-portal.onrender.com/socket.io/:path*"
+    }
+  ]
+}
