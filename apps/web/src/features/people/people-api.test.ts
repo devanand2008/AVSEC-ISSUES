@@ -1,12 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
   PEOPLE_BACKUPS_ENDPOINT,
+  canResetPersonPassword,
   isRestoreTestedPreDeletionBackup,
 } from "./people-api";
 
 describe("People management API routes", () => {
   it("uses the canonical admin backups controller route", () => {
     expect(PEOPLE_BACKUPS_ENDPOINT).toBe("/admin/backups");
+  });
+
+  it("shows the reset action only to an admin with permission for another non-archived account", () => {
+    const actor = { id: "admin", permissions: ["users.reset_password"] };
+    const person = { publicId: "student", status: "ACTIVE", archivedAt: null };
+    expect(canResetPersonPassword(actor, person)).toBe(true);
+    expect(canResetPersonPassword({ ...actor, permissions: [] }, person)).toBe(false);
+    expect(canResetPersonPassword(actor, { ...person, publicId: actor.id })).toBe(false);
+    expect(canResetPersonPassword(actor, { ...person, status: "ARCHIVED" })).toBe(false);
   });
 
   it("accepts only a passed restore-tested pre-deletion backup created after archive", () => {

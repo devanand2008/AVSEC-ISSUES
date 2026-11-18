@@ -14,6 +14,7 @@ import PersonDetailPage from "./page";
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   patch: vi.fn(),
+  post: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({ api: mocks }));
@@ -21,9 +22,11 @@ vi.mock("@/lib/api", () => ({ api: mocks }));
 vi.mock("@/providers/auth-provider", () => ({
   useAuth: () => ({
     user: {
+      id: "actor-public-id",
       permissions: [
         "users.read",
         "users.update",
+        "users.reset_password",
         "roles.read",
         "roles.manage",
         "scopes.manage",
@@ -149,6 +152,32 @@ describe("People detail management", () => {
       return Promise.reject(new Error(`Unexpected GET ${path}`));
     });
     mocks.patch.mockResolvedValue({ ok: true });
+  });
+
+  it("validates a custom temporary password and surfaces a backend denial", async () => {
+    mocks.post.mockRejectedValue(new Error("You cannot reset this user's password."));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Reset password" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Reset password" });
+    const field = within(dialog).getByLabelText("Temporary password (optional)");
+    const confirm = within(dialog).getByRole("button", { name: "Reset password" });
+    fireEvent.change(within(dialog).getByLabelText("Reason for reset"), {
+      target: { value: "Account recovery requested" },
+    });
+    fireEvent.change(field, { target: { value: "short" } });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(field, { target: { value: "Test-Password2026!" } });
+    fireEvent.click(confirm);
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "You cannot reset this user's password.",
+    );
+    expect(mocks.post).toHaveBeenCalledExactlyOnceWith(
+      "/users/person-public-id/reset-password",
+      { temporaryPassword: "Test-Password2026!", reason: "Account recovery requested", requirePasswordChange: true },
+      undefined,
+      { cache: "no-store" },
+    );
   });
 
   it("uses update permission for identity edits and preserves scopes during role changes", async () => {

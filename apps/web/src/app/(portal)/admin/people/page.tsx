@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
+  Key,
   RefreshCw,
   RotateCcw,
   Search,
@@ -38,8 +39,10 @@ import { PermanentDeleteDialog } from "@/components/ui/permanent-delete-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import {
   PEOPLE_BACKUPS_ENDPOINT,
+  canResetPersonPassword,
   isRestoreTestedPreDeletionBackup,
 } from "@/features/people/people-api";
+import { ResetPersonPasswordDialog } from "@/features/people/reset-person-password-dialog";
 import { api } from "@/lib/api";
 import type { PageResponse } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
@@ -165,6 +168,7 @@ export default function PeopleManagementPage() {
   const [archiveTarget, setArchiveTarget] = useState<PersonRow | null>(null);
   const [depTarget, setDepTarget] = useState<PersonRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PersonRow | null>(null);
+  const [passwordTarget, setPasswordTarget] = useState<PersonRow | null>(null);
 
   // ── Permissions ──
   const canCreate = user?.permissions.includes("users.create") ?? false;
@@ -356,6 +360,13 @@ export default function PeopleManagementPage() {
       },
     ];
 
+    if (canResetPersonPassword(user, p)) {
+      items.push({
+        label: "Reset password",
+        icon: <Key size={16} />,
+        onClick: () => setPasswordTarget(p),
+      });
+    }
     if (canSuspend && p.status === "ACTIVE") {
       items.push({
         label: "Suspend Account",
@@ -1039,6 +1050,17 @@ export default function PeopleManagementPage() {
             </div>
           )}
         </>
+      )}
+
+      {passwordTarget && (
+        <ResetPersonPasswordDialog
+          person={passwordTarget}
+          onClose={() => setPasswordTarget(null)}
+          onReset={() => {
+            void queryClient.invalidateQueries({ queryKey: ["people"] });
+            void queryClient.invalidateQueries({ queryKey: ["person", passwordTarget.publicId] });
+          }}
+        />
       )}
 
       {/* ── Archive Dialog ── */}

@@ -12,6 +12,7 @@ import PeopleManagementPage from "./page";
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
+  post: vi.fn(),
   patch: vi.fn(),
   delete: vi.fn(),
 }));
@@ -21,12 +22,14 @@ vi.mock("@/lib/api", () => ({ api: mocks }));
 vi.mock("@/providers/auth-provider", () => ({
   useAuth: () => ({
     user: {
+      id: "actor-public-id",
       permissions: [
         "users.read",
         "users.create",
         "users.import",
         "users.update",
         "users.suspend",
+        "users.reset_password",
       ],
       roles: ["MAIN_ADMIN"],
     },
@@ -122,6 +125,31 @@ describe("People management filters", () => {
       }
       return Promise.reject(new Error(`Unexpected GET ${path}`));
     });
+  });
+
+  it("resets a password from the row menu and shows the generated credential once", async () => {
+    mocks.post.mockResolvedValue({ temporaryPassword: "Generated2026!" });
+    renderPage();
+    fireEvent.click((await screen.findAllByRole("button", { name: "Actions" }))[0]!);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reset password" }));
+
+    const dialog = screen.getByRole("alertdialog", { name: "Reset password" });
+    const confirm = within(dialog).getByRole("button", { name: "Reset password" });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText("Reason for reset"), {
+      target: { value: "  Account recovery requested  " },
+    });
+    fireEvent.click(confirm);
+
+    expect(await within(dialog).findByLabelText("Temporary password")).toHaveValue("Generated2026!");
+    expect(mocks.post).toHaveBeenCalledExactlyOnceWith(
+      "/users/person-public-id/reset-password",
+      { reason: "Account recovery requested", requirePasswordChange: true },
+      undefined,
+      { cache: "no-store" },
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+    expect(screen.queryByDisplayValue("Generated2026!")).toBeNull();
   });
 
   it("keeps Bulk Import available and sends relational Department, Year, and Classroom filters", async () => {

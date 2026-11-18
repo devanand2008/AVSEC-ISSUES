@@ -19,8 +19,10 @@ import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { ErrorState } from "@/components/ui/error-state";
 import {
   PEOPLE_BACKUPS_ENDPOINT,
+  canResetPersonPassword,
   isRestoreTestedPreDeletionBackup,
 } from "@/features/people/people-api";
+import { ResetPersonPasswordDialog } from "@/features/people/reset-person-password-dialog";
 import { StudentSectionMove } from "@/features/people/student-section-move";
 import { StaffFeedbackQrPanel } from "@/features/people/staff-feedback-qr";
 import { api } from "@/lib/api";
@@ -127,6 +129,7 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [rolesOpen, setRolesOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const [selectedRoleCodes, setSelectedRoleCodes] = useState<string[]>([]);
   const [roleReason, setRoleReason] = useState("");
   const [editForm, setEditForm] = useState({
@@ -346,6 +349,11 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
                 <Pencil size={16} /> Edit
               </button>
             )}
+            {canResetPersonPassword(user, p) && (
+              <button className="avs-btn avs-btn-secondary" onClick={() => setPasswordOpen(true)} type="button">
+                <Key size={16} aria-hidden /> Reset password
+              </button>
+            )}
             {canManageRoles && !isArchived && (
               <button
                 className="avs-btn avs-btn-secondary"
@@ -531,6 +539,17 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
       )}
 
       {/* Dialogs */}
+      {passwordOpen && (
+        <ResetPersonPasswordDialog
+          key={p.publicId}
+          person={p}
+          onClose={() => setPasswordOpen(false)}
+          onReset={() => {
+            void queryClient.invalidateQueries({ queryKey: ["person", p.publicId] });
+            void queryClient.invalidateQueries({ queryKey: ["people"] });
+          }}
+        />
+      )}
       <ConfirmationDialog
         open={editOpen}
         onClose={() => {

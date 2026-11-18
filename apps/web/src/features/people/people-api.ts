@@ -1,5 +1,17 @@
 export const PEOPLE_BACKUPS_ENDPOINT = "/admin/backups";
 
+export function canResetPersonPassword(
+  actor: { id: string; permissions: string[] } | null | undefined,
+  person: { publicId: string; status: string; archivedAt: string | null },
+): boolean {
+  return Boolean(
+    actor?.permissions.includes("users.reset_password") &&
+      actor.id !== person.publicId &&
+      person.status !== "ARCHIVED" &&
+      !person.archivedAt,
+  );
+}
+
 export interface DeletionBackupCandidate {
   status: string;
   backupType: string;
