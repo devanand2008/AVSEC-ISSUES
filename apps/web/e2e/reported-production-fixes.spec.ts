@@ -88,14 +88,14 @@ async function createTestHierarchy(): Promise<TestHierarchy> {
       headers,
       data: { floorId: floor.id, code: `EX${suffix}`.slice(0, 40), name: areaName, isActive: true },
     }));
-    const categories = await responseBody<Array<{ id: string; name: string }>>(await admin.get(`${apiBase}/admin/asset-categories`));
+    const categories = await responseBody<Array<{ id: string; name: string }>>(await admin.get(`${apiBase}/asset-categories`));
     expect(categories.length).toBeGreaterThan(0);
     const categoryId = categories[0]!.id;
-    await responseBody(await admin.post(`${apiBase}/admin/assets`, {
+    await responseBody(await admin.post(`${apiBase}/assets`, {
       headers,
       data: { roomId: room.id, categoryId, code: `ERP${suffix}`.slice(0, 60), name: roomAssetName },
     }));
-    await responseBody(await admin.post(`${apiBase}/admin/assets`, {
+    await responseBody(await admin.post(`${apiBase}/assets`, {
       headers,
       data: { areaId: area.id, categoryId, code: `EAL${suffix}`.slice(0, 60), name: `E2E Corridor Light ${suffix}` },
     }));

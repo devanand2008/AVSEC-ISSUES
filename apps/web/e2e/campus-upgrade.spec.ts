@@ -27,8 +27,8 @@ function waitForMessageSend(page: Page) {
 test("admin upgrade pages render without horizontal overflow", async ({ page }, testInfo) => {
   await loginAsAdmin(page);
   await page.goto("/admin/academic");
-  await expect(page.getByRole("heading", { name: "Academic structure" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Departments/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Advanced Academic Setup" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Departments", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
 
   await page.goto("/admin/maintenance-staff");
@@ -39,15 +39,12 @@ test("admin upgrade pages render without horizontal overflow", async ({ page }, 
   await page.goto("/admin/people");
   const addPerson = page.getByRole("link", { name: "Add Person" }).first();
   await expect(addPerson).toHaveAttribute("href", "/admin/people/new");
-  await expect(page.getByRole("link", { name: "Import" }).first()).toHaveAttribute(
-    "href",
-    "/admin/imports",
-  );
+  await expect(page.locator('main a[href="/admin/imports?type=PEOPLE"]')).toBeVisible();
   await addPerson.click();
   await expect(page).toHaveURL(/\/admin\/people\/new$/);
   await expect(page.getByRole("heading", { name: "Add Person" }).first()).toBeVisible();
   await expect(page.getByLabel("College ID")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create account" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
 
   await page.goto("/admin/announcements/create");
   await page.getByLabel("Recipient group").selectOption("DEPARTMENT");

@@ -37,9 +37,10 @@ test("student signs in and sees the scoped portal", async ({ page }) => {
   await page.locator("#password").fill(studentPassword);
   await page.getByRole("button", { name: /login|secure sign in/i }).click();
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
-  await expect(page.getByRole("heading", { name: /Good day, Aarav/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Welcome, Aarav" })).toBeVisible({ timeout: 30_000 });
   await page.goto("/admin/users");
-  await expect(page.locator(".error-box")).toContainText("do not have access", { timeout: 30_000 });
+  await expect(page).toHaveURL(/\/unauthorized$/);
+  await expect(page.getByRole("heading", { name: "Access denied" })).toBeVisible();
 });
 
 test("issue lifecycle routes, uploads, closes, and enforces authorization", async ({}, testInfo) => {
