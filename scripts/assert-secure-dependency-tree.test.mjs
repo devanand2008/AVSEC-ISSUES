@@ -25,20 +25,20 @@ function createFixture(t) {
   t.after(() => fs.rmSync(rootDirectory, { force: true, recursive: true }));
 
   const rootManifest = {
-    dependencies: { "@nestjs/swagger": "11.4.6" },
+    dependencies: { "@nestjs/swagger": "11.4.8" },
     overrides: {
-      "@nestjs/swagger": { "js-yaml": "5.2.3" },
+      "@nestjs/swagger": { "js-yaml": "5.5.0" },
       nanoid: "3.3.18",
     },
   };
-  const apiManifest = { dependencies: { "@nestjs/swagger": "11.4.6" } };
+  const apiManifest = { dependencies: { "@nestjs/swagger": "11.4.8" } };
   const lock = {
     lockfileVersion: 3,
     packages: {
-      "": { dependencies: { "@nestjs/swagger": "11.4.6" } },
-      "apps/api": { dependencies: { "@nestjs/swagger": "11.4.6" } },
-      "node_modules/@nestjs/swagger": { version: "11.4.6" },
-      "node_modules/@nestjs/swagger/node_modules/js-yaml": { version: "5.2.3" },
+      "": { dependencies: { "@nestjs/swagger": "11.4.8" } },
+      "apps/api": { dependencies: { "@nestjs/swagger": "11.4.8" } },
+      "node_modules/@nestjs/swagger": { version: "11.4.8" },
+      "node_modules/@nestjs/swagger/node_modules/js-yaml": { version: "5.5.0" },
       "node_modules/js-yaml": { version: "4.3.1" },
       "node_modules/nanoid": { version: "3.3.18" },
     },
@@ -49,14 +49,14 @@ function createFixture(t) {
   writeJson(rootDirectory, "package-lock.json", lock);
   writeJson(rootDirectory, "node_modules/@nestjs/swagger/package.json", {
     name: "@nestjs/swagger",
-    version: "11.4.6",
+    version: "11.4.8",
   });
   writeJson(
     rootDirectory,
     "node_modules/@nestjs/swagger/node_modules/js-yaml/package.json",
     {
       name: "js-yaml",
-      version: "5.2.3",
+      version: "5.5.0",
     },
   );
   writeJson(rootDirectory, "node_modules/js-yaml/package.json", {
