@@ -8,19 +8,25 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   private readonly logger = new Logger(PrismaService.name);
 
   constructor(config: ConfigService) {
-    let connectionString = config.getOrThrow<string>("DATABASE_URL");
-    const max = config.get<number>("DATABASE_POOL_MAX", 50);
-    const timeout = config.get<number>("DATABASE_POOL_TIMEOUT", 30);
-    if (!connectionString.includes("connection_limit=")) {
-      const separator = connectionString.includes("?") ? "&" : "?";
-      connectionString = `${connectionString}${separator}connection_limit=${max}&pool_timeout=${timeout}`;
-    }
-    super({ adapter: new PrismaPg({ connectionString, max, connectionTimeoutMillis: timeout * 1000, idleTimeoutMillis: timeout * 1000 }) });
+    const connectionString = config.getOrThrow<string>("DATABASE_URL");
+    const max = config.getOrThrow<number>("DATABASE_POOL_MAX");
+    const timeout = config.getOrThrow<number>("DATABASE_POOL_TIMEOUT");
+    super({
+      adapter: new PrismaPg({
+        connectionString,
+        min: 1,
+        max,
+        connectionTimeoutMillis: timeout * 1_000,
+        idleTimeoutMillis: 60_000,
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 15_000,
+      }),
+    });
   }
 
   async onModuleInit(): Promise<void> {
     await this.$connect();
-    this.logger.log("Connected to PostgreSQL");
+    this.logger.log("PostgreSQL pool initialized");
   }
 
   async onModuleDestroy(): Promise<void> {

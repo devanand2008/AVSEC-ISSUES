@@ -98,6 +98,7 @@ export const environmentSchema = z
     DATABASE_URL: z.string().min(1),
     DIRECT_DATABASE_URL: optionalString,
     DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(20),
+    DATABASE_POOL_TIMEOUT: z.coerce.number().int().min(1).max(120).default(30),
     REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
     JWT_ACCESS_SECRET: z.string().min(32),
     JWT_REFRESH_SECRET: z.string().min(32),
