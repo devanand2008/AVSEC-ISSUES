@@ -42,6 +42,8 @@ const PRIORITY_ORDER: Record<string, number> = {
   LOW: 4,
 };
 
+const POSTER_RESEND_PREFIX = "poster-resend:";
+
 export interface RecipientJob {
   announcementId: string;
   collegeId: string;
@@ -154,13 +156,14 @@ export class AnnouncementsService {
     });
 
     return Promise.all(receipts
-      .sort(
-        (a, b) =>
-          (PRIORITY_ORDER[a.announcement.priority] ?? 99) -
-            (PRIORITY_ORDER[b.announcement.priority] ?? 99) ||
-          (a.announcement.publishAt?.getTime() ?? a.announcement.createdAt.getTime()) -
-            (b.announcement.publishAt?.getTime() ?? b.announcement.createdAt.getTime()),
-      )
+      .sort((a, b) => {
+        const priority = (PRIORITY_ORDER[a.announcement.priority] ?? 99) - (PRIORITY_ORDER[b.announcement.priority] ?? 99);
+        const aResent = Boolean(a.announcement.idempotencyKey?.startsWith(POSTER_RESEND_PREFIX));
+        const bResent = Boolean(b.announcement.idempotencyKey?.startsWith(POSTER_RESEND_PREFIX));
+        const aTime = a.announcement.publishAt?.getTime() ?? a.announcement.createdAt.getTime();
+        const bTime = b.announcement.publishAt?.getTime() ?? b.announcement.createdAt.getTime();
+        return priority || Number(bResent) - Number(aResent) || (aResent ? bTime - aTime : aTime - bTime);
+      })
       .slice(0, this.config.get<number>("ANNOUNCEMENT_MAX_AUTO_PER_SESSION", 3))
       .map(async (r) => this.formatAnnouncementWithImage(r.announcement, r)));
   }
@@ -326,7 +329,7 @@ export class AnnouncementsService {
     if (!key || !isUUID(key, "4")) {
       throw new BadRequestException("An idempotency key is required to resend a poster.");
     }
-    const sendKey = `poster-resend:${this.idempotency.hash({ actorId: user.id, collegeId: user.collegeId, id, key })}`;
+    const sendKey = `${POSTER_RESEND_PREFIX}${this.idempotency.hash({ actorId: user.id, collegeId: user.collegeId, id, key })}`;
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sendKey}))`;
