@@ -14,6 +14,7 @@ import { extname } from "node:path";
 import type { Readable } from "node:stream";
 import { Queue } from "bullmq";
 import { addHours } from "date-fns";
+import { isUUID } from "class-validator";
 import type { AuthPrincipal } from "../../common/http/request-context";
 import { IdempotencyService } from "../../common/idempotency/idempotency.service";
 import { PrismaService } from "../../database/prisma.service";
@@ -319,6 +320,84 @@ export class AnnouncementsService {
         },
       });
     });
+  }
+
+  async resendPoster(user: AuthPrincipal, id: string, requestId: string, key?: string) {
+    if (!key || !isUUID(key, "4")) {
+      throw new BadRequestException("An idempotency key is required to resend a poster.");
+    }
+    const sendKey = `poster-resend:${this.idempotency.hash({ actorId: user.id, collegeId: user.collegeId, id, key })}`;
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sendKey}))`;
+      const replay = await tx.announcement.findUnique({
+        where: { idempotencyKey: sendKey },
+        select: { id: true, totalRecipients: true },
+      });
+      if (replay) return { announcementId: replay.id, recipientCount: replay.totalRecipients, replayed: true };
+
+      const source = await tx.announcement.findFirst({
+        where: { id, collegeId: user.collegeId },
+        include: { audiences: true },
+      });
+      if (!source) throw new NotFoundException("Announcement not found.");
+      if (!source.imageStorageKey || !["PUBLISHED", "ARCHIVED", "UNPUBLISHED", "EXPIRED", "PARTIALLY_DELIVERED"].includes(source.status)) {
+        throw new BadRequestException("Only previously sent posters can be resent.");
+      }
+
+      const now = new Date();
+      const { imageStorageKey, imageMimeType, imageWidth, imageHeight, imageSizeBytes } = source;
+      const poster = await tx.announcement.create({
+        data: {
+          collegeId: user.collegeId,
+          authorId: user.id,
+          title: source.title,
+          message: source.message,
+          category: source.category,
+          priority: source.priority,
+          imageStorageKey,
+          imageMimeType,
+          imageWidth,
+          imageHeight,
+          imageSizeBytes,
+          status: "PUBLISHED",
+          publishAt: now,
+          publishedAt: now,
+          expiresAt: source.expiresAt && source.expiresAt <= now ? addHours(now, 7 * 24) : source.expiresAt,
+          showOnAppOpen: true,
+          showOnlyOnce: true,
+          requiresAcknowledgement: source.requiresAcknowledgement,
+          idempotencyKey: sendKey,
+          audiences: {
+            create: source.audiences.map(({ scopeType, scopeId, roleCode, userId }) => ({ scopeType, scopeId, roleCode, userId })),
+          },
+        },
+      });
+      const recipients = await this.createNotification(tx, poster, user.collegeId, source.audiences);
+      if (!recipients.length) throw new BadRequestException("No active users match the poster's saved audience.");
+
+      for (let offset = 0; offset < recipients.length; offset += 500) {
+        await tx.announcementReadReceipt.createMany({
+          data: recipients.slice(offset, offset + 500).map(({ id: userId }) => ({
+            announcementId: poster.id,
+            userId,
+            deliveryStatus: "DELIVERED" as const,
+            firstDeliveredAt: now,
+          })),
+        });
+      }
+      await tx.announcement.update({ where: { id: poster.id }, data: { totalRecipients: recipients.length } });
+      await this.audit.record({
+        actorId: user.id,
+        collegeId: user.collegeId,
+        action: "announcement.poster_resent",
+        entityType: "Announcement",
+        entityId: poster.id,
+        afterValue: { sourceId: id, recipientCount: recipients.length },
+        requestId,
+      }, tx);
+      return { announcementId: poster.id, recipientCount: recipients.length, replayed: false };
+    }, { maxWait: 5_000, timeout: 30_000 });
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

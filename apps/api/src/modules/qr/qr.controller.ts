@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Req } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
@@ -30,6 +30,21 @@ export class QrController {
   @Get("codes")
   codes(@CurrentUser() user: AuthPrincipal) {
     return this.qr.listCodes(user);
+  }
+
+  @Get("codes/blocks")
+  blockCodes(@CurrentUser() user: AuthPrincipal) {
+    return this.qr.blockCodes(user);
+  }
+
+  @Post("codes/blocks")
+  generateBlockCodes(@CurrentUser() user: AuthPrincipal, @Req() request: RequestWithId) {
+    return this.qr.generateBlockCodes(user, { requestId: request.id, ipAddress: request.ip, userAgent: request.header("user-agent") });
+  }
+
+  @Get("codes/:id/image")
+  codeImage(@CurrentUser() user: AuthPrincipal, @Param("id", ParseUUIDPipe) id: string) {
+    return this.qr.codeImage(user, id);
   }
 
   @Post("codes")
