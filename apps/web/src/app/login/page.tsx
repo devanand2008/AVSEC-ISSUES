@@ -67,7 +67,6 @@ export default function LoginPage() {
     readinessRunning.current = false;
   }, []);
   useEffect(() => {
-    router.prefetch("/");
     const warmServer = () => void checkConnection();
     const markOffline = () => setReadiness("offline");
     warmServer();
@@ -77,7 +76,7 @@ export default function LoginPage() {
       window.removeEventListener("online", warmServer);
       window.removeEventListener("offline", markOffline);
     };
-  }, [checkConnection, router]);
+  }, [checkConnection]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;

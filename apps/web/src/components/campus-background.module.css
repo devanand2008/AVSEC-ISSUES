@@ -4,6 +4,7 @@
   --glass-top: #f4fbffb8;
   --glass-bottom: #9dc8f76b;
   --glow: #bdd8fe9c;
+  --travel: 24px;
   position: absolute;
   z-index: -1;
   inset: 0 0 auto;
@@ -69,16 +70,20 @@
 .stack span:nth-child(4) { transform: translateZ(60px) scale(.82); }
 
 @media (prefers-reduced-motion: no-preference) {
-  .stack { animation: settle 4.2s cubic-bezier(.2, .7, .2, 1) both; }
+  .stack { animation: settle 4.4s cubic-bezier(.25, .64, .27, 1) both; }
 }
 
 @keyframes settle {
-  from { transform: translate3d(0, 24px, -60px) rotateX(67deg) rotateZ(-68deg); }
+  from { transform: translate3d(var(--travel), 24px, -70px) rotateX(66deg) rotateZ(-66deg); }
+  62% { transform: translate3d(-5px, -5px, 10px) rotateX(52deg) rotateZ(-30deg); }
   to { transform: rotateX(55deg) rotateZ(-34deg); }
 }
 
 @media (max-width: 760px) {
-  .scene { block-size: min(100%, 21rem); }
+  .scene {
+    --travel: 12px;
+    block-size: min(100%, 21rem);
+  }
   .floor { background-size: 32px 32px; }
   .sculpture { inset-block-start: 1rem; }
 }

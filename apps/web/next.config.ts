@@ -125,6 +125,21 @@ const nextConfig: NextConfig = {
   ...(Number.isInteger(buildCpus) && buildCpus > 0
     ? { experimental: { cpus: buildCpus } }
     : {}),
+  async redirects() {
+    if (!configuredApiUrl.startsWith("/")) return [];
+    return [
+      {
+        source: "/",
+        destination: "/login",
+        permanent: false,
+        // An expired access cookie can still be renewed using a refresh session.
+        missing: [
+          { type: "cookie", key: "college_access" },
+          { type: "cookie", key: "college_csrf" },
+        ],
+      },
+    ];
+  },
   async headers() {
     return [
       { source: "/(.*)", headers: securityHeaders },
