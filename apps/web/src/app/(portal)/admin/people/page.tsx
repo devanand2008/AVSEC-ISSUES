@@ -16,6 +16,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { SearchBar } from "@/components/ui/search-bar";
@@ -148,6 +149,7 @@ const TABS = [
 
 export default function PeopleManagementPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const queryClient = useQueryClient();
 
   // ── State ──
@@ -355,7 +357,7 @@ export default function PeopleManagementPage() {
         label: "View Profile",
         icon: <Eye size={16} />,
         onClick: () => {
-          window.location.href = `/admin/people/${p.publicId}`;
+          router.push(`/admin/people/${p.publicId}`);
         },
       },
     ];
