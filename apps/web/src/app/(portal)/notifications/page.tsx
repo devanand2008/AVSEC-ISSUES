@@ -634,7 +634,7 @@ function NotificationsPageContent() {
     : "";
 
   return (
-    <main className={styles.page} data-notification-ui="true">
+    <div className={styles.page} data-notification-ui="true">
       <div className={styles.heading}>
         <div className={styles.headingCopy}>
           <span className={styles.eyebrow}>Inbox</span>
@@ -1106,6 +1106,6 @@ function NotificationsPageContent() {
         saving={assignIssue.isPending}
         teams={assignmentOptions.data ?? []}
       />
-    </main>
+    </div>
   );
 }

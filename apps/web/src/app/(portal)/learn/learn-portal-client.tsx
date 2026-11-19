@@ -724,7 +724,7 @@ export function LearnPortalClient() {
                         )}
                       </aside>
 
-                      <main className={styles.lessonReader}>
+                      <article className={styles.lessonReader}>
                         {!activeLesson ? (
                           <EmptyState title="No lessons published" message="Course content will appear here." />
                         ) : (
@@ -878,7 +878,7 @@ export function LearnPortalClient() {
                             </footer>
                           </>
                         )}
-                      </main>
+                      </article>
                     </div>
                   )}
                 </>

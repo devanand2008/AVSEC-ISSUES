@@ -46,6 +46,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const openButton = useRef<HTMLButtonElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const sideNav = useRef<HTMLElement>(null);
+  const accountMenu = useRef<HTMLDivElement>(null);
   const profileButton = useRef<HTMLButtonElement>(null);
   const [profile, setProfile] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -163,6 +164,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", dismiss);
     return () => window.removeEventListener("keydown", dismiss);
   }, [open, profile]);
+  useEffect(() => {
+    if (!profile) return;
+    function dismissOutside(event: PointerEvent) {
+      if (event.target instanceof Node && !accountMenu.current?.contains(event.target)) {
+        setProfile(false);
+      }
+    }
+    document.addEventListener("pointerdown", dismissOutside);
+    return () => document.removeEventListener("pointerdown", dismissOutside);
+  }, [profile]);
   useEffect(() => {
     if (!open) return;
     const desktop = window.matchMedia("(min-width: 1001px)");
@@ -286,7 +297,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           <button
             className="menu-button"
             ref={openButton}
-            onClick={() => setOpen(true)}
+            onClick={() => {
+              setProfile(false);
+              setOpen(true);
+            }}
             aria-label="Open navigation"
             aria-expanded={open}
             aria-controls="portal-sidebar"
@@ -295,6 +309,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
           <div className="mobile-topbar-brand">
             <CollegeBranding compact />
+            <strong className="mobile-topbar-name" aria-hidden>AVS College</strong>
           </div>
           <GlobalSearch />
           {canReadNotifications && (
@@ -315,8 +330,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
             </Link>
           )}
-          <div className="profile-menu">
+          <div className="profile-menu" ref={accountMenu}>
             <button
+              type="button"
               className="profile-button"
               ref={profileButton}
               onClick={() => setProfile(!profile)}
@@ -358,14 +374,24 @@ export function AppShell({ children }: { children: ReactNode }) {
                   aria-busy={signingOut}
                   disabled={signingOut}
                   type="button"
-                  onClick={() => void handleLogout()}
+                  onClick={handleLogout}
                 >
-                  <LogOut size={17} />
-                  {signingOut ? "Signing out..." : "Sign out"}
+                  <LogOut size={17} aria-hidden />
+                  {signingOut ? "Logging out…" : "Log out"}
                 </button>
               </div>
             )}
           </div>
+          <button
+            className={styles.mobileLogout}
+            type="button"
+            aria-busy={signingOut}
+            disabled={signingOut}
+            onClick={handleLogout}
+          >
+            <LogOut size={17} aria-hidden />
+            {signingOut ? "Logging out…" : "Log out"}
+          </button>
         </header>
         <main id="main-content" className="content" tabIndex={-1}>{children}</main>
         {!profileSetupRequired &&

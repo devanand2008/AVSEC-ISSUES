@@ -35,7 +35,35 @@
 }
 
 .notificationButton {
+  flex: 0 0 auto;
   position: relative;
+}
+
+.mobileLogout {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 44px;
+  padding-inline: 10px;
+  border: 1px solid #f2d0d0;
+  border-radius: 10px;
+  background: #fff5f5;
+  color: #8f2323;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: background-color 160ms ease;
+}
+
+.mobileLogout:hover {
+  background: #ffe7e7;
+}
+
+.mobileLogout:focus-visible {
+  outline: 2px solid #8f2323;
+  outline-offset: 2px;
 }
 
 .topbarBadge {
@@ -58,9 +86,25 @@
 }
 
 @media (max-width: 1000px) {
+  .mobileLogout {
+    display: inline-flex;
+  }
+
   .counterBadge {
     min-width: 24px;
     height: 24px;
+  }
+}
+
+@media (max-width: 380px) {
+  .mobileLogout {
+    padding-inline: 7px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobileLogout {
+    transition: none;
   }
 }
 .skipLink {

@@ -421,7 +421,9 @@ textarea.input {
     background-position: -220% 0;
   }
 }
-.table-wrap {
+.table-wrap,
+.content .card:has(> table) {
+  min-width: 0;
   overflow-x: auto;
 }
 table {
@@ -938,10 +940,14 @@ body:has([data-notification-ui="true"]) .pwa-install-button {
 }
 .menu-button {
   display: none;
+  flex: 0 0 auto;
 }
 .mobile-topbar-brand {
   display: none;
   min-width: 0;
+}
+.mobile-topbar-name {
+  display: none;
 }
 .topbar-search {
   flex: 1;
@@ -966,6 +972,7 @@ body:has([data-notification-ui="true"]) .pwa-install-button {
 }
 .profile-menu {
   position: relative;
+  flex: 0 0 auto;
 }
 .profile-button {
   border: 0;
@@ -974,6 +981,8 @@ body:has([data-notification-ui="true"]) .pwa-install-button {
   align-items: center;
   gap: 9px;
   padding: 4px;
+  min-width: 44px;
+  min-height: 44px;
 }
 .avatar {
   width: 38px;
@@ -1007,7 +1016,7 @@ body:has([data-notification-ui="true"]) .pwa-install-button {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 42px;
+  min-height: 44px;
   padding: 8px 10px;
   border-radius: 8px;
   background: transparent;
@@ -1093,6 +1102,9 @@ body:has(.pwa-install-button) .avs-bot-launcher {
   display: none;
 }
 @media (max-width: 1000px) {
+  body:has(.sidebar.sidebar-open) {
+    overflow: hidden;
+  }
   .app-frame {
     grid-template-columns: 1fr;
   }
@@ -1130,6 +1142,7 @@ body:has(.pwa-install-button) .avs-bot-launcher {
 @media (max-width: 700px) {
   .topbar {
     height: calc(62px + env(safe-area-inset-top));
+    gap: 8px;
     padding: env(safe-area-inset-top) max(14px, env(safe-area-inset-right)) 0
       max(14px, env(safe-area-inset-left));
   }
@@ -1140,8 +1153,14 @@ body:has(.pwa-install-button) .avs-bot-launcher {
     margin-right: 0;
   }
   .mobile-topbar-brand {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 7px;
     flex: 1;
+  }
+  .mobile-topbar-brand .college-branding {
+    display: flex;
+    gap: 7px;
   }
   .mobile-topbar-brand .college-branding-copy strong {
     font-size: 0.84rem;
@@ -1216,27 +1235,38 @@ body:has(.pwa-install-button) .avs-bot-launcher {
 @media (min-width: 701px) and (max-width: 767px) {
   .content {
     padding-bottom: calc(
-      56px + env(safe-area-inset-bottom, 0px) + var(--space-4)
+      60px + env(safe-area-inset-bottom, 0px) + var(--space-4)
     );
+  }
+}
+
+@media (min-width: 361px) and (max-width: 520px) {
+  .mobile-topbar-name {
+    display: block;
+    font-size: 0.8rem;
+    line-height: 1.15;
+  }
+}
+
+@media (max-width: 520px) {
+  .mobile-topbar-brand .college-branding-copy {
+    display: none;
   }
 }
 
 @media (max-width: 380px) {
   .topbar {
-    gap: 8px;
-    padding-right: max(10px, env(safe-area-inset-right));
-    padding-left: max(10px, env(safe-area-inset-left));
-  }
-  .topbar .profile-menu {
-    display: none;
-  }
-  .mobile-topbar-brand .college-branding-copy strong {
-    font-size: 0.8rem;
-    line-height: 1.1;
+    gap: 6px;
   }
   .content {
     padding-right: max(12px, env(safe-area-inset-right));
     padding-left: max(12px, env(safe-area-inset-left));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
   }
 }
 .metric-grid {
@@ -4335,10 +4365,11 @@ body:has(.pwa-install-button) .avs-bot-launcher {
 }
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
   gap: 18px;
 }
 .chart-card {
+  min-width: 0;
   padding: 20px;
 }
 .chart-card h2 {
@@ -4350,12 +4381,6 @@ body:has(.pwa-install-button) .avs-bot-launcher {
   margin: 0 0 20px;
   display: block;
 }
-@media (max-width: 780px) {
-  .chart-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* ── Import progress bar ─────────────────────────────────────────────────── */
 .import-progress-bar {
   width: 100%;

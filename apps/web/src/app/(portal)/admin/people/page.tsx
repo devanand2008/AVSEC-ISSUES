@@ -514,8 +514,8 @@ export default function PeopleManagementPage() {
                 className="avs-btn avs-btn-primary"
                 aria-label="Add Person"
               >
-                <UserPlus size={16} />
-                <span className="hide-mobile">Add Person</span>
+                <UserPlus size={16} aria-hidden />
+                <span>Add Person</span>
               </Link>
             )}
             {canImportUsers && (
@@ -524,8 +524,8 @@ export default function PeopleManagementPage() {
                 className="avs-btn avs-btn-secondary"
                 aria-label="Bulk Import"
               >
-                <Upload size={16} />{" "}
-                <span className="hide-mobile">Bulk Import</span>
+                <Upload size={16} aria-hidden />
+                <span>Bulk Import</span>
               </Link>
             )}
           </>
