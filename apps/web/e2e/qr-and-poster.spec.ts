@@ -49,6 +49,15 @@ test("block inventory generates missing QR codes once and downloads a printable 
   const downloaded = page.waitForEvent("download");
   await inventory.getByRole("button", { name: "Download " + block.name + " QR PNG", exact: true }).first().click();
   expect((await downloaded).suggestedFilename()).toMatch(/\.png$/);
+
+  await page.goto("/scan-qr");
+  await expect(page.getByRole("button", { name: "Choose QR image" })).toBeVisible();
+  await page.locator('input[type="file"][accept="image/*"]').setInputFiles({
+    name: "block-qr.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(image.dataUrl.split(",")[1]!, "base64"),
+  });
+  await expect(page).toHaveURL(/\/report-issue\?qrToken=QR_.*&source=qr/);
 });
 
 test("generic QR types validate, rotate, expire and resume after mobile sign-in", async ({ page, browser }, testInfo) => {

@@ -156,7 +156,14 @@ export default function ScanQrPage() {
   }
 
   async function stopScanner() {
-    await scannerRef.current?.stop().catch(() => undefined);
+    const scanner = scannerRef.current;
+    if (scanner?.isScanning) {
+      try {
+        await scanner.stop();
+      } catch {
+        // The camera can already be stopping when a scan finishes.
+      }
+    }
     setRunning(false);
     setTorchSupported(false);
     setTorchOn(false);
