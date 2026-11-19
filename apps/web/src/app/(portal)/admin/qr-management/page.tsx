@@ -47,6 +47,14 @@ interface GeneratedQrCode {
   dataUrl: string;
 }
 
+interface BlockQr {
+  id: string;
+  code: string;
+  name: string;
+  campus: { name: string };
+  codeId: string | null;
+}
+
 const cards = [
   {
     href: "/scan-qr",
@@ -78,7 +86,8 @@ export default function AdminQrManagementPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const permissions = user?.permissions ?? [];
-  const canViewAnalytics = ["locations.qr", "feedback.qr.manage", "announcements.publish_college", "settings.manage", "audit.read"].some((permission) =>
+  const canManageBlockCodes = permissions.includes("locations.qr");
+  const canViewAnalytics = ["locations.qr", "feedback.qr.manage", "audit.read"].some((permission) =>
     permissions.includes(permission),
   );
   const canViewGenericQr = ["locations.qr", "announcements.publish_college", "settings.manage", "audit.read"].some((permission) =>
@@ -108,6 +117,24 @@ export default function AdminQrManagementPage() {
     queryFn: () => api.get<GenericQrCode[]>("/qr/codes"),
     enabled: canViewGenericQr,
   });
+  const blockCodes = useQuery({
+    queryKey: ["block-qr-codes"],
+    queryFn: () => api.get<BlockQr[]>("/qr/codes/blocks"),
+    enabled: canManageBlockCodes,
+  });
+  function refreshCodes() {
+    void queryClient.invalidateQueries({ queryKey: ["generic-qr-codes"] });
+    void queryClient.invalidateQueries({ queryKey: ["block-qr-codes"] });
+    void queryClient.invalidateQueries({ queryKey: ["qr-analytics"] });
+  }
+  const generateBlockCodes = useMutation({
+    mutationFn: () => api.post<{ created: number; total: number }>("/qr/codes/blocks"),
+    onSuccess: refreshCodes,
+  });
+  const downloadCode = useMutation({
+    mutationFn: (id: string) => api.get<GeneratedQrCode>(`/qr/codes/${id}/image`),
+    onSuccess: downloadDataUrl,
+  });
   const campuses = useQuery({
     queryKey: ["qr-campuses"],
     queryFn: () => api.get<SelectOption[]>("/locations/campuses"),
@@ -135,28 +162,23 @@ export default function AdminQrManagementPage() {
     onSuccess: (created) => {
       setPreview(created);
       setForm((current) => ({ ...current, label: "", destination: "", entityId: "", expiryDate: "" }));
-      void queryClient.invalidateQueries({ queryKey: ["generic-qr-codes"] });
-      void queryClient.invalidateQueries({ queryKey: ["qr-analytics"] });
+      refreshCodes();
     },
   });
   const updateStatus = useMutation({
     mutationFn: ({ id, status }: { id: string; status: "ACTIVE" | "DISABLED" | "REVOKED" }) =>
       api.patch<{ id: string; status: string }>(`/qr/codes/${id}/status`, { status }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["generic-qr-codes"] });
-      void queryClient.invalidateQueries({ queryKey: ["qr-analytics"] });
-    },
+    onSuccess: refreshCodes,
   });
   const regenerate = useMutation({
     mutationFn: (id: string) => api.post<GeneratedQrCode>(`/qr/codes/${id}/regenerate`, {}),
     onSuccess: (created) => {
       setPreview(created);
-      void queryClient.invalidateQueries({ queryKey: ["generic-qr-codes"] });
-      void queryClient.invalidateQueries({ queryKey: ["qr-analytics"] });
+      refreshCodes();
     },
   });
   const createDisabled =
-    !form.label.trim() ||
+    form.label.trim().length < 2 ||
     (form.qrType === "BLOCK" && !form.blockId) ||
     (form.qrType === "FLOOR" && !form.floorId) ||
     (["CLASS", "ANNOUNCEMENT"].includes(form.qrType) && !form.entityId.trim());
@@ -185,6 +207,8 @@ export default function AdminQrManagementPage() {
           Scan QR
         </Link>
       </div>
+
+      {downloadCode.isError && <div className="error-box" role="alert">{errorMessage(downloadCode.error)}</div>}
 
       {analytics.isLoading ? (
         <LoadingState />
@@ -238,6 +262,45 @@ export default function AdminQrManagementPage() {
             </section>
           </>
         )
+      )}
+
+      {canManageBlockCodes && (
+        <section className="card" style={{ padding: 18, marginTop: 18 }} aria-label="Block QR codes">
+          <div className="section-head">
+            <div>
+              <h2>Block QR codes</h2>
+              <p>Create issue-reporting QR codes for active blocks and download printable PNGs.</p>
+            </div>
+            <button type="button" className="btn btn-primary" disabled={generateBlockCodes.isPending || !blockCodes.data?.some((block) => !block.codeId)} onClick={() => generateBlockCodes.mutate()}>
+              <QrCode size={17} aria-hidden />
+              {generateBlockCodes.isPending ? "Generating…" : "Generate missing block codes"}
+            </button>
+          </div>
+          {generateBlockCodes.data && <p role="status">Created {generateBlockCodes.data.created} new codes for {generateBlockCodes.data.total} active blocks.</p>}
+          {generateBlockCodes.isError && <div className="error-box" role="alert">{errorMessage(generateBlockCodes.error)}</div>}
+          {blockCodes.isLoading ? <LoadingState /> : blockCodes.isError ? (
+            <ErrorState message="Block QR codes could not be loaded." />
+          ) : blockCodes.data?.length ? (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th scope="col">Block</th><th scope="col">Campus</th><th scope="col">QR code</th></tr></thead>
+                <tbody>
+                  {blockCodes.data.map((block) => (
+                    <tr key={block.id}>
+                      <td><strong>{block.name}</strong><br /><small>{block.code}</small></td>
+                      <td>{block.campus.name}</td>
+                      <td>{block.codeId ? (
+                        <button type="button" className="btn btn-secondary" disabled={downloadCode.isPending} onClick={() => downloadCode.mutate(block.codeId!)} aria-label={`Download ${block.name} QR PNG`}>
+                          <Download size={16} aria-hidden /> Download PNG
+                        </button>
+                      ) : "Missing"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <p className="muted">No active blocks were found.</p>}
+        </section>
       )}
 
       {canManageGenericQr && (
@@ -365,7 +428,7 @@ export default function AdminQrManagementPage() {
           <div className="section-head">
             <div>
               <h2>{preview.label}</h2>
-              <p>{preview.qrType.replaceAll("_", " ")} QR is active and ready for printing.</p>
+              <p>{preview.qrType.replaceAll("_", " ")} QR · {preview.status}</p>
             </div>
             <button className="btn btn-secondary" onClick={() => downloadDataUrl(preview)}>
               <Download size={17} />
@@ -386,6 +449,8 @@ export default function AdminQrManagementPage() {
               <p>Server-validated QR codes for app entry, issue locations, class pages and announcements.</p>
             </div>
           </div>
+          {updateStatus.isError && <div className="error-box" role="alert">{errorMessage(updateStatus.error)}</div>}
+          {regenerate.isError && <div className="error-box" role="alert">{errorMessage(regenerate.error)}</div>}
           {genericCodes.isLoading ? (
             <LoadingState />
           ) : genericCodes.isError ? (
@@ -421,28 +486,35 @@ export default function AdminQrManagementPage() {
                           <Clipboard size={16} />
                           Copy
                         </button>
-                        <button type="button" className="btn btn-secondary" disabled={regenerate.isPending} onClick={() => regenerate.mutate(row.id)}>
-                          <RefreshCw size={16} />
-                          Rotate
+                        <button type="button" className="btn btn-secondary" disabled={downloadCode.isPending} onClick={() => downloadCode.mutate(row.id)}>
+                          <Download size={16} aria-hidden /> PNG
                         </button>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          disabled={updateStatus.isPending || row.status === "REVOKED"}
-                          onClick={() => updateStatus.mutate({ id: row.id, status: row.status === "ACTIVE" ? "DISABLED" : "ACTIVE" })}
-                        >
-                          <ShieldCheck size={16} />
-                          {row.status === "ACTIVE" ? "Disable" : "Activate"}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          disabled={updateStatus.isPending || row.status === "REVOKED"}
-                          onClick={() => updateStatus.mutate({ id: row.id, status: "REVOKED" })}
-                        >
-                          <ShieldOff size={16} />
-                          Revoke
-                        </button>
+                        {canManageGenericQr && (
+                          <>
+                            <button type="button" className="btn btn-secondary" disabled={regenerate.isPending} onClick={() => regenerate.mutate(row.id)}>
+                              <RefreshCw size={16} />
+                              Rotate
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              disabled={updateStatus.isPending || row.status === "REVOKED"}
+                              onClick={() => updateStatus.mutate({ id: row.id, status: row.status === "ACTIVE" ? "DISABLED" : "ACTIVE" })}
+                            >
+                              <ShieldCheck size={16} />
+                              {row.status === "ACTIVE" ? "Disable" : "Activate"}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              disabled={updateStatus.isPending || row.status === "REVOKED"}
+                              onClick={() => updateStatus.mutate({ id: row.id, status: "REVOKED" })}
+                            >
+                              <ShieldOff size={16} />
+                              Revoke
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>

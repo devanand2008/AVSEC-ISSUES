@@ -4,10 +4,12 @@ import { ArrowLeft, BarChart3, CheckCircle, Download, Eye, EyeOff, Search, Send,
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/query-state";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { useAuth } from "@/providers/auth-provider";
 
 type BreakdownRow = { label: string; total: number; viewed: number; acknowledged: number };
 
@@ -116,9 +118,23 @@ function formatDate(value: string | null | undefined) {
 
 export default function AnnouncementAnalyticsPage() {
   const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("");
   const [search, setSearch] = useState("");
+  const [resendOpen, setResendOpen] = useState(false);
+  const [resendKey, setResendKey] = useState<string | null>(null);
+  const resend = useMutation({
+    mutationFn: (key: string) => api.post<{ announcementId: string; recipientCount: number }>(
+      `/announcements/${id}/resend-poster`, undefined, { "Idempotency-Key": key },
+    ),
+    onSuccess: () => {
+      setResendOpen(false);
+      setResendKey(null);
+      void queryClient.invalidateQueries({ queryKey: ["admin", "announcements"] });
+    },
+  });
 
   const analytics = useQuery({
     queryKey: ["admin", "announcements", id, "analytics"],
@@ -136,6 +152,8 @@ export default function AnnouncementAnalyticsPage() {
   if (!analytics.data) return null;
 
   const { announcement, stats, breakdowns } = analytics.data;
+  const canResend = user?.permissions.includes("announcements.publish_college") && announcement.imageUrl &&
+    ["PUBLISHED", "ARCHIVED", "UNPUBLISHED", "EXPIRED", "PARTIALLY_DELIVERED"].includes(announcement.status);
 
   return (
     <>
@@ -156,7 +174,35 @@ export default function AnnouncementAnalyticsPage() {
             <span>Expires: <strong>{formatDate(announcement.expiresAt)}</strong></span>
           </div>
         </div>
+        {canResend && (
+          <button type="button" className="btn btn-primary" onClick={() => {
+            resend.reset();
+            setResendKey(resendKey ?? crypto.randomUUID());
+            setResendOpen(true);
+          }}>
+            <Send size={16} aria-hidden /> Resend poster
+          </button>
+        )}
       </div>
+
+      {resend.data && (
+        <p className="card" style={{ padding: 16 }} role="status">
+          Poster resent to {resend.data.recipientCount} active {resend.data.recipientCount === 1 ? "recipient" : "recipients"}.{" "}
+          <Link className="back-link" href={`/admin/announcements/${resend.data.announcementId}`}>View new delivery</Link>
+        </p>
+      )}
+
+      <ConfirmationDialog
+        open={resendOpen}
+        onClose={() => { if (!resend.isPending) setResendOpen(false); }}
+        onConfirm={() => { if (resendKey) resend.mutate(resendKey); }}
+        title="Resend this poster?"
+        description="Active users in the saved audience will receive a new in-app notification and see the poster again. Expired posters get seven days."
+        confirmLabel="Resend poster"
+        loading={resend.isPending}
+      >
+        {resend.isError && <div className="error-box" role="alert">{resend.error.message}</div>}
+      </ConfirmationDialog>
 
       {announcement.imageUrl && (
         <div className="card" style={{ marginBottom: 24, overflow: "hidden" }}>

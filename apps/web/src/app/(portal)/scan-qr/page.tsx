@@ -77,6 +77,7 @@ export default function ScanQrPage() {
   const [torchOn, setTorchOn] = useState(false);
 
   useEffect(() => {
+    decodeLockRef.current = false;
     return () => {
       decodeLockRef.current = true;
       const scanner = scannerRef.current;
