@@ -8,6 +8,7 @@ import {
   Pencil, Shield, Trash2, User, Users,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { use, useState } from "react";
 import { ProfileAvatar } from "@/components/ui/profile-avatar";
 import { RoleBadge } from "@/components/ui/role-badge";
@@ -119,6 +120,7 @@ interface PeopleFilterOptions {
 export default function PersonDetailPage({ params }: { params: Promise<{ publicId: string }> }) {
   const { publicId } = use(params);
   const { user } = useAuth();
+  const router = useRouter();
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<"account" | "personal" | "academic" | "history" | "deletion">("account");
@@ -203,7 +205,8 @@ export default function PersonDetailPage({ params }: { params: Promise<{ publicI
     mutationFn: (data: { reason: string; confirmationPhrase: string; backupReference: string }) =>
       api.delete(`/admin/people/${publicId}/permanent`, data),
     onSuccess: () => {
-      window.location.href = "/admin/people";
+      void queryClient.invalidateQueries({ queryKey: ["people"] });
+      router.replace("/admin/people");
     },
   });
 
