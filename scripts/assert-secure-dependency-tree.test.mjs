@@ -107,7 +107,7 @@ test("rejects a disallowed js-yaml version anywhere in the lock and install", (t
   const result = runValidator(rootDirectory);
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /must be one of 3\.15\.1, 4\.3\.1, 5\.2\.3/);
+  assert.match(result.stderr, /must be one of 3\.15\.1, 4\.3\.1, 5\.5\.0/);
 });
 
 test("rejects an installed nanoid downgrade even when the lock remains pinned", (t) => {
@@ -145,6 +145,6 @@ test("rejects a downgraded js-yaml resolution under Swagger", (t) => {
   assert.equal(result.status, 1);
   assert.match(
     result.stderr,
-    /locked js-yaml resolved for @nestjs\/swagger must be "5\.2\.3"/,
+    /locked js-yaml resolved for @nestjs\/swagger must be "5\.5\.0"/,
   );
 });
