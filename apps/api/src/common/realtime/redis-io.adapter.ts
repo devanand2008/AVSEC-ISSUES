@@ -5,7 +5,7 @@ import Redis from "ioredis";
 import type { Server, ServerOptions } from "socket.io";
 
 export class RedisIoAdapter extends IoAdapter {
-  private readonly logger = new Logger(RedisIoAdapter.name);
+  private readonly redisLogger = new Logger(RedisIoAdapter.name);
   private publisher?: Redis;
   private subscriber?: Redis;
   private adapter?: ReturnType<typeof createAdapter>;
@@ -18,11 +18,11 @@ export class RedisIoAdapter extends IoAdapter {
       this.publisher = publisher;
       this.subscriber = subscriber;
       this.adapter = createAdapter(publisher, subscriber);
-      this.logger.log("Socket.IO Redis adapter connected.");
+      this.redisLogger.log("Socket.IO Redis adapter connected.");
     } catch (error) {
       publisher.disconnect();
       subscriber.disconnect();
-      this.logger.warn(`Socket.IO is using the local adapter because Redis is unavailable: ${error instanceof Error ? error.message : "unknown error"}`);
+      this.redisLogger.warn(`Socket.IO is using the local adapter because Redis is unavailable: ${error instanceof Error ? error.message : "unknown error"}`);
     }
   }
 
