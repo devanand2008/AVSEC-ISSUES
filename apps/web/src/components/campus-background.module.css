@@ -1,0 +1,84 @@
+.scene {
+  --grid: #5d91d52e;
+  --outline: #6796d978;
+  --glass-top: #f4fbffb8;
+  --glass-bottom: #9dc8f76b;
+  --glow: #bdd8fe9c;
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 auto;
+  block-size: min(100%, 40rem);
+  overflow: hidden;
+  pointer-events: none;
+  perspective: 850px;
+  background: radial-gradient(ellipse at 86% 6%, var(--glow), transparent 64%);
+}
+
+.dark {
+  --grid: #a3ccff48;
+  --outline: #b1dcffc9;
+  --glass-top: #b6e0ff5c;
+  --glass-bottom: #669de941;
+  --glow: #397ac88c;
+  inset: 0;
+  block-size: 100%;
+  background: radial-gradient(ellipse at 89% 72%, var(--glow), transparent 62%);
+}
+
+.floor {
+  position: absolute;
+  inset: 10% -30% -40%;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse at 72% 48%, #000 10%, transparent 67%);
+  transform: rotateX(62deg) rotateZ(-12deg);
+}
+
+.sculpture {
+  position: absolute;
+  inset: clamp(1.5rem, 7vw, 5rem) clamp(-7rem, -6vw, -2rem) auto auto;
+  width: clamp(9rem, 26vw, 22rem);
+  aspect-ratio: 1;
+  perspective: 650px;
+}
+
+.dark .sculpture {
+  inset: auto clamp(-4rem, -3vw, -1rem) 8% auto;
+  width: clamp(13rem, 31vw, 26rem);
+}
+
+.stack {
+  position: absolute;
+  inset: 15%;
+  transform-style: preserve-3d;
+  transform: rotateX(55deg) rotateZ(-34deg);
+}
+
+.stack span {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--outline);
+  border-radius: 16%;
+  background: linear-gradient(140deg, var(--glass-top), var(--glass-bottom));
+  box-shadow: inset 0 0 0 6px #fff1;
+}
+
+.stack span:nth-child(2) { transform: translateZ(20px) scale(.94); }
+.stack span:nth-child(3) { transform: translateZ(40px) scale(.88); }
+.stack span:nth-child(4) { transform: translateZ(60px) scale(.82); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .stack { animation: settle 4.2s cubic-bezier(.2, .7, .2, 1) both; }
+}
+
+@keyframes settle {
+  from { transform: translate3d(0, 24px, -60px) rotateX(67deg) rotateZ(-68deg); }
+  to { transform: rotateX(55deg) rotateZ(-34deg); }
+}
+
+@media (max-width: 760px) {
+  .scene { block-size: min(100%, 21rem); }
+  .floor { background-size: 32px 32px; }
+  .sculpture { inset-block-start: 1rem; }
+}

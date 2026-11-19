@@ -11,6 +11,7 @@ import {
   type FormEvent,
 } from "react";
 import { CollegeBranding } from "@/components/college-branding";
+import { CampusBackground } from "@/components/campus-background";
 import { api } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
 import { loginErrorMessage } from "./login-error";
@@ -61,32 +62,27 @@ export default function LoginPage() {
     if (readinessRunning.current) return;
     readinessRunning.current = true;
     setReadiness("checking");
-    const result = await probeLoginReadiness(() => api.warmup());
-    setReadiness(result);
+    const result = await probeLoginReadiness(() => api.warmup(), { attempts: 1 });
+    setReadiness(navigator.onLine ? result : "offline");
     readinessRunning.current = false;
   }, []);
-  // Prefetch every first-login destination so navigation is instant after login.
   useEffect(() => {
     router.prefetch("/");
-    router.prefetch("/change-password");
-    router.prefetch("/profile/setup");
-    const warmServer = () => {
-      if (document.visibilityState === "visible") {
-        void checkConnection();
-      }
-    };
+    const warmServer = () => void checkConnection();
+    const markOffline = () => setReadiness("offline");
     warmServer();
     window.addEventListener("online", warmServer);
-    document.addEventListener("visibilitychange", warmServer);
+    window.addEventListener("offline", markOffline);
     return () => {
       window.removeEventListener("online", warmServer);
-      document.removeEventListener("visibilitychange", warmServer);
+      window.removeEventListener("offline", markOffline);
     };
   }, [checkConnection, router]);
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (readiness !== "ready") {
-      void checkConnection();
+    if (busy) return;
+    if (!navigator.onLine) {
+      setReadiness("offline");
       return;
     }
     setBusy(true);
@@ -117,6 +113,7 @@ export default function LoginPage() {
   return (
     <main className={styles.page} data-login-page>
       <aside className={styles.brandPanel}>
+        <CampusBackground dark />
         <CollegeBranding priority />
         <div className={styles.brandCopy}>
           <p className={styles.brandTitle}>Campus services</p>
@@ -129,6 +126,7 @@ export default function LoginPage() {
       </aside>
 
       <section className={styles.formPanel} aria-labelledby="login-title">
+        <CampusBackground />
         <div className={styles.formWrap}>
           <CollegeBranding className={styles.mobileBrand} priority />
           <header className={styles.formHeader}>
@@ -208,7 +206,7 @@ export default function LoginPage() {
               Remember my ID on this device
             </label>
 
-            {readiness !== "ready" && (
+            {(readiness === "offline" || (busy && readiness === "checking")) && (
               <div className={styles.connection}>
                 {readiness === "checking" ? (
                   <LoaderCircle className={styles.spinner} size={19} aria-hidden />
@@ -217,22 +215,15 @@ export default function LoginPage() {
                 )}
                 <div>
                   <span role="status">
-                    {readiness === "checking"
-                      ? "Connecting to the campus server…"
-                      : readiness === "offline"
-                        ? "You’re offline. Reconnect to sign in."
-                        : "The campus server hasn’t responded yet."}
+                    {readiness === "offline"
+                      ? "You’re offline. Reconnect to sign in."
+                      : "Connecting to the campus server…"}
                   </span>
-                  {readiness !== "checking" && (
-                    <button type="button" onClick={() => void checkConnection()}>
-                      Retry connection
-                    </button>
-                  )}
                 </div>
               </div>
             )}
 
-            <button className="btn btn-primary" disabled={busy || readiness !== "ready"}>
+            <button className="btn btn-primary" disabled={busy}>
               {busy ? "Signing in…" : "Secure sign in"}
               {!busy && <ArrowRight size={18} aria-hidden />}
             </button>

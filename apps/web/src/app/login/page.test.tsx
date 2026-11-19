@@ -30,12 +30,18 @@ afterEach(() => {
 });
 
 describe("campus sign-in", () => {
-  it("enables sign-in when the connection check completes during Strict Mode", async () => {
+  it("accepts sign-in while the single Strict Mode connection check is pending", async () => {
+    mocks.warmup.mockReturnValue(new Promise<void>(() => undefined));
     render(<StrictMode><LoginPage /></StrictMode>);
     const submit = screen.getByRole("button", { name: "Secure sign in" });
 
-    expect(submit).toBeDisabled();
-    await waitFor(() => expect(submit).toBeEnabled());
+    expect(submit).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("College ID or Email"), { target: { value: "QA01" } });
+    fireEvent.change(screen.getByLabelText("Password", { exact: true }), { target: { value: "ExamplePass123!" } });
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(mocks.router.push).toHaveBeenCalledWith("/"));
+    expect(mocks.login).toHaveBeenCalledWith("QA01", "ExamplePass123!", undefined);
     expect(mocks.warmup).toHaveBeenCalledTimes(1);
   });
 

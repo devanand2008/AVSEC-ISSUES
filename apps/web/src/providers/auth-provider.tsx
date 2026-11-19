@@ -1,12 +1,14 @@
 "use client";
 
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, type ReactNode } from "react";
 import { api } from "@/lib/api";
 import type { User } from "@/lib/types";
 
 interface AuthContextValue { user: User | null; loading: boolean; login: (identifier: string, password: string, collegeCode?: string) => Promise<User>; logout: () => Promise<void>; refetch: () => Promise<unknown> }
 const AuthContext = createContext<AuthContextValue | null>(null);
+const publicAuthRoutes = new Set(["/login", "/forgot-password", "/reset-password"]);
 
 function clearAuthenticatedState(client: QueryClient) {
   client.setQueryData(["me"], null);
@@ -28,22 +30,24 @@ export function performLogout(
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const client = useQueryClient();
-  const query = useQuery({ queryKey: ["me"], queryFn: ({ signal }) => api.get<User>("/auth/me", { signal }), retry: false, staleTime: 60_000 });
-  const { refetch } = query;
+  const pathname = usePathname();
+  const needsSession = !publicAuthRoutes.has(pathname);
+  const query = useQuery({
+    queryKey: ["me"],
+    queryFn: ({ signal }) => api.get<User>("/auth/me", { signal }),
+    enabled: needsSession,
+    retry: false,
+    staleTime: 60_000,
+  });
   useEffect(() => {
-    // On BFCache restore (mobile Safari/Chrome back-navigation), the page is
-    // re-shown from cache without re-running React. We must refetch the user
-    // state immediately so `mustChangePassword` reflects the actual DB value
-    // instead of whatever was in the React tree when the page was cached.
-    const refreshAfterRestore = async (event: PageTransitionEvent) => {
-      if (!event.persisted) return;
-      // Invalidate the React Query cache for "me" so the next call hits the network
-      await client.invalidateQueries({ queryKey: ["me"] });
-      void refetch();
+    if (!needsSession) return;
+    // A page restored from the browser cache can contain stale account state.
+    const refreshAfterRestore = (event: PageTransitionEvent) => {
+      if (event.persisted) void client.invalidateQueries({ queryKey: ["me"], exact: true });
     };
     window.addEventListener("pageshow", refreshAfterRestore);
     return () => window.removeEventListener("pageshow", refreshAfterRestore);
-  }, [client, refetch]);
+  }, [client, needsSession]);
   const value: AuthContextValue = {
     user: query.data ?? null,
     loading: query.isLoading,

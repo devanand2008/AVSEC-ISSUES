@@ -131,31 +131,26 @@ async function fetchWithTimeout(
   }
 }
 
-function healthUrl(check: "live" | "ready"): string {
-  return requestUrl(`/health/${check}`);
-}
-
 async function warmApi(): Promise<void> {
   readinessPromise ??= (async () => {
-    for (const check of ["live", "ready"] as const) {
-      const response = await fetchWithTimeout(
-        healthUrl(check),
-        {
-          cache: "no-store",
-          credentials: "include",
-          headers: { accept: "application/json" },
-        },
-        READINESS_TIMEOUT_MS,
+    const response = await fetchWithTimeout(
+      requestUrl("/health/ready/dependencies"),
+      {
+        cache: "no-store",
+        credentials: "omit",
+        headers: { accept: "application/json" },
+      },
+      READINESS_TIMEOUT_MS,
+    );
+    const health = response.ok ? await response.json().catch(() => null) : null;
+    if (health?.status !== "ready") {
+      throw new ApiError(
+        "The AVS server is not ready yet.",
+        response.ok ? 503 : response.status,
+        undefined,
+        undefined,
+        response.headers.get("x-request-id") ?? undefined,
       );
-      if (!response.ok) {
-        throw new ApiError(
-          "The AVS server is not ready yet.",
-          response.status,
-          undefined,
-          undefined,
-          response.headers.get("x-request-id") ?? undefined,
-        );
-      }
     }
   })().finally(() => {
     readinessPromise = null;

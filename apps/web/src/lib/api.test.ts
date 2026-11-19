@@ -114,20 +114,24 @@ describe("automatic session refresh", () => {
   it("shares one cold-start readiness request across simultaneous callers", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(Response.json({ status: "ok" }));
+      .mockResolvedValue(Response.json({ status: "ready" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const first = api.warmup();
     const second = api.warmup();
     await Promise.all([first, second]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const healthPaths = fetchMock.mock.calls.map(([input]) =>
-      new URL(String(input), "https://web.test.invalid").pathname,
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [input, init] = fetchMock.mock.calls[0]!;
+    expect(new URL(String(input), "https://web.test.invalid").pathname).toBe(
+      "/health/ready/dependencies",
     );
-    expect(healthPaths).toEqual(["/health/live", "/health/ready"]);
-    expect(healthPaths.every((path) => !path.startsWith("/api/v1/"))).toBe(
-      true,
-    );
+    expect(init?.credentials).toBe("omit");
+  });
+
+  it("treats a hosting wake-up page as unavailable even when it returns 200", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>Starting</html>")));
+
+    await expect(api.warmup()).rejects.toMatchObject({ status: 503 });
   });
 
   it("keeps operations health requests outside the versioned API prefix", async () => {

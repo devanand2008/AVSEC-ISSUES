@@ -913,7 +913,11 @@ body:has([data-notification-ui="true"]) .pwa-install-button {
   color: #173e79;
 }
 .main-column {
+  position: relative;
   min-width: 0;
+}
+.main-column > [data-campus-background] {
+  z-index: 0;
 }
 .topbar {
   height: 70px;
@@ -1028,6 +1032,7 @@ body:has([data-notification-ui="true"]) .pwa-install-button {
   background: #f1f5f9;
 }
 .content {
+  position: relative;
   width: min(1440px, 100%);
   margin: auto;
   padding: clamp(20px, 3vw, 34px);

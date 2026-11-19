@@ -16,6 +16,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CollegeBranding, LoadingLogo } from "@/components/college-branding";
+import { CampusBackground } from "@/components/campus-background";
 import { useAuth } from "@/providers/auth-provider";
 import { GlobalSearch } from "@/components/global-search";
 import {
@@ -297,6 +298,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         />
       )}
       <div className="main-column" inert={open}>
+        <CampusBackground />
         <header className="topbar">
           <button
             className="menu-button"
