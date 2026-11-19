@@ -196,6 +196,23 @@
     display: inline-flex;
     margin-bottom: 24px;
   }
+
+  .mobileBrand :global(.college-logo) {
+    transform: perspective(480px) rotateY(-7deg);
+    box-shadow: 3px 3px 0 #d1e2f8, 0 5px 13px #2257a52c;
+  }
+}
+
+@media (max-width: 760px) and (prefers-reduced-motion: no-preference) {
+  .mobileBrand :global(.college-logo) {
+    animation: mobile-emblem-land 3.2s cubic-bezier(.22, .66, .28, 1) both;
+  }
+}
+
+@keyframes mobile-emblem-land {
+  from { transform: perspective(480px) translateY(-4px) rotateY(-49deg) rotateX(15deg); }
+  65% { transform: perspective(480px) rotateY(7deg); }
+  to { transform: perspective(480px) rotateY(-7deg); }
 }
 
 @media (max-width: 380px) {

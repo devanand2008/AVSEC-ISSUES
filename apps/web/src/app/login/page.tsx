@@ -112,7 +112,7 @@ export default function LoginPage() {
   return (
     <main className={styles.page} data-login-page>
       <aside className={styles.brandPanel}>
-        <CampusBackground dark />
+        <CampusBackground dark showCollegeLogo />
         <CollegeBranding priority />
         <div className={styles.brandCopy}>
           <p className={styles.brandTitle}>Campus services</p>

@@ -12,7 +12,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({ useRouter: () => mocks.router }));
 vi.mock("@/providers/auth-provider", () => ({ useAuth: () => ({ login: mocks.login }) }));
 vi.mock("@/lib/api", () => ({ api: { warmup: mocks.warmup } }));
-vi.mock("@/components/college-branding", () => ({ CollegeBranding: () => null }));
+vi.mock("@/components/college-branding", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/components/college-branding")>()),
+  CollegeBranding: () => null,
+}));
 vi.mock("@/features/auth/post-login-routing", () => ({
   getPostAuthenticationRoute: () => "/",
 }));
