@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/api", () => ({ api: mocks }));
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn() }) }));
+
 vi.mock("@/providers/auth-provider", () => ({
   useAuth: () => ({
     user: {
