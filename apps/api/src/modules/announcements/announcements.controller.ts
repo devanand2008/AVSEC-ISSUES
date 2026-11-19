@@ -34,7 +34,15 @@ import {
 } from "./dto/announcement.dto";
 
 // SSE connected clients registry
-const sseClients = new Map<string, Response>();
+const sseClients = new Map<Response, string>();
+
+function notifyAnnouncementClients(collegeId: string) {
+  for (const [response, recipientCollege] of sseClients) {
+    if (recipientCollege === collegeId && !response.destroyed && !response.writableEnded) {
+      response.write('data: {"type":"announcement:published"}\n\n');
+    }
+  }
+}
 
 @ApiTags("announcements")
 @Controller("announcements")
@@ -89,7 +97,7 @@ export class AnnouncementsController {
     res.setHeader("Vary", "Origin");
     res.flushHeaders();
 
-    sseClients.set(user.id, res);
+    sseClients.set(res, user.collegeId);
 
     // Send a heartbeat every 25s to prevent proxy timeouts
     const interval = setInterval(() => {
@@ -98,7 +106,7 @@ export class AnnouncementsController {
 
     res.on("close", () => {
       clearInterval(interval);
-      sseClients.delete(user.id);
+      sseClients.delete(res);
     });
   }
 
@@ -245,12 +253,23 @@ export class AnnouncementsController {
       (req as { requestId?: string }).requestId ?? "",
       idempotencyKey,
     );
-    // Notify all connected SSE clients
-    for (const [, res] of sseClients) {
-      res.write(
-        `data: ${JSON.stringify({ type: "announcement:published", announcementId: id })}\n\n`,
-      );
-    }
+    notifyAnnouncementClients(user.collegeId);
+    return result;
+  }
+
+  @ApiOperation({ summary: "Resend a previously sent poster to its saved audience" })
+  @Permissions("announcements.publish_college")
+  @Post(":id/resend-poster")
+  async resendPoster(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Headers("idempotency-key") key: string | undefined,
+    @Req() req: Request,
+  ) {
+    const { replayed, ...result } = await this.announcements.resendPoster(
+      user, id, (req as { requestId?: string }).requestId ?? "", key,
+    );
+    if (!replayed) notifyAnnouncementClients(user.collegeId);
     return result;
   }
 

@@ -183,6 +183,79 @@ export class QrService {
     return codes.map((code) => ({ ...code, id: code.publicId }));
   }
 
+  blockCodes(user: AuthPrincipal) {
+    this.requireAny(user, ["locations.qr"]);
+    return this.blockCodeInventory(this.prisma, user.collegeId);
+  }
+
+  async generateBlockCodes(user: AuthPrincipal, metadata: RequestMetadata) {
+    this.requireAny(user, ["locations.qr"]);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`block-qr:${user.collegeId}`}))`;
+      const blocks = await this.blockCodeInventory(tx, user.collegeId);
+      const missing = blocks.filter((block) => !block.codeId);
+      if (missing.length) {
+        await tx.qrCode.createMany({
+          data: missing.map((block) => {
+            const token = this.generateToken();
+            return {
+              collegeId: user.collegeId,
+              qrType: "BLOCK" as const,
+              secureTokenHash: this.hash(token),
+              qrUrl: this.qrScanUrl(token),
+              label: `${block.name} (${block.code})`.slice(0, 180),
+              destination: this.defaultDestination("BLOCK", token),
+              entityType: "Block",
+              entityId: block.id,
+              createdById: user.id,
+            };
+          }),
+        });
+        await this.audit.record({
+          ...metadata,
+          actorId: user.id,
+          collegeId: user.collegeId,
+          action: "qr.blocks_generated",
+          entityType: "QrCode",
+          afterValue: { blockIds: missing.map((block) => block.id) },
+        }, tx);
+      }
+      return { created: missing.length, total: blocks.length };
+    });
+  }
+
+  private async blockCodeInventory(client: Prisma.TransactionClient, collegeId: string) {
+    const blocks = await client.block.findMany({
+      where: { isActive: true, archivedAt: null, campus: { collegeId, isActive: true, archivedAt: null } },
+      orderBy: [{ campus: { name: "asc" } }, { sortOrder: "asc" }, { name: "asc" }],
+      select: { id: true, code: true, name: true, campus: { select: { name: true } } },
+    });
+    const codes = await client.qrCode.findMany({
+      where: {
+        collegeId,
+        qrType: "BLOCK",
+        entityId: { in: blocks.map((block) => block.id) },
+        status: "ACTIVE",
+        OR: [{ expiryDate: null }, { expiryDate: { gt: new Date() } }],
+      },
+      distinct: ["entityId"],
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { entityId: true, publicId: true },
+    });
+    const byBlock = new Map(codes.map((code) => [code.entityId, code.publicId]));
+    return blocks.map((block) => ({ ...block, codeId: byBlock.get(block.id) ?? null }));
+  }
+
+  async codeImage(user: AuthPrincipal, publicId: string) {
+    this.requireAny(user, ["locations.qr", "announcements.publish_college", "settings.manage", "audit.read"]);
+    const code = await this.prisma.qrCode.findFirst({
+      where: { publicId, collegeId: user.collegeId },
+      select: { publicId: true, qrType: true, label: true, destination: true, status: true, expiryDate: true, qrUrl: true },
+    });
+    if (!code) throw new NotFoundException("QR code not found.");
+    return this.renderCode(code);
+  }
+
   async createCode(user: AuthPrincipal, input: CreateQrCodeDto, metadata: RequestMetadata) {
     this.requireAny(user, ["locations.qr", "announcements.publish_college", "settings.manage"]);
     const qrType = input.qrType as GenericQrType;
@@ -223,16 +296,7 @@ export class QrService {
       afterValue: { publicId: created.publicId, qrType: created.qrType, destination: created.destination },
       ...metadata,
     });
-    return {
-      id: created.publicId,
-      qrType: created.qrType,
-      label: created.label,
-      destination: created.destination,
-      status: created.status,
-      expiryDate: created.expiryDate,
-      secureUrl: created.qrUrl,
-      dataUrl: await QRCode.toDataURL(created.qrUrl, { errorCorrectionLevel: "M", margin: 1, width: 512 }),
-    };
+    return this.renderCode(created);
   }
 
   async updateStatus(user: AuthPrincipal, publicId: string, input: UpdateQrStatusDto, metadata: RequestMetadata) {
@@ -281,7 +345,7 @@ export class QrService {
         status: "ACTIVE",
         revokedAt: null,
       },
-      select: { publicId: true, qrType: true, label: true, destination: true, status: true, qrUrl: true },
+      select: { publicId: true, qrType: true, label: true, destination: true, status: true, expiryDate: true, qrUrl: true },
     });
     await this.audit.record({
       actorId: user.id,
@@ -291,14 +355,16 @@ export class QrService {
       afterValue: { publicId: updated.publicId, qrType: updated.qrType },
       ...metadata,
     });
+    return this.renderCode(updated);
+  }
+
+  private async renderCode<T extends { publicId: string; qrUrl: string }>(code: T) {
+    const { publicId, qrUrl, ...details } = code;
     return {
-      id: updated.publicId,
-      qrType: updated.qrType,
-      label: updated.label,
-      destination: updated.destination,
-      status: updated.status,
-      secureUrl: updated.qrUrl,
-      dataUrl: await QRCode.toDataURL(updated.qrUrl, { errorCorrectionLevel: "M", margin: 1, width: 512 }),
+      ...details,
+      id: publicId,
+      secureUrl: qrUrl,
+      dataUrl: await QRCode.toDataURL(qrUrl, { errorCorrectionLevel: "M", margin: 4, width: 512 }),
     };
   }
 
