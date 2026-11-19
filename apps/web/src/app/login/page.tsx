@@ -16,6 +16,7 @@ import { useAuth } from "@/providers/auth-provider";
 import { loginErrorMessage } from "./login-error";
 import { probeLoginReadiness, type LoginReadiness } from "./login-readiness";
 import { getPostAuthenticationRoute } from "@/features/auth/post-login-routing";
+import { qrRouteAfterSignIn } from "@/features/auth/qr-sign-in";
 import styles from "./login.module.css";
 
 type LoginHint = {
@@ -106,7 +107,8 @@ export default function LoginPage() {
       } catch {
         // Some browser privacy settings disable storage. Sign-in still works.
       }
-      router.push(getPostAuthenticationRoute(user));
+      const landing = getPostAuthenticationRoute(user);
+      router.push(landing === "/" ? qrRouteAfterSignIn(window.location.search) : landing);
     } catch (caught: unknown) {
       setError(loginErrorMessage(caught));
       setBusy(false);

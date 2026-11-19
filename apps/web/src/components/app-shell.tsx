@@ -14,7 +14,7 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CollegeBranding, LoadingLogo } from "@/components/college-branding";
 import { useAuth } from "@/providers/auth-provider";
 import { GlobalSearch } from "@/components/global-search";
@@ -36,9 +36,11 @@ import {
   type NotificationSummary,
 } from "@/features/shell/notification-summary";
 import { requiresProfileSetup } from "@/features/auth/post-login-routing";
+import { qrSignInPath } from "@/features/auth/qr-sign-in";
 import styles from "./app-shell.module.css";
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, loading, logout } = useAuth();
+  const queryClient = useQueryClient();
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -89,7 +91,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     router.replace("/login");
   }
   useEffect(() => {
-    if (!loading && !user) router.replace("/login");
+    if (!loading && !user) router.replace(qrSignInPath(pathname, window.location.search));
     else if (user?.status === "SUSPENDED" && pathname !== "/suspended")
       router.replace("/suspended");
     else if (user?.mustChangePassword && pathname !== "/change-password")
@@ -140,6 +142,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       withCredentials: true,
     });
     source.onmessage = () => {
+      void queryClient.invalidateQueries({ queryKey: ["announcements"] });
+      void queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
       api
         .get<PendingAnnouncement[]>("/announcements/me/pending")
         .then((data) => {
@@ -147,9 +152,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         })
         .catch(console.error);
     };
-    source.onerror = () => source.close();
     return () => source.close();
-  }, [loading, user, profileSetupRequired]);
+  }, [loading, user, profileSetupRequired, queryClient]);
   useEffect(() => {
     if (!open && !profile) return;
     if (open) closeButton.current?.focus();
